@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"C:/Users/enaby/OneDrive/سطح المكتب/New folder \\(2\\)/.claude/worktrees/distracted-mestorf\")",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(wc -l src/**/*.ts src/**/**/*.ts src/**/**/**/*.ts)",
+      "Bash(ls -la \"C:/Users/enaby/OneDrive/سطح المكتب/New folder \\(2\\)/Website Design Adaptation/\")",
+      "Bash(find \"C:/Users/enaby/OneDrive/سطح المكتب/New folder \\(2\\)/Website Design Adaptation/\" -name \"package.json\" -maxdepth 2)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(ls \"C:/Users/enaby/OneDrive/سطح المكتب/New folder \\(2\\)/.claude/worktrees/distracted-mestorf/node_modules/ts-node/dist/\")",
+      "Bash(node -e \":*)"
+    ]
+  }
+}

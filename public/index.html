@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StandMe OS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --surface2: #242424;
+      --border: #333;
+      --text: #e5e5e5;
+      --text-dim: #888;
+      --accent: #4f8cff;
+      --accent-dim: #1e3a6e;
+      --green: #34d058;
+      --orange: #f0883e;
+      --red: #f85149;
+      --yellow: #e3b341;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      width: 36px;
+      height: 36px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+      color: #fff;
+    }
+
+    .header-title { font-size: 18px; font-weight: 600; }
+    .header-subtitle { font-size: 12px; color: var(--text-dim); }
+
+    .status-badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(52, 208, 88, 0.15);
+      color: var(--green);
+    }
+
+    /* Main layout */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .sidebar-section {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-section h3 {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    .cmd-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 6px 10px;
+      margin: 2px 0;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+
+    .cmd-btn:hover { background: var(--surface2); }
+    .cmd-btn .cmd-name { color: var(--accent); }
+    .cmd-btn .cmd-desc { color: var(--text-dim); font-size: 11px; font-family: inherit; margin-left: 4px; }
+
+    /* Chat area */
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .message {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.bot {
+      align-self: flex-start;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message.system {
+      align-self: center;
+      background: rgba(227, 179, 65, 0.1);
+      border: 1px solid rgba(227, 179, 65, 0.3);
+      color: var(--yellow);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .message .timestamp {
+      display: block;
+      font-size: 10px;
+      color: rgba(255,255,255,0.5);
+      margin-top: 4px;
+    }
+
+    .message.bot .timestamp { color: var(--text-dim); }
+
+    .message.bot strong, .message.bot b { color: var(--accent); }
+
+    /* Notifications panel */
+    .notifications {
+      max-height: 120px;
+      overflow-y: auto;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 8px 20px;
+      display: none;
+    }
+
+    .notifications.has-items { display: block; }
+
+    .notification {
+      padding: 6px 10px;
+      margin: 4px 0;
+      background: rgba(240, 136, 62, 0.1);
+      border-left: 3px solid var(--orange);
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+
+    .notification .notif-to {
+      font-weight: 600;
+      color: var(--orange);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    /* Input area */
+    .input-area {
+      padding: 16px 20px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+    }
+
+    .input-area input {
+      flex: 1;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+    }
+
+    .input-area input:focus { border-color: var(--accent); }
+
+    .input-area input::placeholder { color: var(--text-dim); }
+
+    .send-btn {
+      padding: 10px 20px;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .send-btn:hover { background: #3a7ae8; }
+    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Loading */
+    .typing {
+      align-self: flex-start;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      border-bottom-left-radius: 4px;
+      font-size: 14px;
+      color: var(--text-dim);
+      display: none;
+    }
+
+    .typing.visible { display: block; }
+
+    .typing-dots span {
+      animation: blink 1.4s infinite both;
+      font-size: 20px;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes blink {
+      0%, 100% { opacity: 0.2; }
+      50% { opacity: 1; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .message { max-width: 90%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">SM</div>
+      <div>
+        <div class="header-title">StandMe OS</div>
+        <div class="header-subtitle">Exhibition Stand AI Operating System</div>
+      </div>
+    </div>
+    <div class="status-badge" id="status">ONLINE</div>
+  </div>
+
+  <div class="main">
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <h3>Lead Management</h3>
+        <button class="cmd-btn" onclick="sendCommand('/newlead')"><span class="cmd-name">/newlead</span><span class="cmd-desc">Add lead</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/enrich')"><span class="cmd-name">/enrich</span><span class="cmd-desc">Enrich leads</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/brief')"><span class="cmd-name">/brief</span><span class="cmd-desc">Concept brief</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/outreach')"><span class="cmd-name">/outreach</span><span class="cmd-desc">Run outreach</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/outreachstatus')"><span class="cmd-name">/outreachstatus</span><span class="cmd-desc">Stats</span></button>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Project Ops</h3>
+        <button class="cmd-btn" onclick="sendCommand('/status')"><span class="cmd-name">/status</span><span class="cmd-desc">Dashboard</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/deadlines')"><span class="cmd-name">/deadlines</span><span class="cmd-desc">Deadlines</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/techdeadlines')"><span class="cmd-name">/techdeadlines</span><span class="cmd-desc">Tech deadlines</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/reminders')"><span class="cmd-name">/reminders</span><span class="cmd-desc">Follow-ups</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/crossboard')"><span class="cmd-name">/crossboard</span><span class="cmd-desc">Board health</span></button>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Team & Resources</h3>
+        <button class="cmd-btn" onclick="sendCommand('/contractors')"><span class="cmd-name">/contractors</span><span class="cmd-desc">List</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/addcontractor')"><span class="cmd-name">/addcontractor</span><span class="cmd-desc">Add</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/findfile')"><span class="cmd-name">/findfile</span><span class="cmd-desc">Search Drive</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/lesson')"><span class="cmd-name">/lesson</span><span class="cmd-desc">Lessons</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/dealanalysis')"><span class="cmd-name">/dealanalysis</span><span class="cmd-desc">Analysis</span></button>
+      </div>
+
+      <div class="sidebar-section">
+        <h3>Marketing</h3>
+        <button class="cmd-btn" onclick="sendCommand('/post')"><span class="cmd-name">/post</span><span class="cmd-desc">LinkedIn</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/caption')"><span class="cmd-name">/caption</span><span class="cmd-desc">Instagram</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/campaign')"><span class="cmd-name">/campaign</span><span class="cmd-desc">Email</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/casestudy')"><span class="cmd-name">/casestudy</span><span class="cmd-desc">Case study</span></button>
+        <button class="cmd-btn" onclick="sendCommand('/contentplan')"><span class="cmd-name">/contentplan</span><span class="cmd-desc">Plan</span></button>
+      </div>
+    </div>
+
+    <div class="chat-container">
+      <div class="messages" id="messages">
+        <div class="message system">
+          StandMe OS — Web Test Mode<br>
+          Type /help or click a command on the left to get started.<br>
+          You are logged in as Mo (Admin).
+        </div>
+      </div>
+
+      <div class="typing" id="typing">
+        <div class="typing-dots"><span>.</span><span>.</span><span>.</span></div>
+      </div>
+
+      <div class="notifications" id="notifications"></div>
+
+      <div class="input-area">
+        <input type="text" id="input" placeholder="Type a command or ask a question..." autocomplete="off" />
+        <button class="send-btn" id="sendBtn" onclick="send()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('input');
+    const typingEl = document.getElementById('typing');
+    const notifEl = document.getElementById('notifications');
+    const sendBtn = document.getElementById('sendBtn');
+
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    function sendCommand(cmd) {
+      inputEl.value = cmd + ' ';
+      inputEl.focus();
+    }
+
+    function addMessage(role, text) {
+      const div = document.createElement('div');
+      div.className = `message ${role}`;
+
+      // Simple markdown-like formatting
+      let formatted = text
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<strong>$1</strong>')
+        .replace(/`(.+?)`/g, '<code style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px">$1</code>');
+
+      const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      div.innerHTML = `${formatted}<span class="timestamp">${time}</span>`;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function showNotifications(notifications) {
+      if (!notifications || notifications.length === 0) {
+        notifEl.classList.remove('has-items');
+        return;
+      }
+
+      notifEl.innerHTML = '';
+      notifEl.classList.add('has-items');
+
+      for (const n of notifications) {
+        const div = document.createElement('div');
+        div.className = 'notification';
+
+        let text = n.text
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.+?)\*/g, '<strong>$1</strong>');
+
+        div.innerHTML = `<span class="notif-to">To ${n.to}:</span>\n${text}`;
+        notifEl.appendChild(div);
+      }
+    }
+
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+
+      inputEl.value = '';
+      addMessage('user', text);
+
+      sendBtn.disabled = true;
+      typingEl.classList.add('visible');
+
+      try {
+        const resp = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text }),
+        });
+
+        const data = await resp.json();
+        typingEl.classList.remove('visible');
+        sendBtn.disabled = false;
+
+        if (data.response) {
+          addMessage('bot', data.response);
+        }
+
+        if (data.notifications) {
+          showNotifications(data.notifications);
+        }
+      } catch (err) {
+        typingEl.classList.remove('visible');
+        sendBtn.disabled = false;
+        addMessage('system', 'Connection error. Is the server running?');
+      }
+
+      inputEl.focus();
+    }
+
+    // Focus input on load
+    inputEl.focus();
+  </script>
+</body>
+</html>

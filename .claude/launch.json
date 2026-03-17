@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "StandMe OS Web UI",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--require", "ts-node/register", "src/web/server.ts"],
+      "port": 3000
+    },
+    {
+      "name": "StandMe OS Telegram Bot",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--require", "ts-node/register", "src/index.ts"],
+      "port": 0
+    }
+  ]
+}

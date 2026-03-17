@@ -1,0 +1,38 @@
+{
+  "name": "standme-os",
+  "version": "1.0.0",
+  "description": "StandMe OS — AI-driven operating system for exhibition stand design & build",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "dev:watch": "nodemon --exec ts-node src/index.ts",
+    "web": "ts-node src/web/server.ts",
+    "web:watch": "nodemon --exec ts-node src/web/server.ts",
+    "setup:google": "ts-node src/setup/oauth-setup.ts",
+    "setup:sheets": "ts-node src/setup/sheets-setup.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "axios": "^1.7.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.0",
+    "express": "^5.2.1",
+    "googleapis": "^134.0.0",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.66.0",
+    "winston": "^3.13.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.14.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "nodemon": "^3.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}
