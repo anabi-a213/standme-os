@@ -35,11 +35,9 @@ export class OutreachAgent extends BaseAgent {
       return { success: true, message: 'No leads ready', confidence: 'HIGH' };
     }
 
-    const campaignId = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '0');
-    if (!campaignId) {
-      await this.respond(ctx.chatId, '⚠️ No Woodpecker campaign configured. Set WOODPECKER_CAMPAIGN_ID in Railway env vars.\n\nRun /campaigns to see your available campaigns.');
-      return { success: false, message: 'No campaign ID', confidence: 'LOW' };
-    }
+    // Auto-resolve campaign: use env override, or auto-pick the active campaign
+    const campaignId = await this.resolveCampaignId(ctx, ctx.args);
+    if (!campaignId) return { success: false, message: 'No campaign resolved', confidence: 'LOW' };
 
     let drafted = 0;
 
@@ -160,8 +158,8 @@ export class OutreachAgent extends BaseAgent {
       );
     } catch { /* silent */ }
 
-    // Live Woodpecker campaign stats
-    const campaignId = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '0');
+    // Live Woodpecker campaign stats — auto-resolve
+    const campaignId = await this.resolveCampaignId(ctx, '', true);
     if (campaignId) {
       try {
         const stats = await getCampaignStats(campaignId);
@@ -204,6 +202,52 @@ export class OutreachAgent extends BaseAgent {
       await this.respond(ctx.chatId, `Failed to fetch campaigns: ${err.message}`);
       return { success: false, message: err.message, confidence: 'LOW' };
     }
+  }
+
+  // ---- Auto-resolve which Woodpecker campaign to use ----
+  // Priority: 1) explicit ID in args  2) env var override  3) only RUNNING campaign  4) ask Mo
+
+  private async resolveCampaignId(ctx: AgentContext, args: string, silent = false): Promise<number | null> {
+    // 1. Explicit ID passed as arg e.g. /outreach 12345
+    const fromArg = parseInt(args?.trim() || '');
+    if (fromArg > 0) return fromArg;
+
+    // 2. Env var override
+    const fromEnv = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '');
+    if (fromEnv > 0) return fromEnv;
+
+    // 3. Fetch live campaigns from Woodpecker
+    let campaigns: { id: number; name: string; status: string }[] = [];
+    try {
+      campaigns = await listCampaigns();
+    } catch (err: any) {
+      if (!silent) await this.respond(ctx.chatId, `⚠️ Could not fetch Woodpecker campaigns: ${err.message}`);
+      return null;
+    }
+
+    const running = campaigns.filter(c => c.status?.toUpperCase() === 'RUNNING');
+
+    // 4a. Exactly one running → use it automatically
+    if (running.length === 1) {
+      if (!silent) await this.respond(ctx.chatId, `Using campaign: *${running[0].name}* (ID: ${running[0].id})`);
+      return running[0].id;
+    }
+
+    // 4b. Multiple running → show list and ask Mo to specify
+    if (running.length > 1) {
+      const list = running.map(c => `  • *${c.name}* → /outreach ${c.id}`).join('\n');
+      await this.respond(ctx.chatId, `Multiple active campaigns — pick one:\n\n${list}`);
+      return null;
+    }
+
+    // 4c. No running campaigns — show all and ask
+    if (!silent) {
+      const all = campaigns.length > 0
+        ? campaigns.map(c => `  • *${c.name}* [${c.status}] → /outreach ${c.id}`).join('\n')
+        : '  No campaigns found in Woodpecker.';
+      await this.respond(ctx.chatId, `No running campaigns. All campaigns:\n\n${all}`);
+    }
+    return null;
   }
 
   // ---- Update outreach log row status ----

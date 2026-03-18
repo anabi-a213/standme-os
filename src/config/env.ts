@@ -38,7 +38,7 @@ const envSchema = z.object({
 
   // Woodpecker
   WOODPECKER_API_KEY: z.string().min(1),
-  WOODPECKER_CAMPAIGN_ID: z.string().default(''), // default campaign ID for outreach
+  WOODPECKER_CAMPAIGN_ID: z.string().default(''), // optional: force a specific campaign ID
 
   // Anthropic (Claude)
   ANTHROPIC_API_KEY: z.string().min(1),
