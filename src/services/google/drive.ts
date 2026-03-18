@@ -335,18 +335,19 @@ export async function createFolder(name: string, parentId?: string): Promise<str
 export async function shareWithTeam(fileId: string): Promise<void> {
   const drive = getDriveClient();
 
-  // Share with entire standme.de Google Workspace domain
+  // Share with entire standme.de Google Workspace domain — no notification emails
   try {
     await drive.permissions.create({
       fileId,
       supportsAllDrives: true,
+      sendNotificationEmail: false,
       requestBody: { type: 'domain', domain: 'standme.de', role: 'writer' },
     });
   } catch (err: any) {
     logger.warn(`[Drive] Could not share ${fileId} with standme.de domain: ${err.message}`);
   }
 
-  // Also share with any extra emails configured individually
+  // Also share with any extra emails configured individually — no notification emails
   const extras = (process.env.TEAM_SHARE_EMAILS || '')
     .split(',')
     .map(e => e.trim())
@@ -357,6 +358,7 @@ export async function shareWithTeam(fileId: string): Promise<void> {
       await drive.permissions.create({
         fileId,
         supportsAllDrives: true,
+        sendNotificationEmail: false,
         requestBody: { type: 'user', emailAddress: email, role: 'writer' },
       });
     } catch (err: any) {
