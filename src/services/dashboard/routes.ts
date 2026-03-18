@@ -1,42 +1,38 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
+import express from 'express';
 import { dashboardBus } from './event-bus';
 import { getAllAgents, getAgent } from '../../agents/registry';
 import { UserRole } from '../../config/access';
 import { logger } from '../../utils/logger';
+import { handleApproval } from '../approvals';
 
 const router = Router();
 
-// Dashboard password (set DASHBOARD_PASSWORD env var, defaults to none = open)
-function checkAuth(req: Request, res: Response): boolean {
+// Auth middleware — must be first
+router.use((req: Request, res: Response, next) => {
   const password = process.env.DASHBOARD_PASSWORD;
-  if (!password) return true; // No password set = open access
-
-  // Check session cookie
-  if (req.cookies?.dash_auth === password) return true;
-
-  // Check query param (for initial login)
+  if (!password) return next();
+  if (req.cookies?.dash_auth === password) return next();
   if (req.query.key === password) {
     res.cookie('dash_auth', password, { httpOnly: true, maxAge: 86400000 });
-    return true;
+    return next();
   }
+  if (req.path.startsWith('/api')) {
+    res.status(401).json({ error: 'Unauthorized' }); return;
+  }
+  // Show login page for non-API routes
+  res.send(`<!DOCTYPE html><html><head><title>StandMe OS</title>
+    <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0a0a0a;color:#e0e0e0}
+    form{text-align:center}input{padding:12px 20px;font-size:16px;border:1px solid #333;border-radius:8px;background:#1a1a1a;color:#fff;margin:10px}
+    button{padding:12px 24px;font-size:16px;border:none;border-radius:8px;background:#C9A84C;color:#000;cursor:pointer;font-weight:600}
+    h1{font-size:24px;margin-bottom:20px;color:#C9A84C}</style></head>
+    <body><form method="GET"><h1>STANDME OS</h1><input name="key" type="password" placeholder="Enter password" autofocus><br><button type="submit">Login</button></form></body></html>`);
+});
 
-  return false;
-}
-
-// Serve dashboard HTML
+// Serve React dashboard
 router.get('/', (req: Request, res: Response) => {
-  const password = process.env.DASHBOARD_PASSWORD;
-  if (password && req.query.key !== password && !req.cookies?.dash_auth) {
-    res.send(`<!DOCTYPE html><html><head><title>StandMe OS</title>
-      <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0a0a0f;color:#e0e0e0}
-      form{text-align:center}input{padding:12px 20px;font-size:16px;border:1px solid #333;border-radius:8px;background:#1a1a2e;color:#fff;margin:10px}
-      button{padding:12px 24px;font-size:16px;border:none;border-radius:8px;background:#6c5ce7;color:#fff;cursor:pointer}
-      button:hover{background:#5a4bd1}h1{font-size:24px;margin-bottom:20px}</style></head>
-      <body><form method="GET"><h1>StandMe OS Dashboard</h1><input name="key" type="password" placeholder="Enter password" autofocus><br><button type="submit">Login</button></form></body></html>`);
-    return;
-  }
-  res.sendFile(path.join(process.cwd(), 'public', 'dashboard.html'));
+  res.sendFile(path.join(process.cwd(), 'public', 'dashboard-build', 'index.html'));
 });
 
 // API: Agent statuses
@@ -67,7 +63,7 @@ router.get('/api/agent-configs', (_req: Request, res: Response) => {
   })));
 });
 
-// API: Trigger an agent command from the dashboard
+// API: Trigger an agent command from the dashboard (async — fire and forget)
 router.post('/api/trigger', async (req: Request, res: Response) => {
   const { command, args } = req.body || {};
   if (!command) {
@@ -100,6 +96,49 @@ router.post('/api/trigger', async (req: Request, res: Response) => {
   );
 
   res.json({ ok: true, agent: agent.config.name, command });
+});
+
+// API: Run agent synchronously — returns result
+router.post('/api/run', async (req: Request, res: Response) => {
+  const { command, args } = req.body || {};
+  if (!command) { res.status(400).json({ error: 'command is required' }); return; }
+  const agent = getAgent(command);
+  if (!agent) { res.status(404).json({ error: `No agent found for: ${command}` }); return; }
+  const ctx = {
+    userId: 'dashboard',
+    username: 'dashboard',
+    chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
+    command,
+    args: args || '',
+    role: UserRole.ADMIN,
+    language: 'en' as const,
+  };
+  try {
+    const result = await agent.run(ctx);
+    res.json({ ok: true, agent: agent.config.name, result: result.message, success: result.success });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// API: Approve or reject a pending action
+router.post('/api/approve', async (req: Request, res: Response) => {
+  const { approvalId, approved } = req.body || {};
+  if (!approvalId) { res.status(400).json({ error: 'approvalId required' }); return; }
+  try {
+    const result = await handleApproval(approvalId, approved === true);
+    res.json({ ok: true, result });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Serve React build static assets
+router.use(express.static(path.join(process.cwd(), 'public', 'dashboard-build')));
+
+// SPA catch-all — must be last (use '/{*path}' for path-to-regexp v8+)
+router.get('/{*path}', (req: Request, res: Response) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'dashboard-build', 'index.html'));
 });
 
 export { router as dashboardRouter };

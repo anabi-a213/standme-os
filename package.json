@@ -4,7 +4,8 @@
   "description": "StandMe OS — AI-driven operating system for exhibition stand design & build",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:dashboard",
+    "build:dashboard": "cd dashboard-app && npm install && npm run build",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "dev:watch": "nodemon --exec ts-node src/index.ts",

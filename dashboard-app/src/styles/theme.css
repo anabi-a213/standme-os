@@ -1,0 +1,413 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* StandMe OS 2026 Premium Design System */
+  
+  /* Base Colors - Neural Dark Theme */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #0d0d0d;
+  --surface: #131313;
+  --surface-2: #1a1a1a;
+  --surface-3: #222222;
+  --surface-elevated: #2a2a2a;
+  --surface-warm: #1c1814;
+  
+  /* Borders & Dividers */
+  --border: rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.03);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --divider: rgba(201, 168, 76, 0.1);
+  
+  /* Gold Accent System - Premium palette */
+  --gold: #C9A84C;
+  --gold-bright: #E8C97A;
+  --gold-dim: rgba(201, 168, 76, 0.12);
+  --gold-glow: rgba(201, 168, 76, 0.25);
+  --gold-mesh: linear-gradient(135deg, rgba(201, 168, 76, 0.15) 0%, rgba(201, 168, 76, 0.05) 50%, rgba(201, 168, 76, 0) 100%);
+  
+  /* Neural Mesh Gradients - 2026 aesthetic */
+  --mesh-gradient-1: radial-gradient(at 0% 0%, rgba(201, 168, 76, 0.08) 0px, transparent 50%);
+  --mesh-gradient-2: radial-gradient(at 100% 100%, rgba(34, 211, 165, 0.05) 0px, transparent 50%);
+  --mesh-gradient-3: radial-gradient(at 50% 50%, rgba(96, 165, 250, 0.03) 0px, transparent 50%);
+  
+  /* Glassmorphism */
+  --glass-bg: rgba(26, 26, 26, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-glow: rgba(201, 168, 76, 0.15);
+  
+  /* Text Colors */
+  --text: #FFFFFF;
+  --text-secondary: #c0c0c0;
+  --text-muted: #707070;
+  --text-subtle: #4a4a4a;
+  --text-gold: #E8C97A;
+  
+  /* Status Colors */
+  --success: #22d3a5;
+  --success-dim: rgba(34, 211, 165, 0.15);
+  --error: #f05c5c;
+  --error-dim: rgba(240, 92, 92, 0.15);
+  --warning: #f5c842;
+  --warning-dim: rgba(245, 200, 66, 0.15);
+  --info: #60a5fa;
+  --info-dim: rgba(96, 165, 250, 0.15);
+  
+  /* Shadows & Depth - Advanced layering */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+  --shadow-gold: 0 0 20px rgba(201, 168, 76, 0.3), 0 0 40px rgba(201, 168, 76, 0.15);
+  --shadow-glow: 0 0 30px rgba(201, 168, 76, 0.2);
+  
+  /* Typography Scale */
+  --font-size: 16px;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
+  
+  /* Font Weights */
+  --font-light: 300;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-extrabold: 800;
+  
+  /* Spacing System (4px base unit) */
+  --spacing-0: 0px;
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-7: 28px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-20: 80px;
+  
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+  
+  /* Animation Timing */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  --duration-slower: 500ms;
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.0, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  
+  /* Backdrop Blur */
+  --blur-sm: 8px;
+  --blur-md: 12px;
+  --blur-lg: 16px;
+  --blur-xl: 24px;
+  
+  /* Panel Dimensions */
+  --sidebar-width: 220px;
+  --right-panel-width: 400px;
+  --topbar-height: 48px;
+  
+  /* Standard theme tokens for compatibility */
+  --background: var(--bg-primary);
+  --foreground: var(--text);
+  --card: var(--surface-2);
+  --card-foreground: var(--text);
+  --popover: var(--surface-elevated);
+  --popover-foreground: var(--text);
+  --primary: var(--gold);
+  --primary-foreground: #0d0d0d;
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--gold);
+  --accent-foreground: #0d0d0d;
+  --destructive: var(--error);
+  --destructive-foreground: var(--text);
+  --input: var(--surface-2);
+  --ring: var(--gold);
+  --radius: 8px;
+}
+
+@theme inline {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-warm: var(--surface-warm);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-divider: var(--divider);
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-gold: var(--text-gold);
+  --color-gold: var(--gold);
+  --color-gold-bright: var(--gold-bright);
+  --color-gold-dim: var(--gold-dim);
+  --color-gold-glow: var(--gold-glow);
+  --color-success: var(--success);
+  --color-success-dim: var(--success-dim);
+  --color-error: var(--error);
+  --color-error-dim: var(--error-dim);
+  --color-warning: var(--warning);
+  --color-warning-dim: var(--warning-dim);
+  --color-info: var(--info);
+  --color-info-dim: var(--info-dim);
+  --color-glass-bg: var(--glass-bg);
+  --color-glass-border: var(--glass-border);
+  --color-glass-glow: var(--glass-glow);
+  
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-[var(--bg-primary)] text-[var(--text)];
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  /* Premium scrollbar styles - 2026 design */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(201, 168, 76, 0.3);
+  }
+
+  /* Typography */
+  h1 {
+    font-weight: var(--font-bold);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-weight: var(--font-semibold);
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+  }
+
+  h3 {
+    font-weight: var(--font-semibold);
+    line-height: 1.4;
+  }
+
+  h4 {
+    font-weight: var(--font-medium);
+    line-height: 1.5;
+  }
+
+  label {
+    font-weight: var(--font-medium);
+    line-height: 1.5;
+  }
+
+  button {
+    font-weight: var(--font-medium);
+    line-height: 1.5;
+  }
+
+  input,
+  textarea {
+    font-weight: var(--font-normal);
+    line-height: 1.5;
+  }
+
+  /* Monospace elements */
+  code,
+  kbd,
+  pre,
+  .font-mono {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  }
+
+  /* Selection styling */
+  ::selection {
+    background: rgba(201, 168, 76, 0.3);
+    color: var(--text);
+  }
+
+  /* Focus visible styling */
+  :focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+}
+
+/* Custom keyframe animations for 2026 design */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes border-flow {
+  0% {
+    border-color: var(--gold);
+    box-shadow: 0 0 10px rgba(201, 168, 76, 0.3);
+  }
+  50% {
+    border-color: var(--gold-bright);
+    box-shadow: 0 0 20px rgba(201, 168, 76, 0.5);
+  }
+  100% {
+    border-color: var(--gold);
+    box-shadow: 0 0 10px rgba(201, 168, 76, 0.3);
+  }
+}
+
+@keyframes mesh-move {
+  0% {
+    background-position: 0% 0%;
+  }
+  50% {
+    background-position: 100% 100%;
+  }
+  100% {
+    background-position: 0% 0%;
+  }
+}
+
+/* Utility classes */
+.glass-effect {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur-lg));
+  border: 1px solid var(--glass-border);
+}
+
+.gold-glow {
+  box-shadow: var(--shadow-gold);
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+.animate-float {
+  animation: float 3s infinite ease-in-out;
+}
+
+.neural-mesh {
+  background-image: var(--mesh-gradient-1), var(--mesh-gradient-2), var(--mesh-gradient-3);
+  background-size: 200% 200%;
+  animation: mesh-move 20s ease infinite;
+}
