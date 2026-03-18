@@ -7,6 +7,7 @@ import { startScheduler } from './scheduler';
 import { logger } from './utils/logger';
 import { writeSystemLog } from './utils/system-log';
 import { canApprove, getUserRole, UserRole } from './config/access';
+import { handleApproval } from './services/approvals';
 
 // Import all agents
 import { LeadIntakeAgent } from './agents/01-lead-intake.agent';
@@ -25,8 +26,6 @@ import { DriveIndexerAgent } from './agents/14-drive-indexer.agent';
 import { MarketingContentAgent } from './agents/15-marketing-content.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
 
-// Pending approvals store
-const pendingApprovals = new Map<string, { action: string; data: any; timestamp: number }>();
 
 async function main() {
   logger.info('========================================');
@@ -123,26 +122,14 @@ async function main() {
         return;
       }
 
-      const pending = pendingApprovals.get(approvalId);
-      if (pending) {
-        pendingApprovals.delete(approvalId);
-        await bot.sendMessage(msg.chat.id,
-          isApprove
-            ? `✅ Approved: ${pending.action}`
-            : `❌ Rejected: ${pending.action}`
-        );
-
-        await writeSystemLog({
-          agent: 'Brain',
-          actionType: isApprove ? 'APPROVE' : 'REJECT',
-          detail: `${approvalId}: ${pending.action}`,
-          result: 'SUCCESS',
-        });
-      } else {
-        await bot.sendMessage(msg.chat.id,
-          isApprove ? '✅ Approved.' : '❌ Rejected.'
-        );
-      }
+      const result = await handleApproval(approvalId, isApprove);
+      await bot.sendMessage(msg.chat.id, result || (isApprove ? '✅ Approved.' : '❌ Rejected.'), { parse_mode: 'Markdown' });
+      await writeSystemLog({
+        agent: 'Brain',
+        actionType: isApprove ? 'APPROVE' : 'REJECT',
+        detail: approvalId,
+        result: 'SUCCESS',
+      });
       return;
     }
 

@@ -5,12 +5,15 @@ let _client: AxiosInstance | null = null;
 
 function getWoodpeckerClient(): AxiosInstance {
   if (!_client) {
+    const apiKey = process.env.WOODPECKER_API_KEY || '';
     _client = axios.create({
       baseURL: 'https://api.woodpecker.co/rest/v1',
       headers: {
-        Authorization: `Basic ${Buffer.from(process.env.WOODPECKER_API_KEY + ':').toString('base64')}`,
+        // Woodpecker uses HTTP Basic auth: API key as username, empty password
+        Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
         'Content-Type': 'application/json',
       },
+      timeout: 15000,
     });
   }
   return _client;
@@ -30,6 +33,12 @@ export interface WoodpeckerProspect {
   status?: string;
 }
 
+export interface WoodpeckerCampaign {
+  id: number;
+  name: string;
+  status: string; // RUNNING | PAUSED | COMPLETED | DRAFT
+}
+
 export interface CampaignStats {
   id: number;
   name: string;
@@ -42,26 +51,59 @@ export interface CampaignStats {
   not_interested: number;
 }
 
-export async function addProspectToCampaign(campaignId: number, prospect: WoodpeckerProspect): Promise<void> {
-  await retry(async () => {
-    await getWoodpeckerClient().post(`/campaign_list/${campaignId}/prospects`, {
-      prospects: [prospect],
-    });
-  }, 'addProspectToCampaign');
+// ---- Campaigns ----
+
+export async function listCampaigns(): Promise<WoodpeckerCampaign[]> {
+  return retry(async () => {
+    const resp = await getWoodpeckerClient().get('/campaign_list');
+    const data = resp.data;
+    // Woodpecker returns an object keyed by campaign ID, or an array
+    if (Array.isArray(data)) return data;
+    return Object.values(data);
+  }, 'listCampaigns');
 }
 
 export async function getCampaignStats(campaignId: number): Promise<CampaignStats> {
   return retry(async () => {
     const resp = await getWoodpeckerClient().get(`/campaign_list/${campaignId}/statistics`);
-    return resp.data;
+    const d = resp.data;
+    return {
+      id: campaignId,
+      name: d.name || `Campaign ${campaignId}`,
+      sent: Number(d.sent || 0),
+      opened: Number(d.opened || 0),
+      clicked: Number(d.clicked || 0),
+      replied: Number(d.replied || 0),
+      bounced: Number(d.bounced || 0),
+      interested: Number(d.interested || 0),
+      not_interested: Number(d.not_interested || 0),
+    };
   }, 'getCampaignStats');
 }
 
-export async function listCampaigns(): Promise<{ id: number; name: string; status: string }[]> {
+// ---- Prospects ----
+
+export async function addProspectToCampaign(campaignId: number, prospect: WoodpeckerProspect): Promise<number | null> {
   return retry(async () => {
-    const resp = await getWoodpeckerClient().get('/campaign_list');
-    return resp.data;
-  }, 'listCampaigns');
+    const resp = await getWoodpeckerClient().post(`/campaign_list/${campaignId}/prospects`, {
+      prospects: [prospect],
+    });
+    // Woodpecker returns { status: 'OK', prospects: [{id, ...}] }
+    const created = resp.data?.prospects?.[0];
+    return created?.id ?? null;
+  }, 'addProspectToCampaign');
+}
+
+export async function getProspectByEmail(email: string): Promise<WoodpeckerProspect | null> {
+  return retry(async () => {
+    const resp = await getWoodpeckerClient().get('/prospects_list', {
+      params: { email },
+    });
+    const data = resp.data;
+    if (Array.isArray(data) && data.length > 0) return data[0];
+    if (typeof data === 'object' && data.email) return data;
+    return null;
+  }, 'getProspectByEmail');
 }
 
 export async function getProspectActivity(email: string): Promise<{
@@ -71,20 +113,19 @@ export async function getProspectActivity(email: string): Promise<{
   replied: boolean;
   bounced: boolean;
 }> {
-  return retry(async () => {
-    const resp = await getWoodpeckerClient().get('/prospects', {
-      params: { search: email },
-    });
-    const prospect = resp.data?.[0];
+  try {
+    const prospect = await getProspectByEmail(email);
     if (!prospect) return { status: 'NOT_FOUND', opened: false, clicked: false, replied: false, bounced: false };
     return {
       status: prospect.status || 'UNKNOWN',
-      opened: prospect.opened === 'true' || prospect.opened === true,
-      clicked: prospect.clicked === 'true' || prospect.clicked === true,
-      replied: prospect.replied === 'true' || prospect.replied === true,
-      bounced: prospect.bounced === 'true' || prospect.bounced === true,
+      opened: prospect.status === 'OPENED',
+      clicked: prospect.status === 'CLICKED',
+      replied: prospect.status === 'REPLIED',
+      bounced: prospect.status === 'BOUNCED',
     };
-  }, 'getProspectActivity');
+  } catch {
+    return { status: 'ERROR', opened: false, clicked: false, replied: false, bounced: false };
+  }
 }
 
 export async function stopProspect(prospectId: number): Promise<void> {
