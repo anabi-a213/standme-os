@@ -215,10 +215,13 @@ export class CampaignBuilderAgent extends BaseAgent {
 
     // ---- 4. Load LEAD_MASTER + CAMPAIGN_SALES for deduplication ----
 
-    const [existingLeads, existingSales] = await Promise.all([
-      readSheet(SHEETS.LEAD_MASTER),
-      readSheet(SHEETS.CAMPAIGN_SALES),
+    const [existingLeads, existingSalesRaw] = await Promise.all([
+      readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]),
+      process.env[SHEETS.CAMPAIGN_SALES.envKey]
+        ? readSheet(SHEETS.CAMPAIGN_SALES).catch(() => [] as string[][])
+        : Promise.resolve([] as string[][]),
     ]);
+    const existingSales = existingSalesRaw;
 
     // Companies already in LEAD_MASTER for this show
     const existingCompanies = new Set<string>();
@@ -409,9 +412,9 @@ export class CampaignBuilderAgent extends BaseAgent {
           tags:       `standme,${showName.toLowerCase().replace(/\s+/g, '-')},discovery`,
         });
 
-        // CAMPAIGN_SALES row — links everything together
+        // CAMPAIGN_SALES row — links everything together (skip if sheet not configured)
         const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
+        if (process.env[SHEETS.CAMPAIGN_SALES.envKey]) await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
           id:             salesId,
           campaignId:     String(campaignId),
           showName,

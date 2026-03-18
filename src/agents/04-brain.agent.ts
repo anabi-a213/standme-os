@@ -123,8 +123,12 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /deadlines — upcoming show organiser deadlines
 - /reminders — client follow-up reminders
 - /techdeadlines — technical deadline tracker
-- /outreach — run outreach for qualified leads
+- /outreach — run outreach for qualified leads already in the OUTREACH_QUEUE (scored 7+)
 - /outreachstatus — outreach campaign stats
+- /discover [show name] — scan exhibitor files from Drive, find contacts, build Woodpecker campaign (use this when Mo says "launch campaign using files", "discover leads for X", "run campaign from the list/xlsx")
+- /newcampaign [show name] — generate personalised emails for existing pipeline leads and launch Woodpecker campaign
+- /salesreplies — process Woodpecker replies and advance deals
+- /campaignstatus [show name] — full Woodpecker + pipeline view for a show
 - /contractors — list available contractors
 - /addcontractor — add new contractor to database
 - /bookcontractor — book a contractor for a project
