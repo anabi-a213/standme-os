@@ -79,6 +79,16 @@ const REQUIRED_TABS: TabConfig[] = [
     tabName: 'Knowledge',
     headers: ['ID', 'Source', 'Source Type', 'Topic', 'Tags', 'Content', 'Last Updated'],
   },
+  {
+    envKey: 'SHEET_CAMPAIGN_SALES',
+    tabName: 'CampaignSales',
+    headers: [
+      'ID', 'Campaign ID', 'Show Name', 'Company', 'Contact Name', 'Contact Email',
+      'Woodpecker ID', 'Status', 'Classification', 'Stand Size', 'Budget', 'Show Dates',
+      'Phone', 'Requirements', 'Conversation Log', 'Last Reply Date', 'Last Action Date',
+      'Lead Master ID', 'Notes', 'Website', 'Logo URL',
+    ],
+  },
 ];
 
 export async function initSheets(): Promise<void> {
