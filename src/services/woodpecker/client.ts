@@ -51,34 +51,90 @@ export interface CampaignStats {
   not_interested: number;
 }
 
+export interface WoodpeckerEmailStep {
+  id?: number;
+  step?: number;
+  subject: string;
+  body: string;
+  delay?: number; // days after previous step
+}
+
+export interface WoodpeckerCampaignDetails extends WoodpeckerCampaign {
+  from_name?: string;
+  from_email?: string;
+  emails?: WoodpeckerEmailStep[];
+}
+
 // ---- Campaigns ----
 
+/**
+ * List all campaigns. Woodpecker returns an object keyed by campaign ID,
+ * with stats embedded in each campaign object under `statistics`.
+ * This is the only reliable campaign endpoint in Woodpecker Classic API.
+ */
 export async function listCampaigns(): Promise<WoodpeckerCampaign[]> {
   return retry(async () => {
     const resp = await getWoodpeckerClient().get('/campaign_list');
     const data = resp.data;
-    // Woodpecker returns an object keyed by campaign ID, or an array
-    if (Array.isArray(data)) return data;
-    return Object.values(data);
+    const raw: any[] = Array.isArray(data) ? data : Object.values(data);
+    return raw.map(c => ({ id: Number(c.id), name: String(c.name || ''), status: String(c.status || '') }));
   }, 'listCampaigns');
 }
 
+/**
+ * Get stats for a single campaign.
+ * Woodpecker Classic API does not have a per-campaign stats endpoint.
+ * We fetch the full campaign list and extract the matching entry's stats.
+ */
 export async function getCampaignStats(campaignId: number): Promise<CampaignStats> {
-  return retry(async () => {
-    const resp = await getWoodpeckerClient().get(`/campaign_list/${campaignId}/statistics`);
-    const d = resp.data;
-    return {
-      id: campaignId,
-      name: d.name || `Campaign ${campaignId}`,
-      sent: Number(d.sent || 0),
-      opened: Number(d.opened || 0),
-      clicked: Number(d.clicked || 0),
-      replied: Number(d.replied || 0),
-      bounced: Number(d.bounced || 0),
-      interested: Number(d.interested || 0),
-      not_interested: Number(d.not_interested || 0),
-    };
-  }, 'getCampaignStats');
+  const resp = await getWoodpeckerClient().get('/campaign_list');
+  const data = resp.data;
+  const raw: any[] = Array.isArray(data) ? data : Object.values(data);
+  const c = raw.find(x => Number(x.id) === campaignId);
+  if (!c) throw new Error(`Campaign ${campaignId} not found`);
+
+  // Stats are under `statistics` or top-level depending on API version
+  const s = c.statistics ?? c;
+  return {
+    id: campaignId,
+    name: String(c.name || `Campaign ${campaignId}`),
+    sent:          Number(s.sent          ?? 0),
+    opened:        Number(s.opened        ?? 0),
+    clicked:       Number(s.clicked       ?? 0),
+    replied:       Number(s.replied       ?? 0),
+    bounced:       Number(s.bounced       ?? 0),
+    interested:    Number(s.interested    ?? 0),
+    not_interested: Number(s.not_interested ?? 0),
+  };
+}
+
+/**
+ * Get campaign details (basic info + stats).
+ * Email sequences are not accessible via Woodpecker Classic API.
+ */
+export async function getCampaignDetails(campaignId: number): Promise<WoodpeckerCampaignDetails> {
+  const resp = await getWoodpeckerClient().get('/campaign_list');
+  const data = resp.data;
+  const raw: any[] = Array.isArray(data) ? data : Object.values(data);
+  const c = raw.find(x => Number(x.id) === campaignId);
+  if (!c) throw new Error(`Campaign ${campaignId} not found`);
+  return {
+    id:         Number(c.id),
+    name:       String(c.name       || ''),
+    status:     String(c.status     || ''),
+    from_name:  String(c.from_name  || ''),
+    from_email: String(c.from_email || ''),
+    emails: [], // Woodpecker Classic API does not expose email sequences
+  };
+}
+
+/**
+ * NOTE: Woodpecker Classic API does NOT support creating campaigns programmatically.
+ * Campaigns must be created in the Woodpecker UI.
+ * This function will always throw — callers should handle this gracefully.
+ */
+export async function createCampaign(_name: string, _fromName: string, _fromEmail: string): Promise<number> {
+  throw new Error('Woodpecker Classic API does not support creating campaigns via API. Create the campaign in the Woodpecker UI, then re-run.');
 }
 
 // ---- Prospects ----
@@ -134,56 +190,6 @@ export async function stopProspect(prospectId: number): Promise<void> {
       status: 'PAUSED',
     });
   }, 'stopProspect');
-}
-
-// ---- Get campaign details including email sequences ----
-
-export interface WoodpeckerEmailStep {
-  id?: number;
-  step?: number;
-  subject: string;
-  body: string;
-  delay?: number; // days after previous step
-}
-
-export interface WoodpeckerCampaignDetails extends WoodpeckerCampaign {
-  from_name?: string;
-  from_email?: string;
-  emails?: WoodpeckerEmailStep[];
-}
-
-export async function getCampaignDetails(campaignId: number): Promise<WoodpeckerCampaignDetails> {
-  return retry(async () => {
-    const resp = await getWoodpeckerClient().get(`/campaign_list/${campaignId}`);
-    const d = resp.data;
-    // Woodpecker returns either the campaign object directly or nested
-    const campaign = Array.isArray(d) ? d[0] : (d?.campaign ?? d);
-    return {
-      id: campaign.id ?? campaignId,
-      name: campaign.name ?? '',
-      status: campaign.status ?? '',
-      from_name: campaign.from_name ?? '',
-      from_email: campaign.from_email ?? '',
-      // Email sequences are under 'emails' or 'steps' depending on API version
-      emails: campaign.emails ?? campaign.steps ?? [],
-    };
-  }, 'getCampaignDetails');
-}
-
-// ---- Create a new campaign ----
-
-export async function createCampaign(name: string, fromName: string, fromEmail: string): Promise<number> {
-  return retry(async () => {
-    const resp = await getWoodpeckerClient().post('/campaigns', {
-      name,
-      from_name: fromName,
-      from_email: fromEmail,
-      status: 'PAUSED', // start paused so Mo can review before activating
-    });
-    const id = resp.data?.id ?? resp.data?.campaign?.id;
-    if (!id) throw new Error('Woodpecker did not return a campaign ID');
-    return Number(id);
-  }, 'createCampaign');
 }
 
 // ---- Get all prospects in a campaign, optionally filtered by status ----

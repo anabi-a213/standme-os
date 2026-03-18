@@ -23,7 +23,7 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, appendRow, updateCell, objectToRow, sheetUrl } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import {
-  listCampaigns, createCampaign, getCampaignDetails, getCampaignStats,
+  listCampaigns, getCampaignDetails, getCampaignStats,
   getProspectsByCampaign, addProspectToCampaign, WoodpeckerProspect,
 } from '../services/woodpecker/client';
 import {
@@ -1335,23 +1335,40 @@ export class CampaignBuilderAgent extends BaseAgent {
       );
     }
 
-    // ---- 4. Always create a NEW campaign (timestamp in name to distinguish from past ones) ----
-    const date = new Date().toISOString().slice(0, 7); // e.g. 2026-03
-    const campaignName = `${showName} — StandMe ${date}`;
-    const fromName  = process.env.WOODPECKER_FROM_NAME  || 'Mo';
-    const fromEmail = process.env.SEND_FROM_EMAIL || process.env.WOODPECKER_FROM_EMAIL || 'info@standme.de';
+    // ---- 4. Select campaign to use ----
+    // Woodpecker Classic API does not support creating campaigns programmatically.
+    // Use the most recent matching campaign, or guide Mo to create one.
 
-    try {
-      const campaignId = await createCampaign(campaignName, fromName, fromEmail);
-      await this.respond(ctx.chatId, `New Woodpecker campaign created: *${campaignName}* (ID: ${campaignId})`);
-      return { campaignId, pastAnalysis };
-    } catch (err: any) {
-      await sendToMo(formatType2(
-        `Create Woodpecker campaign: ${showName}`,
-        `Auto-creation failed (${err.message}). Create it manually in Woodpecker and re-run.`
-      ));
-      await this.respond(ctx.chatId, `Could not create Woodpecker campaign. Mo has been notified.`);
-      return null;
+    // Sort past campaigns so the most recently created (highest ID) is first
+    const sorted = [...pastCampaigns].sort((a, b) => b.id - a.id);
+    const chosen = sorted[0] || null;
+
+    if (chosen) {
+      await this.respond(
+        ctx.chatId,
+        `Using Woodpecker campaign: *${chosen.name}* (ID: ${chosen.id}, status: ${chosen.status})\n\n` +
+        `To run this as a fresh campaign, pause it and duplicate it in Woodpecker UI, then re-run.`
+      );
+      return { campaignId: chosen.id, pastAnalysis };
     }
+
+    // No matching campaign — list all available ones and ask Mo to create/pick one
+    const campaignList = allCampaigns
+      .slice(0, 10)
+      .map(c => `  • ${c.name} (ID: ${c.id}, ${c.status})`)
+      .join('\n');
+
+    await sendToMo(formatType2(
+      `No Woodpecker campaign for ${showName}`,
+      `No campaign matching "${showName}" found.\n\nAvailable campaigns:\n${campaignList || '  (none)'}\n\n` +
+      `Create a new campaign in Woodpecker UI named "${showName}" then run /discover ${showName} again.`
+    ));
+    await this.respond(
+      ctx.chatId,
+      `No Woodpecker campaign found for *${showName}*.\n\n` +
+      `Available campaigns:\n${campaignList || '  (none)'}\n\n` +
+      `Create one in Woodpecker UI, then run /discover ${showName} again.`
+    );
+    return null;
   }
 }
