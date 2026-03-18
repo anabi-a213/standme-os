@@ -30,8 +30,11 @@ router.use((req: Request, res: Response, next) => {
     <body><form method="GET"><h1>STANDME OS</h1><input name="key" type="password" placeholder="Enter password" autofocus><br><button type="submit">Login</button></form></body></html>`);
 });
 
-// Serve React dashboard
+// Serve React dashboard — no-cache on index.html so new deploys take effect immediately
 router.get('/', (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(process.cwd(), 'public', 'dashboard-build', 'index.html'));
 });
 
