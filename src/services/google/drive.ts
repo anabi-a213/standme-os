@@ -328,15 +328,55 @@ export async function createFolder(name: string, parentId?: string): Promise<str
 
 // ---- Create Google Doc ----
 
+// ---- Share a file with the StandMe team ----
+// Grants writer access to the standme.de domain and any individual emails
+// listed in TEAM_SHARE_EMAILS (comma-separated). Errors are non-fatal.
+
+export async function shareWithTeam(fileId: string): Promise<void> {
+  const drive = getDriveClient();
+
+  // Share with entire standme.de Google Workspace domain
+  try {
+    await drive.permissions.create({
+      fileId,
+      supportsAllDrives: true,
+      requestBody: { type: 'domain', domain: 'standme.de', role: 'writer' },
+    });
+  } catch (err: any) {
+    logger.warn(`[Drive] Could not share ${fileId} with standme.de domain: ${err.message}`);
+  }
+
+  // Also share with any extra emails configured individually
+  const extras = (process.env.TEAM_SHARE_EMAILS || '')
+    .split(',')
+    .map(e => e.trim())
+    .filter(Boolean);
+
+  for (const email of extras) {
+    try {
+      await drive.permissions.create({
+        fileId,
+        supportsAllDrives: true,
+        requestBody: { type: 'user', emailAddress: email, role: 'writer' },
+      });
+    } catch (err: any) {
+      logger.warn(`[Drive] Could not share ${fileId} with ${email}: ${err.message}`);
+    }
+  }
+}
+
+// ---- Create Google Doc ----
+
 export async function createGoogleDoc(name: string, content: string, folderId?: string): Promise<{ id: string; url: string }> {
   return retry(async () => {
     const docs = google.docs({ version: 'v1', auth: getGoogleAuth() });
 
+    const resolvedFolder = folderId || process.env.DRIVE_FOLDER_AGENTS || '';
     const fileMetadata: drive_v3.Schema$File = {
       name,
       mimeType: 'application/vnd.google-apps.document',
     };
-    if (folderId) fileMetadata.parents = [folderId];
+    if (resolvedFolder) fileMetadata.parents = [resolvedFolder];
 
     const file = await getDriveClient().files.create({
       requestBody: fileMetadata,
@@ -354,6 +394,9 @@ export async function createGoogleDoc(name: string, content: string, folderId?: 
         },
       });
     }
+
+    // Share with the full team — non-blocking, errors are logged not thrown
+    shareWithTeam(docId).catch(() => {});
 
     return {
       id: docId,

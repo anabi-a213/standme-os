@@ -46,6 +46,11 @@ const envSchema = z.object({
   // Gmail
   GMAIL_LABEL: z.string().default('standme-inquiries'),
   SEND_FROM_EMAIL: z.string().default('info@standme.de'),
+
+  // Google Drive — shared folder where all agent-created files land
+  DRIVE_FOLDER_AGENTS: z.string().default(''),
+  // Comma-separated extra emails to share agent files with (for people outside standme.de)
+  TEAM_SHARE_EMAILS: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;

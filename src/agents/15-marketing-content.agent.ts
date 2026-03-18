@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet } from '../services/google/sheets';
+import { readSheet, appendRow, objectToRow } from '../services/google/sheets';
 import { createGoogleDoc } from '../services/google/drive';
 import { generateMarketingContent } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
@@ -50,10 +50,21 @@ export class MarketingContentAgent extends BaseAgent {
     const content = await generateMarketingContent(contentType, topic || 'weekly plan', extraContext);
 
     // Save as Google Doc
-    const doc = await createGoogleDoc(
-      `${contentType.toUpperCase()} — ${topic || 'Content Plan'} — ${new Date().toISOString().split('T')[0]}`,
-      content
-    );
+    const docName = `${contentType.toUpperCase()} — ${topic || 'Content Plan'} — ${new Date().toISOString().split('T')[0]}`;
+    const doc = await createGoogleDoc(docName, content);
+
+    // Log to Drive Index so the team can find it
+    appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
+      fileName: docName,
+      fileId: doc.id,
+      fileUrl: doc.url,
+      folderPath: '/StandMe Agents',
+      parentFolder: 'Agents',
+      fileType: 'Google Doc',
+      lastModified: new Date().toISOString(),
+      linkedProject: topic || 'marketing',
+      category: `Marketing — ${contentType}`,
+    })).catch(() => {});
 
     // Save content to KB — future content and email agents learn from it
     await saveKnowledge({

@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, findRowByValue } from '../services/google/sheets';
+import { readSheet, findRowByValue, appendRow, objectToRow } from '../services/google/sheets';
 import { addComment } from '../services/trello/client';
 import { createGoogleDoc } from '../services/google/drive';
 import { generateBrief, generateText } from '../services/ai/client';
@@ -124,6 +124,19 @@ export class ConceptBriefAgent extends BaseAgent {
       `Concept Brief — ${companyName} — ${showName}`,
       briefContent
     );
+
+    // Log to Drive Index so the team can find it
+    appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
+      fileName: `Concept Brief — ${companyName} — ${showName}`,
+      fileId: doc.id,
+      fileUrl: doc.url,
+      folderPath: '/StandMe Agents',
+      parentFolder: 'Agents',
+      fileType: 'Google Doc',
+      lastModified: new Date().toISOString(),
+      linkedProject: companyName,
+      category: 'Concept Brief',
+    })).catch(() => {});
 
     // Save brief to Knowledge Base — future briefs and emails benefit from this
     await saveKnowledge({

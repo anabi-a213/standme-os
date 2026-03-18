@@ -79,6 +79,19 @@ export class LessonsLearnedAgent extends BaseAgent {
       report
     );
 
+    // Log to Drive Index so the team can find it
+    appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
+      fileName: `Lessons Learned — ${cardIdOrName}`,
+      fileId: doc.id,
+      fileUrl: doc.url,
+      folderPath: '/StandMe Agents',
+      parentFolder: 'Agents',
+      fileType: 'Google Doc',
+      lastModified: new Date().toISOString(),
+      linkedProject: cardIdOrName,
+      category: 'Lessons Learned',
+    })).catch(() => {});
+
     // Add summary to sheet
     await appendRow(SHEETS.LESSONS_LEARNED, objectToRow(SHEETS.LESSONS_LEARNED, {
       id: `LL-${Date.now()}`,
