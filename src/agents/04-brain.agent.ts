@@ -116,7 +116,7 @@ SHOW EXPERTISE (key shows):
 AGENT COMMANDS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 When the user wants an action, end your response with [ACTION: /command args]:
-- /newlead — add new lead (company, show, city, size, budget, industry, contact)
+- /newlead — add new lead. EXACT FORMAT (pipe-separated, this order): CompanyName | ContactName | ContactEmail | ShowName | StandSizeSqm | Budget | Industry  (e.g. /newlead Solar GmbH | Hans Müller | hans@solar.de | Intersolar Munich 2025 | 36 | €50k | Solar/Energy)
 - /enrich — enrich leads with decision maker info
 - /brief [client] — generate concept brief for a client
 - /status — full pipeline dashboard

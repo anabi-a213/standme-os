@@ -35,13 +35,15 @@ export class LeadIntakeAgent extends BaseAgent {
       return { success: false, message: 'Missing company name', confidence: 'LOW' };
     }
 
-    // Duplicate check
+    // Duplicate check — stop and notify Mo rather than creating a corrupt duplicate entry
     const existing = await this.checkDuplicate(companyName, contactEmail, showName);
     if (existing) {
       await sendToMo(formatType2(
         'Duplicate Lead Detected',
         `${companyName} may already exist in the system.\nExisting: ${existing}\nNew data: ${args}\n\nMerging recommended.`
       ));
+      await this.respond(ctx.chatId, `⚠️ Duplicate detected: *${companyName}* already exists as ${existing}. Notified Mo to review and merge. No new entry created.`);
+      return { success: false, message: 'Duplicate lead — not logged', confidence: 'HIGH' };
     }
 
     // Validate show
