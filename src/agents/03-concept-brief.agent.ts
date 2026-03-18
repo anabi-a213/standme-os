@@ -120,7 +120,7 @@ export class ConceptBriefAgent extends BaseAgent {
     });
 
     // Resolve the right subfolder inside StandMe OS for briefs
-    const briefFolder = await resolveAgentFolder(['brief', 'concept', 'sales']);
+    const briefFolder = await resolveAgentFolder(['brief', 'concept', 'proposal', 'quote', 'client', 'sales', 'design']);
 
     // Create Google Doc inside that subfolder
     const doc = await createGoogleDoc(

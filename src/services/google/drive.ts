@@ -88,47 +88,89 @@ export async function listAllFilesInFolder(folderId: string): Promise<DriveFile[
   }, 'listAllFilesInFolder');
 }
 
-// ---- StandMe OS folder tree: discover subfolders and route by keyword ----
-// Reads the subfolders of the StandMe OS root once, caches them in memory,
-// then routes agent-created docs to the best-matching subfolder.
+// ---- StandMe OS folder tree: full recursive scan and smart routing ----
+// BFS-scans the entire StandMe OS folder tree (all levels deep),
+// caches results, and routes agent docs to the best-matching subfolder.
 
-const STANDME_ROOT = '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl';
+export const STANDME_ROOT = '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl';
 
-interface FolderEntry { id: string; name: string; }
+export interface FolderEntry {
+  id: string;
+  name: string;
+  parentId: string;
+  path: string; // full path from root, e.g. "Sales / Briefs"
+}
+
 let _folderCache: FolderEntry[] | null = null;
 let _folderCacheTime = 0;
 const FOLDER_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
+// Full BFS scan of the StandMe OS folder tree (all levels deep)
 export async function listStandMeSubfolders(): Promise<FolderEntry[]> {
   const now = Date.now();
   if (_folderCache && now - _folderCacheTime < FOLDER_CACHE_TTL) return _folderCache;
 
+  const result: FolderEntry[] = [];
+  // Queue entries: [folderId, pathSoFar]
+  const queue: Array<{ id: string; path: string }> = [{ id: STANDME_ROOT, path: '' }];
+  const visited = new Set<string>([STANDME_ROOT]);
+
   try {
-    const resp = await getDriveClient().files.list({
-      q: `'${STANDME_ROOT}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-      fields: 'files(id, name)',
-      includeItemsFromAllDrives: true,
-      supportsAllDrives: true,
-    } as any);
-    _folderCache = ((resp.data as any).files || []).map((f: any) => ({ id: f.id, name: f.name }));
+    while (queue.length > 0) {
+      const { id: parentId, path: parentPath } = queue.shift()!;
+
+      const resp = await getDriveClient().files.list({
+        q: `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id, name)',
+        includeItemsFromAllDrives: true,
+        supportsAllDrives: true,
+        pageSize: 100,
+      } as any);
+
+      const children: Array<{ id: string; name: string }> = ((resp.data as any).files || []);
+      for (const f of children) {
+        if (visited.has(f.id)) continue;
+        visited.add(f.id);
+        const fullPath = parentPath ? `${parentPath} / ${f.name}` : f.name;
+        result.push({ id: f.id, name: f.name, parentId, path: fullPath });
+        queue.push({ id: f.id, path: fullPath });
+      }
+    }
+
+    _folderCache = result;
     _folderCacheTime = now;
-    logger.info(`[Drive] StandMe folder tree: ${_folderCache!.map(f => f.name).join(', ')}`);
+    logger.info(`[Drive] StandMe folder tree (${result.length} folders): ${result.map(f => f.path).join(' | ')}`);
   } catch (err: any) {
     logger.warn(`[Drive] Could not read StandMe folder tree: ${err.message}`);
-    _folderCache = [];
+    _folderCache = _folderCache || []; // keep stale cache on error
   }
+
   return _folderCache!;
 }
 
-// Find the best subfolder ID for a set of keywords (e.g. ['brief', 'concept']).
-// Returns the StandMe OS root if no match found.
-export async function resolveAgentFolder(keywords: string[]): Promise<{ id: string; name: string }> {
+// Invalidate the folder cache (e.g. after creating a new subfolder)
+export function invalidateFolderCache(): void {
+  _folderCache = null;
+  _folderCacheTime = 0;
+}
+
+// Find the deepest best-matching subfolder for a set of keywords.
+// Matches against both folder name and full path. Falls back to StandMe OS root.
+export async function resolveAgentFolder(keywords: string[]): Promise<{ id: string; name: string; path: string }> {
   const folders = await listStandMeSubfolders();
+
   for (const kw of keywords) {
-    const match = folders.find(f => f.name.toLowerCase().includes(kw.toLowerCase()));
-    if (match) return match;
+    const kwLower = kw.toLowerCase();
+    // Prefer an exact name match first, then partial name, then path match
+    const exact  = folders.find(f => f.name.toLowerCase() === kwLower);
+    if (exact) return exact;
+    const partial = folders.find(f => f.name.toLowerCase().includes(kwLower));
+    if (partial) return partial;
+    const inPath = folders.find(f => f.path.toLowerCase().includes(kwLower));
+    if (inPath) return inPath;
   }
-  return { id: STANDME_ROOT, name: 'StandMe OS' };
+
+  return { id: STANDME_ROOT, name: 'StandMe OS', path: '' };
 }
 
 // ---- List ALL files in personal drive (full tree, paginated) ----

@@ -50,7 +50,7 @@ export class MarketingContentAgent extends BaseAgent {
     const content = await generateMarketingContent(contentType, topic || 'weekly plan', extraContext);
 
     // Resolve the right subfolder inside StandMe OS for marketing/content
-    const marketingFolder = await resolveAgentFolder(['marketing', 'content', 'social', 'brand']);
+    const marketingFolder = await resolveAgentFolder(['marketing', 'content', 'social', 'brand', 'media', 'post', 'campaign', 'communication']);
 
     // Save as Google Doc
     const docName = `${contentType.toUpperCase()} — ${topic || 'Content Plan'} — ${new Date().toISOString().split('T')[0]}`;

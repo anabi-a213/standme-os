@@ -75,7 +75,7 @@ export class LessonsLearnedAgent extends BaseAgent {
 
     // Create Google Doc
     // Resolve the right subfolder inside StandMe OS for lessons/project reviews
-    const lessonsFolder = await resolveAgentFolder(['lesson', 'learned', 'project', 'review', 'debrief']);
+    const lessonsFolder = await resolveAgentFolder(['lesson', 'learned', 'debrief', 'review', 'retrospective', 'post', 'project', 'archive', 'completed', 'operation']);
 
     const doc = await createGoogleDoc(
       `Lessons Learned — ${cardIdOrName}`,

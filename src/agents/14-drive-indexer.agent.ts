@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, readSheet, objectToRow } from '../services/google/sheets';
-import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, DriveFile } from '../services/google/drive';
+import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, listStandMeSubfolders, resolveAgentFolder, invalidateFolderCache, STANDME_ROOT, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { saveKnowledge, searchKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
@@ -14,7 +14,7 @@ export class DriveIndexerAgent extends BaseAgent {
     name: 'Drive Indexer',
     id: 'agent-14',
     description: 'Index all Google Drive files (personal + shared) with content understanding and growing knowledge base',
-    commands: ['/indexdrive', '/findfile', '/readfile', '/knowledge', '/shareallfiles'],
+    commands: ['/indexdrive', '/findfile', '/readfile', '/knowledge', '/shareallfiles', '/foldertree'],
     schedule: '0 8 * * 1',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -24,7 +24,46 @@ export class DriveIndexerAgent extends BaseAgent {
     if (ctx.command === '/readfile') return this.readFile(ctx);
     if (ctx.command === '/knowledge') return this.queryKnowledge(ctx);
     if (ctx.command === '/shareallfiles') return this.shareAllFiles(ctx);
+    if (ctx.command === '/foldertree') return this.showFolderTree(ctx);
     return this.indexDrive(ctx);
+  }
+
+  private async showFolderTree(ctx: AgentContext): Promise<AgentResponse> {
+    await this.respond(ctx.chatId, '🗂 Scanning StandMe OS folder tree...');
+    invalidateFolderCache(); // always fresh scan for this command
+
+    const folders = await listStandMeSubfolders();
+
+    if (folders.length === 0) {
+      await this.respond(ctx.chatId, '⚠️ No subfolders found. Check that the service account has access to the StandMe OS folder.');
+      return { success: false, message: 'No folders found', confidence: 'LOW' };
+    }
+
+    // Show full tree
+    const treeLines = folders.map(f => `📁 ${f.path}`);
+
+    // Show what each agent would route to
+    const [briefFolder, lessonsFolder, marketingFolder] = await Promise.all([
+      resolveAgentFolder(['brief', 'concept', 'proposal', 'quote', 'client', 'sales', 'design']),
+      resolveAgentFolder(['lesson', 'learned', 'debrief', 'review', 'retrospective', 'post', 'project', 'archive', 'completed', 'operation']),
+      resolveAgentFolder(['marketing', 'content', 'social', 'brand', 'media', 'post', 'campaign', 'communication']),
+    ]);
+
+    const routingLines = [
+      `📝 *Concept Briefs (Agent 03)* → ${briefFolder.path || briefFolder.name}`,
+      `📚 *Lessons Learned (Agent 11)* → ${lessonsFolder.path || lessonsFolder.name}`,
+      `📣 *Marketing Content (Agent 15)* → ${marketingFolder.path || marketingFolder.name}`,
+    ];
+
+    const msg =
+      `*StandMe OS Folder Tree (${folders.length} folders):*\n\n` +
+      treeLines.join('\n') +
+      `\n\n*Agent Routing:*\n` +
+      routingLines.join('\n') +
+      `\n\n_If any routing is wrong, rename the folder so it contains a matching keyword._`;
+
+    await this.respond(ctx.chatId, msg);
+    return { success: true, message: `${folders.length} folders found`, confidence: 'HIGH' };
   }
 
   private async shareAllFiles(ctx: AgentContext): Promise<AgentResponse> {
