@@ -4,7 +4,8 @@ import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, findRowByValue, appendRow, objectToRow } from '../services/google/sheets';
 import { addComment } from '../services/trello/client';
-import { createGoogleDoc, resolveAgentFolder } from '../services/google/drive';
+import { createGoogleDoc } from '../services/google/drive';
+import { getFolderIdForCategory } from '../config/drive-folders';
 import { generateBrief, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
@@ -119,14 +120,14 @@ export class ConceptBriefAgent extends BaseAgent {
       lessonsLearned: lessonsContext,
     });
 
-    // Resolve the right subfolder inside StandMe OS for briefs
-    const briefFolder = await resolveAgentFolder(['brief', 'concept', 'proposal', 'quote', 'client', 'sales', 'design']);
+    // Route to /01_Sales/Proposals in the canonical folder tree
+    const briefFolderId = getFolderIdForCategory('brief');
 
     // Create Google Doc inside that subfolder
     const doc = await createGoogleDoc(
       `Concept Brief — ${companyName} — ${showName}`,
       briefContent,
-      briefFolder.id
+      briefFolderId
     );
 
     // Log to Drive Index so the team can find it

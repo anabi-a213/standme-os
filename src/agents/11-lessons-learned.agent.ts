@@ -4,7 +4,8 @@ import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, objectToRow, sheetUrl } from '../services/google/sheets';
 import { getCard } from '../services/trello/client';
-import { createGoogleDoc, resolveAgentFolder } from '../services/google/drive';
+import { createGoogleDoc } from '../services/google/drive';
+import { getFolderIdForCategory } from '../config/drive-folders';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
@@ -73,23 +74,34 @@ export class LessonsLearnedAgent extends BaseAgent {
       2500
     );
 
-    // Create Google Doc
-    // Resolve the right subfolder inside StandMe OS for lessons/project reviews
-    const lessonsFolder = await resolveAgentFolder(['lesson', 'learned', 'debrief', 'review', 'retrospective', 'post', 'project', 'archive', 'completed', 'operation']);
+    // Route to correct Lessons Learned subfolder based on project outcome
+    // Won deals → /06_Lessons_Learned/Won_Deals
+    // Lost/cancelled → /06_Lessons_Learned/Lost_Deals
+    // Delivery problems → /06_Lessons_Learned/Delivery_Issues
+    const stageLower = (cardData || '').toLowerCase();
+    let lessonCategory: 'lessons-won' | 'lessons-lost' | 'lessons-delivery' = 'lessons-won';
+    if (stageLower.includes('lost') || stageLower.includes('cancel') || stageLower.includes('delayed')) {
+      lessonCategory = 'lessons-lost';
+    } else if (stageLower.includes('delivery') || stageLower.includes('issue') || stageLower.includes('problem')) {
+      lessonCategory = 'lessons-delivery';
+    }
+    const lessonsFolderId = getFolderIdForCategory(lessonCategory);
 
     const doc = await createGoogleDoc(
       `Lessons Learned — ${cardIdOrName}`,
       report,
-      lessonsFolder.id
+      lessonsFolderId
     );
+
+    const folderLabel = lessonCategory === 'lessons-won' ? 'Won_Deals' : lessonCategory === 'lessons-lost' ? 'Lost_Deals' : 'Delivery_Issues';
 
     // Log to Drive Index so the team can find it
     appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
       fileName: `Lessons Learned — ${cardIdOrName}`,
       fileId: doc.id,
       fileUrl: doc.url,
-      folderPath: `/${lessonsFolder.name}`,
-      parentFolder: lessonsFolder.id,
+      folderPath: `/06_Lessons_Learned/${folderLabel}`,
+      parentFolder: lessonsFolderId,
       fileType: 'Google Doc',
       lastModified: new Date().toISOString(),
       linkedProject: cardIdOrName,

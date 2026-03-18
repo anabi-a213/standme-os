@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, readSheet, objectToRow } from '../services/google/sheets';
-import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, listStandMeSubfolders, resolveAgentFolder, invalidateFolderCache, STANDME_ROOT, DriveFile } from '../services/google/drive';
+import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, listStandMeSubfolders, resolveAgentFolder, invalidateFolderCache, setupDriveFolderTree, createProjectFolderTree, createShowFolder, createContractorFolder, STANDME_ROOT, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { saveKnowledge, searchKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
@@ -14,7 +14,7 @@ export class DriveIndexerAgent extends BaseAgent {
     name: 'Drive Indexer',
     id: 'agent-14',
     description: 'Index all Google Drive files (personal + shared) with content understanding and growing knowledge base',
-    commands: ['/indexdrive', '/findfile', '/readfile', '/knowledge', '/shareallfiles', '/foldertree'],
+    commands: ['/indexdrive', '/findfile', '/readfile', '/knowledge', '/shareallfiles', '/foldertree', '/setupdrive', '/newprojectfolder', '/newshowfolder', '/newcontractorfolder'],
     schedule: '0 8 * * 1',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -25,7 +25,137 @@ export class DriveIndexerAgent extends BaseAgent {
     if (ctx.command === '/knowledge') return this.queryKnowledge(ctx);
     if (ctx.command === '/shareallfiles') return this.shareAllFiles(ctx);
     if (ctx.command === '/foldertree') return this.showFolderTree(ctx);
+    if (ctx.command === '/setupdrive') return this.setupDriveTree(ctx);
+    if (ctx.command === '/newprojectfolder') return this.newProjectFolder(ctx);
+    if (ctx.command === '/newshowfolder') return this.newShowFolder(ctx);
+    if (ctx.command === '/newcontractorfolder') return this.newContractorFolder(ctx);
     return this.indexDrive(ctx);
+  }
+
+  // ── /setupdrive — Build the entire static folder tree in Google Drive ──
+  // Usage: /setupdrive
+  // Creates all 31 static folders (idempotent — safe to re-run).
+  // Outputs a .env block with all the folder IDs to paste in.
+
+  private async setupDriveTree(ctx: AgentContext): Promise<AgentResponse> {
+    await this.respond(ctx.chatId,
+      'Setting up StandMe OS folder tree in Google Drive...\n' +
+      'This creates 31 folders and is safe to re-run (existing folders are found, not duplicated).'
+    );
+
+    let resolved: Record<string, string>;
+    try {
+      resolved = await setupDriveFolderTree();
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `Setup failed: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    const envLines = Object.entries(resolved)
+      .filter(([k]) => k !== 'ROOT')
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n');
+
+    const count = Object.keys(resolved).length - 1; // exclude ROOT
+    const msg =
+      `*Drive folder tree set up!* (${count} folders created/found)\n\n` +
+      `Add these to your *.env* file so agents save files to the right folders:\n\n` +
+      `\`\`\`\n${envLines}\n\`\`\`\n\n` +
+      `Once added, restart the bot. All agents will then save files to the correct location.\n` +
+      `Run /foldertree to verify the structure.`;
+
+    await this.respond(ctx.chatId, msg);
+    return { success: true, message: `Drive tree set up: ${count} folders`, confidence: 'HIGH' };
+  }
+
+  // ── /newprojectfolder — Create project folder + 11 subfolders ──
+  // Usage: /newprojectfolder P001 | ClientName | ShowName
+  // Creates under /02_Projects/ACTIVE/
+
+  private async newProjectFolder(ctx: AgentContext): Promise<AgentResponse> {
+    const parts = (ctx.args || '').split('|').map(p => p.trim());
+    if (parts.length < 3) {
+      await this.respond(ctx.chatId,
+        'Usage: /newprojectfolder [ProjectID] | [Client Name] | [Show Name]\n' +
+        'Example: /newprojectfolder P001 | Pharma Corp | Arab Health'
+      );
+      return { success: false, message: 'Missing args', confidence: 'HIGH' };
+    }
+
+    const [projectId, client, show] = parts;
+    await this.respond(ctx.chatId, `Creating project folder for *${client}* at *${show}*...`);
+
+    try {
+      const { projectFolderId, url, subfolders } = await createProjectFolderTree(projectId, client, show);
+      const subList = Object.keys(subfolders).map(s => `  • ${s}`).join('\n');
+      const msg =
+        `*Project folder created!*\n\n` +
+        `📁 ${projectId}_${client}_${show}\n` +
+        `${subList}\n\n` +
+        `[Open in Drive](${url})`;
+      await this.respond(ctx.chatId, msg);
+      return { success: true, message: `Project folder: ${projectFolderId}`, confidence: 'HIGH' };
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `Failed to create project folder: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+  }
+
+  // ── /newshowfolder — Create show folder + 4 subfolders ──
+  // Usage: /newshowfolder Arab Health | 2026
+  // Creates under /03_Events_And_Venues/
+
+  private async newShowFolder(ctx: AgentContext): Promise<AgentResponse> {
+    const parts = (ctx.args || '').split('|').map(p => p.trim());
+    const showName = parts[0];
+    const year = parts[1] ? parseInt(parts[1]) : undefined;
+
+    if (!showName) {
+      await this.respond(ctx.chatId, 'Usage: /newshowfolder [Show Name] | [Year]\nExample: /newshowfolder Arab Health | 2026');
+      return { success: false, message: 'Missing show name', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `Creating show folder for *${showName}*...`);
+    try {
+      const { showFolderId, url, subfolders } = await createShowFolder(showName, year);
+      const subList = Object.keys(subfolders).map(s => `  • ${s}`).join('\n');
+      const msg =
+        `*Show folder created!*\n\n` +
+        `📁 ${showName} ${year || new Date().getFullYear()}\n${subList}\n\n` +
+        `[Open in Drive](${url})`;
+      await this.respond(ctx.chatId, msg);
+      return { success: true, message: `Show folder: ${showFolderId}`, confidence: 'HIGH' };
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `Failed: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+  }
+
+  // ── /newcontractorfolder — Create contractor folder + 4 subfolders ──
+  // Usage: /newcontractorfolder Ahmed Al Rashidi
+  // Creates under /04_Contractors/
+
+  private async newContractorFolder(ctx: AgentContext): Promise<AgentResponse> {
+    const name = (ctx.args || '').trim();
+    if (!name) {
+      await this.respond(ctx.chatId, 'Usage: /newcontractorfolder [Contractor Name]\nExample: /newcontractorfolder Ahmed Al Rashidi');
+      return { success: false, message: 'Missing name', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `Creating contractor folder for *${name}*...`);
+    try {
+      const { contractorFolderId, url, subfolders } = await createContractorFolder(name);
+      const subList = Object.keys(subfolders).map(s => `  • ${s}`).join('\n');
+      const msg =
+        `*Contractor folder created!*\n\n` +
+        `📁 ${name}\n${subList}\n\n` +
+        `[Open in Drive](${url})`;
+      await this.respond(ctx.chatId, msg);
+      return { success: true, message: `Contractor folder: ${contractorFolderId}`, confidence: 'HIGH' };
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `Failed: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
   }
 
   private async showFolderTree(ctx: AgentContext): Promise<AgentResponse> {

@@ -423,6 +423,146 @@ export async function createFolder(name: string, parentId?: string): Promise<str
   }, 'createFolder');
 }
 
+// ---- Find or create a folder (by name under a specific parent) ----
+// If a folder with this exact name already exists under parentId, return its ID.
+// Otherwise create it. This makes all setup operations idempotent.
+
+export async function ensureFolder(name: string, parentId: string): Promise<string> {
+  return retry(async () => {
+    // Search for existing folder with this name under this parent
+    const q = `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and '${parentId}' in parents and trashed = false`;
+    const resp = await getDriveClient().files.list({
+      q,
+      fields: 'files(id)',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    const files = resp.data.files || [];
+    if (files.length > 0 && files[0].id) {
+      return files[0].id;
+    }
+    // Doesn't exist — create it
+    return createFolder(name, parentId);
+  }, `ensureFolder(${name})`);
+}
+
+// ---- Set up the entire static StandMe OS folder tree in Google Drive ----
+// Idempotent: uses ensureFolder so existing folders are found, not duplicated.
+// Returns a map of envKey → folderId for pasting into .env
+
+export async function setupDriveFolderTree(): Promise<Record<string, string>> {
+  const { STATIC_FOLDER_TREE, DRIVE_FOLDERS } = await import('../../config/drive-folders');
+  const ROOT_ID = DRIVE_FOLDERS.ROOT;
+
+  // We track resolved IDs in this run (envKey → id)
+  const resolved: Record<string, string> = { ROOT: ROOT_ID };
+
+  logger.info('[Drive] Starting folder tree setup...');
+
+  for (const folder of STATIC_FOLDER_TREE) {
+    // Find parent ID: either ROOT or a previously resolved folder
+    const parentId = resolved[folder.parentEnvKey];
+    if (!parentId) {
+      logger.warn(`[Drive] Cannot create "${folder.name}" — parent "${folder.parentEnvKey}" not resolved yet. Check tree order.`);
+      continue;
+    }
+
+    try {
+      const id = await ensureFolder(folder.name, parentId);
+      resolved[folder.envKey] = id;
+      logger.info(`[Drive] ✓ ${folder.name} → ${id}`);
+    } catch (err: any) {
+      logger.error(`[Drive] ✗ Failed to create "${folder.name}": ${err.message}`);
+    }
+  }
+
+  // Invalidate cache so agents see the new folders
+  invalidateFolderCache();
+
+  return resolved;
+}
+
+// ---- Create a full project folder tree under /02_Projects/ACTIVE/ ----
+// Creates: [ProjectID]_[Client]_[Show]_[YYYY-MM]/ + all 11 standard subfolders.
+// Returns: { projectFolderId, subfolders: { subfolder → id } }
+
+export async function createProjectFolderTree(
+  projectId: string,
+  client: string,
+  show: string,
+  date?: Date,
+): Promise<{ projectFolderId: string; url: string; subfolders: Record<string, string> }> {
+  const { makeProjectFolderName, PROJECT_SUBFOLDERS, DRIVE_FOLDERS } = await import('../../config/drive-folders');
+
+  const activeId = DRIVE_FOLDERS.PROJECTS.ACTIVE();
+  const parentId = activeId || DRIVE_FOLDERS.PROJECTS._id() || STANDME_ROOT;
+
+  const folderName = makeProjectFolderName(projectId, client, show, date);
+  const projectFolderId = await ensureFolder(folderName, parentId);
+
+  const subfolders: Record<string, string> = {};
+  for (const sub of PROJECT_SUBFOLDERS) {
+    const subId = await ensureFolder(sub, projectFolderId);
+    subfolders[sub] = subId;
+  }
+
+  invalidateFolderCache();
+
+  const url = `https://drive.google.com/drive/folders/${projectFolderId}`;
+  logger.info(`[Drive] Project folder created: ${folderName} (${projectFolderId})`);
+  return { projectFolderId, url, subfolders };
+}
+
+// ---- Create a show/event folder under /03_Events_And_Venues/ ----
+// Creates: [ShowName]_[YYYY]/ + Portal_Docs, Deadlines, Rules_Regulations, Rigging_Electrical_Orders
+// Returns: { showFolderId, subfolders }
+
+export async function createShowFolder(
+  showName: string,
+  year?: number,
+): Promise<{ showFolderId: string; url: string; subfolders: Record<string, string> }> {
+  const { makeShowFolderName, SHOW_SUBFOLDERS, DRIVE_FOLDERS } = await import('../../config/drive-folders');
+
+  const parentId = DRIVE_FOLDERS.EVENTS._id() || STANDME_ROOT;
+  const folderName = makeShowFolderName(showName, year);
+  const showFolderId = await ensureFolder(folderName, parentId);
+
+  const subfolders: Record<string, string> = {};
+  for (const sub of SHOW_SUBFOLDERS) {
+    const subId = await ensureFolder(sub, showFolderId);
+    subfolders[sub] = subId;
+  }
+
+  invalidateFolderCache();
+  const url = `https://drive.google.com/drive/folders/${showFolderId}`;
+  logger.info(`[Drive] Show folder created: ${folderName} (${showFolderId})`);
+  return { showFolderId, url, subfolders };
+}
+
+// ---- Create a contractor folder under /04_Contractors/ ----
+// Creates: [ContractorName]/ + Contacts, Rates, Past_Projects, Performance_Notes
+
+export async function createContractorFolder(
+  contractorName: string,
+): Promise<{ contractorFolderId: string; url: string; subfolders: Record<string, string> }> {
+  const { CONTRACTOR_SUBFOLDERS, DRIVE_FOLDERS } = await import('../../config/drive-folders');
+
+  const parentId = DRIVE_FOLDERS.CONTRACTORS._id() || STANDME_ROOT;
+  const safeName = contractorName.replace(/[^a-zA-Z0-9_\- ]/g, '').replace(/\s+/g, '_');
+  const contractorFolderId = await ensureFolder(safeName, parentId);
+
+  const subfolders: Record<string, string> = {};
+  for (const sub of CONTRACTOR_SUBFOLDERS) {
+    const subId = await ensureFolder(sub, contractorFolderId);
+    subfolders[sub] = subId;
+  }
+
+  invalidateFolderCache();
+  const url = `https://drive.google.com/drive/folders/${contractorFolderId}`;
+  logger.info(`[Drive] Contractor folder created: ${safeName} (${contractorFolderId})`);
+  return { contractorFolderId, url, subfolders };
+}
+
 // ---- Create Google Doc ----
 
 // ---- Make a file editable by anyone with the link ----

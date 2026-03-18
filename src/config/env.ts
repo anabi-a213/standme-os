@@ -47,10 +47,62 @@ const envSchema = z.object({
   GMAIL_LABEL: z.string().default('standme-inquiries'),
   SEND_FROM_EMAIL: z.string().default('info@standme.de'),
 
-  // Google Drive — shared folder where all agent-created files land
+  // Google Drive — legacy generic folder (fallback if specific folders not set)
   DRIVE_FOLDER_AGENTS: z.string().default(''),
   // Comma-separated extra emails to share agent files with (for people outside standme.de)
   TEAM_SHARE_EMAILS: z.string().default(''),
+  // Explicit file owner email (fallback for sharing when org policy blocks link sharing)
+  DRIVE_OWNER_EMAIL: z.string().default(''),
+
+  // ── StandMe OS Drive Folder Tree ──
+  // Set these by running /setupdrive from Telegram, then pasting the output into .env
+
+  // 00_Admin
+  DRIVE_FOLDER_ADMIN: z.string().default(''),
+  DRIVE_FOLDER_APPROVALS_LOG: z.string().default(''),
+  DRIVE_FOLDER_TEMPLATES_MASTER: z.string().default(''),
+  DRIVE_FOLDER_PRICING_MODEL: z.string().default(''),
+  DRIVE_FOLDER_FINANCE: z.string().default(''),
+  DRIVE_FOLDER_INVOICES: z.string().default(''),
+  DRIVE_FOLDER_PAYMENTS: z.string().default(''),
+  DRIVE_FOLDER_JOB_COSTING: z.string().default(''),
+  DRIVE_FOLDER_SUPPLIER_INVOICES: z.string().default(''),
+
+  // 01_Sales
+  DRIVE_FOLDER_SALES: z.string().default(''),
+  DRIVE_FOLDER_LEADS: z.string().default(''),
+  DRIVE_FOLDER_LEADS_INBOUND: z.string().default(''),
+  DRIVE_FOLDER_LEADS_OUTBOUND: z.string().default(''),
+  DRIVE_FOLDER_LEADS_QUALIFIED: z.string().default(''),
+  DRIVE_FOLDER_LEADS_LOST: z.string().default(''),
+  DRIVE_FOLDER_PROPOSALS: z.string().default(''),
+  DRIVE_FOLDER_OFFER_SHEETS: z.string().default(''),
+  DRIVE_FOLDER_CONTRACTS_TEMPLATES: z.string().default(''),
+  DRIVE_FOLDER_OUTREACH_ASSETS: z.string().default(''),
+
+  // 02_Projects
+  DRIVE_FOLDER_PROJECTS: z.string().default(''),
+  DRIVE_FOLDER_PROJECTS_ACTIVE: z.string().default(''),
+  DRIVE_FOLDER_PROJECTS_ARCHIVE: z.string().default(''),
+
+  // 03_Events_And_Venues
+  DRIVE_FOLDER_EVENTS: z.string().default(''),
+
+  // 04_Contractors
+  DRIVE_FOLDER_CONTRACTORS: z.string().default(''),
+
+  // 05_Design_References
+  DRIVE_FOLDER_DESIGN_REFS: z.string().default(''),
+  DRIVE_FOLDER_DESIGN_BY_INDUSTRY: z.string().default(''),
+  DRIVE_FOLDER_DESIGN_BY_STYLE: z.string().default(''),
+  DRIVE_FOLDER_DESIGN_BY_STAND_TYPE: z.string().default(''),
+
+  // 06_Lessons_Learned
+  DRIVE_FOLDER_LESSONS: z.string().default(''),
+  DRIVE_FOLDER_LESSONS_WON: z.string().default(''),
+  DRIVE_FOLDER_LESSONS_LOST: z.string().default(''),
+  DRIVE_FOLDER_LESSONS_DELIVERY: z.string().default(''),
+  DRIVE_FOLDER_LESSONS_PROCESS: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
