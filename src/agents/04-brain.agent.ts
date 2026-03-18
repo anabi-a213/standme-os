@@ -250,7 +250,45 @@ export class BrainAgent extends BaseAgent {
         });
       }
 
-      sections.push({ label: 'SYSTEM', content: '  All agents operational ✅' });
+      // Upcoming technical deadlines in the next 14 days
+      try {
+        const deadlines = await readSheet(SHEETS.TECHNICAL_DEADLINES);
+        const now = new Date();
+        const upcoming: string[] = [];
+        for (const r of deadlines.slice(1)) {
+          const show = r[1] || r[2] || '?';
+          const dates = [
+            { label: 'Portal', val: r[3] },
+            { label: 'Rigging', val: r[4] },
+            { label: 'Electrics', val: r[5] },
+            { label: 'Design approval', val: r[6] },
+            { label: 'Build start', val: r[7] },
+          ];
+          for (const { label, val } of dates) {
+            if (!val) continue;
+            const diff = (new Date(val).getTime() - now.getTime()) / 86400000;
+            if (diff >= 0 && diff <= 14) {
+              upcoming.push(`  ⏰ ${show} — ${label}: ${val} (${Math.round(diff)}d)`);
+            }
+          }
+        }
+        if (upcoming.length > 0) {
+          sections.push({ label: 'DEADLINES THIS FORTNIGHT', content: upcoming.join('\n') });
+        }
+      } catch { /* non-fatal */ }
+
+      // Pending outreach in queue
+      try {
+        const queue = await readSheet(SHEETS.OUTREACH_QUEUE);
+        const pending = queue.slice(1).filter(r => (r[7] || '').toUpperCase() === 'PENDING');
+        if (pending.length > 0) {
+          sections.push({
+            label: 'OUTREACH PENDING',
+            content: pending.slice(0, 5).map(r => `  ${r[2] || '?'} — ${r[5] || 'no show'}`).join('\n') +
+              (pending.length > 5 ? `\n  ...and ${pending.length - 5} more` : ''),
+          });
+        }
+      } catch { /* non-fatal */ }
 
     } catch (err: any) {
       sections.push({ label: 'ERROR', content: `  ${err.message}` });
