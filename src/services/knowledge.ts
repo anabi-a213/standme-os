@@ -122,3 +122,13 @@ export async function buildKnowledgeContext(query: string): Promise<string> {
     `[${e.sourceType.toUpperCase()} | ${e.topic}] ${e.content} (from: ${e.source})`
   ).join('\n');
 }
+
+// ---- Build agent system prompt prefix from static knowledge ----
+// Use this in any agent's system prompt to give it StandMe + industry context.
+// Import getStaticKnowledge from '../config/standme-knowledge' and call this.
+
+export function buildAgentKnowledgePrefix(agentName: string): string {
+  const { getStaticKnowledge } = require('../config/standme-knowledge');
+  const base = getStaticKnowledge(false); // compact version for non-Brain agents
+  return `You are the ${agentName} agent for StandMe — an exhibition stand design & build company (MENA & Europe).\n\n${base}\n\n`;
+}
