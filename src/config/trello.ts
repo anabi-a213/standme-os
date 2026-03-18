@@ -1,13 +1,13 @@
 export const TRELLO_CONFIG = {
   // Pipeline stages on Sales Pipeline board (the only writable board)
   pipelineStages: [
-    '01 New Inquiry',
-    '02 Qualifying',
-    '03 Concept Brief',
-    '04 Proposal Sent',
-    '05 In Negotiation',
-    '06 Won',
-    '07 Lost-Delayed',
+    '01 — New Inquiry',
+    '02 — Qualifying',
+    '03 — Concept Brief',
+    '04 — Proposal Sent',
+    '05 — In Negotiation',
+    '06 — Won',
+    '07 — Lost / Delayed',
   ] as const,
 
   // Board keys mapped to env var names

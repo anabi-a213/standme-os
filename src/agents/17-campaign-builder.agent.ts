@@ -1247,7 +1247,7 @@ export class CampaignBuilderAgent extends BaseAgent {
       const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
       if (boardId) {
         try {
-          const list = await findListByName(boardId, '02 Qualifying');
+          const list = await findListByName(boardId, '02 — Qualifying');
           if (list) {
             const card = await createCard(
               list.id,
