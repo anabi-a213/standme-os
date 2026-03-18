@@ -37,8 +37,8 @@ export function LeadStatsPanel() {
         <div className="grid grid-cols-2 gap-3">
           {stats.map(stat => (
             <div key={stat.label} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
-              <div className="text-2xl font-bold text-[var(--text)]">{stat.value}</div>
-              <div className="mt-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">{stat.label}</div>
+              <div className="text-xl font-bold text-[var(--text-gold)]">{stat.value}</div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">{stat.label}</div>
               {stat.trend === 'down' && <div className="text-[10px] text-[var(--error)]">↓ needs attention</div>}
             </div>
           ))}
