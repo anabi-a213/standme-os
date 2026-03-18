@@ -51,6 +51,7 @@ AGENT COMMANDS (trigger these when the user asks for these things):
 - /dealanalysis — analyse won/lost deals
 - /findfile [name] — search Google Drive
 - /indexdrive — re-index Google Drive
+- /movecard [client] | [stage] — move a card to a different pipeline stage (e.g. "move Pharma Corp to Proposal Sent" → [ACTION: /movecard Pharma Corp | 04 Proposal Sent])
 - /crossboard — cross-board health check
 - /post /caption /campaign — generate marketing content
 - /casestudy /portfolio /insight — generate content pieces

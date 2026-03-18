@@ -25,6 +25,7 @@ import { DealAnalyserAgent } from './agents/12-deal-analyser.agent';
 import { OutreachAgent } from './agents/13-outreach.agent';
 import { DriveIndexerAgent } from './agents/14-drive-indexer.agent';
 import { MarketingContentAgent } from './agents/15-marketing-content.agent';
+import { CardManagerAgent } from './agents/08-card-manager.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
 
 
@@ -45,6 +46,7 @@ async function main() {
     new DeadlineMonitorAgent(),
     new ProjectStatusAgent(),
     new ClientReminderAgent(),
+    new CardManagerAgent(),
     new TechnicalDeadlineAgent(),
     new ContractorCoordAgent(),
     new LessonsLearnedAgent(),
@@ -84,6 +86,7 @@ async function main() {
         `/status — Pipeline dashboard\n` +
         `/deadlines — Check deadlines\n` +
         `/reminders — Client follow-ups\n` +
+        `/movecard — Move a card to a pipeline stage\n` +
         `/techdeadlines — Technical deadlines\n` +
         `/outreach — Run outreach\n` +
         `/outreachstatus — Outreach stats\n` +
