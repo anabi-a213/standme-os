@@ -96,7 +96,7 @@ export class LessonsLearnedAgent extends BaseAgent {
     const folderLabel = lessonCategory === 'lessons-won' ? 'Won_Deals' : lessonCategory === 'lessons-lost' ? 'Lost_Deals' : 'Delivery_Issues';
 
     // Log to Drive Index so the team can find it
-    appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
+    await appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
       fileName: `Lessons Learned — ${cardIdOrName}`,
       fileId: doc.id,
       fileUrl: doc.url,

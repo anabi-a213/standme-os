@@ -58,7 +58,7 @@ export class MarketingContentAgent extends BaseAgent {
     const doc = await createGoogleDoc(docName, content, marketingFolderId);
 
     // Log to Drive Index so the team can find it
-    appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
+    await appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
       fileName: docName,
       fileId: doc.id,
       fileUrl: doc.url,

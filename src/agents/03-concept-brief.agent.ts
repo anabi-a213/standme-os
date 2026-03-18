@@ -131,7 +131,7 @@ export class ConceptBriefAgent extends BaseAgent {
     );
 
     // Log to Drive Index so the team can find it
-    appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
+    await appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
       fileName: `Concept Brief — ${companyName} — ${showName}`,
       fileId: doc.id,
       fileUrl: doc.url,

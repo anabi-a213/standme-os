@@ -11,6 +11,7 @@ import { canApprove, getUserRole, UserRole } from './config/access';
 import { handleApproval } from './services/approvals';
 import { initSheets } from './services/google/sheets-init';
 import { loadRuntimeConfig } from './services/runtime-config';
+import { warmGoogleAuth } from './services/google/auth';
 
 // Import all agents
 import { LeadIntakeAgent } from './agents/01-lead-intake.agent';
@@ -51,6 +52,9 @@ async function main() {
       logger.warn(`[Startup] ${key} not set — ${commands} will run in degraded mode`);
     }
   }
+
+  // Pre-warm Google OAuth token so first Sheets/Drive call isn't slow
+  await warmGoogleAuth();
 
   // Auto-check and create any missing Google Sheets tabs
   initSheets().catch(err => logger.warn(`[Sheets Init] Failed: ${err.message}`));
