@@ -1,6 +1,7 @@
 import { google, drive_v3 } from 'googleapis';
 import { getGoogleAuth } from './auth';
 import { retry } from '../../utils/retry';
+import { logger } from '../../utils/logger';
 
 let _drive: drive_v3.Drive | null = null;
 
@@ -18,10 +19,48 @@ export interface DriveFile {
   webViewLink: string;
   parents: string[];
   modifiedTime: string;
-  driveId?: string; // for shared drives
+  driveId?: string;
 }
 
-// ---- List files (personal + all shared drives) ----
+function mapFile(f: drive_v3.Schema$File, fallbackDriveId = ''): DriveFile {
+  return {
+    id: f.id || '',
+    name: f.name || '',
+    mimeType: f.mimeType || '',
+    webViewLink: f.webViewLink || '',
+    parents: (f.parents || []) as string[],
+    modifiedTime: f.modifiedTime || '',
+    driveId: f.driveId || fallbackDriveId,
+  };
+}
+
+const FILE_FIELDS = 'nextPageToken, files(id, name, mimeType, webViewLink, parents, modifiedTime, driveId)';
+
+// ---- Paginated fetch helper ----
+
+async function fetchAllPages(
+  params: drive_v3.Params$Resource$Files$List,
+  fallbackDriveId = ''
+): Promise<DriveFile[]> {
+  const allFiles: DriveFile[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const response = await getDriveClient().files.list({
+      ...params,
+      fields: FILE_FIELDS,
+      pageSize: 1000,
+      pageToken,
+    });
+    const files = response.data.files || [];
+    allFiles.push(...files.map(f => mapFile(f, fallbackDriveId)));
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  return allFiles;
+}
+
+// ---- List ALL personal drive files (paginated, no folder filter) ----
 
 export async function listFiles(folderId?: string, query?: string): Promise<DriveFile[]> {
   return retry(async () => {
@@ -29,62 +68,157 @@ export async function listFiles(folderId?: string, query?: string): Promise<Driv
     if (folderId) q += ` and '${folderId}' in parents`;
     if (query) q += ` and ${query}`;
 
-    const response = await getDriveClient().files.list({
+    return fetchAllPages({
       q,
-      fields: 'files(id, name, mimeType, webViewLink, parents, modifiedTime, driveId)',
-      pageSize: 200,
       includeItemsFromAllDrives: true,
       supportsAllDrives: true,
     });
-
-    return (response.data.files || []).map(f => ({
-      id: f.id || '',
-      name: f.name || '',
-      mimeType: f.mimeType || '',
-      webViewLink: f.webViewLink || '',
-      parents: (f.parents || []) as string[],
-      modifiedTime: f.modifiedTime || '',
-      driveId: f.driveId || '',
-    }));
   }, 'listFiles');
+}
+
+// ---- List ALL files in personal drive (full tree, paginated) ----
+
+export async function listAllPersonalFiles(): Promise<DriveFile[]> {
+  return retry(async () => {
+    return fetchAllPages({
+      q: 'trashed = false',
+      corpora: 'user',
+      includeItemsFromAllDrives: false,
+      supportsAllDrives: true,
+    });
+  }, 'listAllPersonalFiles');
 }
 
 // ---- List all shared drives ----
 
 export async function listSharedDrives(): Promise<{ id: string; name: string }[]> {
-  return retry(async () => {
+  const allDrives: { id: string; name: string }[] = [];
+  let pageToken: string | undefined;
+
+  do {
     const response = await getDriveClient().drives.list({
-      pageSize: 50,
-      fields: 'drives(id, name)',
-    });
-    return (response.data.drives || []).map(d => ({ id: d.id || '', name: d.name || '' }));
-  }, 'listSharedDrives');
+      pageSize: 100,
+      fields: 'nextPageToken, drives(id, name)',
+      pageToken,
+    } as any);
+    const drives = response.data.drives || [];
+    allDrives.push(...drives.map((d: any) => ({ id: d.id || '', name: d.name || '' })));
+    pageToken = (response.data as any).nextPageToken || undefined;
+  } while (pageToken);
+
+  return allDrives;
 }
 
-// ---- List files inside a shared drive ----
+// ---- List ALL files in a shared drive (full tree, paginated) ----
 
 export async function listSharedDriveFiles(driveId: string): Promise<DriveFile[]> {
   return retry(async () => {
-    const response = await getDriveClient().files.list({
-      q: `trashed = false and '${driveId}' in parents`,
-      fields: 'files(id, name, mimeType, webViewLink, parents, modifiedTime, driveId)',
-      pageSize: 200,
+    // corpora: 'drive' + driveId gets EVERYTHING in the shared drive, not just root
+    return fetchAllPages({
+      q: 'trashed = false',
+      corpora: 'drive',
+      driveId,
       includeItemsFromAllDrives: true,
       supportsAllDrives: true,
-      driveId,
-      corpora: 'drive',
+    }, driveId);
+  }, 'listSharedDriveFiles');
+}
+
+// ---- Build complete folder map: id -> { name, parentId } ----
+// Used to resolve full paths like /Projects/Arab Health 2025/Briefs/
+
+export interface FolderNode {
+  name: string;
+  parentId: string | null;
+}
+
+export async function buildFolderMap(): Promise<Map<string, FolderNode>> {
+  const map = new Map<string, FolderNode>();
+
+  try {
+    // Personal drive folders
+    const personalFolders = await fetchAllPages({
+      q: "mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+      corpora: 'user',
+      includeItemsFromAllDrives: false,
+      supportsAllDrives: true,
     });
 
-    return (response.data.files || []).map(f => ({
-      id: f.id || '',
-      name: f.name || '',
-      mimeType: f.mimeType || '',
-      webViewLink: f.webViewLink || '',
-      parents: (f.parents || []) as string[],
-      modifiedTime: f.modifiedTime || '',
-      driveId: f.driveId || driveId,
-    }));
-  }, 'listSharedDriveFiles');
+    for (const f of personalFolders) {
+      map.set(f.id, { name: f.name, parentId: f.parents?.[0] || null });
+    }
+
+    // Shared drive folders
+    const sharedDrives = await listSharedDrives();
+    for (const drive of sharedDrives) {
+      try {
+        const sharedFolders = await fetchAllPages({
+          q: "mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+          corpora: 'drive',
+          driveId: drive.id,
+          includeItemsFromAllDrives: true,
+          supportsAllDrives: true,
+        }, drive.id);
+
+        for (const f of sharedFolders) {
+          map.set(f.id, { name: f.name, parentId: f.parents?.[0] || null });
+        }
+        // Add the shared drive root itself
+        map.set(drive.id, { name: drive.name, parentId: null });
+      } catch (err: any) {
+        logger.warn(`[Drive] Could not index folders in "${drive.name}": ${err.message}`);
+      }
+    }
+  } catch (err: any) {
+    logger.warn(`[Drive] buildFolderMap partial error: ${err.message}`);
+  }
+
+  return map;
+}
+
+// ---- Resolve full folder path using the pre-built map ----
+// Returns something like: /StandMe GmbH/Arab Health 2025/Client Briefs
+
+export function resolveFullPath(parentId: string | undefined, folderMap: Map<string, FolderNode>): string {
+  if (!parentId) return '/';
+  const parts: string[] = [];
+  let currentId: string | null = parentId;
+  let depth = 0;
+
+  while (currentId && depth < 12) {
+    const node = folderMap.get(currentId);
+    if (!node) break;
+    parts.unshift(node.name);
+    currentId = node.parentId;
+    depth++;
+  }
+
+  return parts.length > 0 ? '/' + parts.join('/') : '/';
+}
+
+// ---- Build full folder path for a single file (legacy, one level) ----
+
+export async function getFolderName(folderId: string): Promise<string> {
+  try {
+    const response = await getDriveClient().files.get({
+      fileId: folderId,
+      fields: 'name',
+      supportsAllDrives: true,
+    });
+    return response.data.name || folderId;
+  } catch {
+    return '';
+  }
+}
+
+export async function buildFolderPath(file: DriveFile): Promise<string> {
+  if (!file.parents || file.parents.length === 0) return '/';
+  try {
+    const parentName = await getFolderName(file.parents[0]);
+    return parentName ? `/${parentName}` : '/';
+  } catch {
+    return '/';
+  }
 }
 
 // ---- Read Google Doc content as plain text ----
@@ -133,73 +267,27 @@ export async function readPdfAsText(fileId: string): Promise<string> {
   }, 'readPdfAsText');
 }
 
-// ---- Get folder name by ID ----
+// ---- Read any file content based on type ----
 
-export async function getFolderName(folderId: string): Promise<string> {
-  try {
-    const response = await getDriveClient().files.get({
-      fileId: folderId,
-      fields: 'name',
-      supportsAllDrives: true,
-    });
-    return response.data.name || folderId;
-  } catch {
-    return '';
-  }
-}
-
-// ---- Build full folder path for a file ----
-
-export async function buildFolderPath(file: DriveFile): Promise<string> {
-  if (!file.parents || file.parents.length === 0) return '/';
-  try {
-    const parentName = await getFolderName(file.parents[0]);
-    return parentName ? `/${parentName}` : '/';
-  } catch {
-    return '/';
-  }
+export async function readFileContent(file: DriveFile): Promise<string> {
+  const mime = file.mimeType;
+  if (mime === 'application/vnd.google-apps.document') return readDocContent(file.id);
+  if (mime === 'application/vnd.google-apps.spreadsheet') return readSheetAsText(file.id);
+  if (mime === 'application/pdf') return readPdfAsText(file.id);
+  return '';
 }
 
 // ---- Search Drive (personal + shared) ----
 
 export async function searchFiles(query: string): Promise<DriveFile[]> {
   return retry(async () => {
-    const response = await getDriveClient().files.list({
+    return fetchAllPages({
       q: `name contains '${query.replace(/'/g, "\\'")}' and trashed = false`,
-      fields: 'files(id, name, mimeType, webViewLink, parents, modifiedTime, driveId)',
       pageSize: 20,
       includeItemsFromAllDrives: true,
       supportsAllDrives: true,
-    });
-
-    return (response.data.files || []).map(f => ({
-      id: f.id || '',
-      name: f.name || '',
-      mimeType: f.mimeType || '',
-      webViewLink: f.webViewLink || '',
-      parents: (f.parents || []) as string[],
-      modifiedTime: f.modifiedTime || '',
-      driveId: f.driveId || '',
-    }));
+    } as any);
   }, 'searchFiles');
-}
-
-// ---- Read any file content based on type ----
-
-export async function readFileContent(file: DriveFile): Promise<string> {
-  const mime = file.mimeType;
-
-  if (mime === 'application/vnd.google-apps.document') {
-    return readDocContent(file.id);
-  }
-  if (mime === 'application/vnd.google-apps.spreadsheet') {
-    return readSheetAsText(file.id);
-  }
-  if (mime === 'application/pdf') {
-    return readPdfAsText(file.id);
-  }
-  // Folder or unsupported
-  return '';
 }
 
 // ---- Create folder ----

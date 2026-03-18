@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, readSheet, objectToRow } from '../services/google/sheets';
-import { listFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderPath, searchFiles, DriveFile } from '../services/google/drive';
+import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { saveKnowledge, searchKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
@@ -27,17 +27,22 @@ export class DriveIndexerAgent extends BaseAgent {
   }
 
   private async indexDrive(ctx: AgentContext): Promise<AgentResponse> {
-    await this.respond(ctx.chatId, '🔍 Indexing all drives (personal + shared) and building knowledge base...');
+    await this.respond(ctx.chatId, '🔍 Building full folder tree and indexing all drives (personal + shared)...');
 
     try {
+      // 1. Build complete folder map first (one pass, used for all path resolution)
+      await this.respond(ctx.chatId, '📂 Mapping folder structure...');
+      const folderMap = await buildFolderMap();
+      logger.info(`[Drive] Folder map built: ${folderMap.size} folders`);
+
       const allFiles: DriveFile[] = [];
 
-      // 1. Personal Drive
-      const personalFiles = await listFiles();
+      // 2. Personal Drive — all files, paginated
+      const personalFiles = await listAllPersonalFiles();
       allFiles.push(...personalFiles);
       logger.info(`[Drive] Personal drive: ${personalFiles.length} files`);
 
-      // 2. Shared Drives
+      // 3. Shared Drives — all files in each, paginated
       const sharedDrives = await listSharedDrives();
       for (const drive of sharedDrives) {
         try {
@@ -49,9 +54,12 @@ export class DriveIndexerAgent extends BaseAgent {
         }
       }
 
-      await this.respond(ctx.chatId, `Found ${allFiles.length} files across ${1 + sharedDrives.length} drives. Reading and learning...`);
+      // Skip folders — only index actual files
+      const actualFiles = allFiles.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
 
-      // 3. Read existing leads for project matching
+      await this.respond(ctx.chatId, `Found ${actualFiles.length} files across ${1 + sharedDrives.length} drives. Reading and learning...`);
+
+      // 4. Read existing leads for project matching
       const leads = await readSheet(SHEETS.LEAD_MASTER);
       const companyNames = leads.slice(1).map(r => (r[2] || '').toLowerCase()).filter(Boolean);
 
@@ -59,11 +67,12 @@ export class DriveIndexerAgent extends BaseAgent {
       let withContent = 0;
       let knowledgeSaved = 0;
 
-      for (const file of allFiles) {
+      for (const file of actualFiles) {
         try {
           const category = this.categorizeFile(file);
           const linkedProject = this.matchToProject(file, companyNames);
-          const folderPath = await buildFolderPath(file);
+          // Resolve full path using pre-built folder map (no API calls per file)
+          const folderPath = resolveFullPath(file.parents?.[0], folderMap);
 
           // Read content for docs, sheets, PDFs
           let contentSummary = '';
@@ -121,7 +130,7 @@ export class DriveIndexerAgent extends BaseAgent {
         }
       }
 
-      const summary = `✅ Indexed ${indexed} files (${withContent} with content, ${knowledgeSaved} knowledge entries saved) across ${1 + sharedDrives.length} drives`;
+      const summary = `✅ Indexed ${indexed}/${actualFiles.length} files (${withContent} with content, ${knowledgeSaved} knowledge entries) across ${1 + sharedDrives.length} drives. Folder tree: ${folderMap.size} folders mapped.`;
       await sendToMo(formatType2('Drive Index Complete', summary));
       await this.respond(ctx.chatId, summary);
 

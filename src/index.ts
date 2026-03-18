@@ -8,6 +8,7 @@ import { logger } from './utils/logger';
 import { writeSystemLog } from './utils/system-log';
 import { canApprove, getUserRole, UserRole } from './config/access';
 import { handleApproval } from './services/approvals';
+import { initSheets } from './services/google/sheets-init';
 
 // Import all agents
 import { LeadIntakeAgent } from './agents/01-lead-intake.agent';
@@ -31,6 +32,9 @@ async function main() {
   logger.info('========================================');
   logger.info('  StandMe OS — Starting...');
   logger.info('========================================');
+
+  // Auto-check and create any missing Google Sheets tabs
+  initSheets().catch(err => logger.warn(`[Sheets Init] Failed: ${err.message}`));
 
   // Register all agents
   const agents = [
