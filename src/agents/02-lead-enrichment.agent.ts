@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
+import { readSheet, updateCell, appendRow, objectToRow, sheetUrl } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
@@ -110,8 +110,9 @@ export class LeadEnrichmentAgent extends BaseAgent {
     }
 
     const summary = `Enrichment complete: ${enriched}/${leadsToEnrich.length} leads processed.`;
-    await this.respond(ctx.chatId, `✅ ${summary}`);
-    await sendToMo(formatType2('Lead Enrichment Run', summary));
+    const leadSheetLink = sheetUrl(SHEETS.LEAD_MASTER);
+    await this.respond(ctx.chatId, `✅ ${summary}${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
+    await sendToMo(formatType2('Lead Enrichment Run', `${summary}${leadSheetLink ? `\n📊 [Lead Master](${leadSheetLink})` : ''}`));
 
     return { success: true, message: summary, confidence: 'MEDIUM' };
   }

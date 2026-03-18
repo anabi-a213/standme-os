@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { appendRow, objectToRow } from '../services/google/sheets';
+import { appendRow, objectToRow, sheetUrl } from '../services/google/sheets';
 import { getCard } from '../services/trello/client';
 import { createGoogleDoc } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
@@ -150,7 +150,8 @@ export class LessonsLearnedAgent extends BaseAgent {
       date: new Date().toISOString().split('T')[0],
     }));
 
-    await this.respond(ctx.chatId, '✅ Lesson noted and logged.');
+    const lessonsSheetLink = sheetUrl(SHEETS.LESSONS_LEARNED);
+    await this.respond(ctx.chatId, `✅ Lesson noted and logged.${lessonsSheetLink ? `\n📊 [View Lessons Learned](${lessonsSheetLink})` : ''}`);
     return { success: true, message: 'Manual lesson added', confidence: 'HIGH' };
   }
 }

@@ -4,7 +4,7 @@ import { Lead, LeadScoreResult, ScoreBreakdown } from '../types/lead';
 import { UserRole } from '../config/access';
 import { validateShow } from '../config/shows';
 import { SHEETS } from '../config/sheets';
-import { appendRow, readSheet, rowToObject, objectToRow } from '../services/google/sheets';
+import { appendRow, readSheet, rowToObject, objectToRow, sheetUrl } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { detectLanguage } from '../services/ai/client';
@@ -155,7 +155,8 @@ export class LeadIntakeAgent extends BaseAgent {
       await sendToMo(formatType2('New Lead Logged', message));
     }
 
-    await this.respond(ctx.chatId, `✅ Lead captured: ${companyName} — ${scoreResult.status} (${scoreResult.total}/10)`);
+    const leadSheetLink = sheetUrl(SHEETS.LEAD_MASTER);
+    await this.respond(ctx.chatId, `✅ Lead captured: ${companyName} — ${scoreResult.status} (${scoreResult.total}/10)${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
 
     return {
       success: true,

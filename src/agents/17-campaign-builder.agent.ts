@@ -20,7 +20,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, appendRow, updateCell, objectToRow } from '../services/google/sheets';
+import { readSheet, appendRow, updateCell, objectToRow, sheetUrl } from '../services/google/sheets';
 import {
   listCampaigns, createCampaign, getCampaignDetails, getCampaignStats,
   getProspectsByCampaign, addProspectToCampaign, WoodpeckerProspect,
@@ -357,7 +357,8 @@ export class CampaignBuilderAgent extends BaseAgent {
             logger.warn(`[CampaignBuilder] Push failed for ${draft.target.companyName}: ${err.message}`);
           }
         }
-        return `Campaign *${showName}* launched. ${pushed}/${emailDrafts.length} prospects in Woodpecker campaign ${campaignId}. Reply monitoring active every 2h.`;
+        const salesSheetLink = sheetUrl(SHEETS.CAMPAIGN_SALES);
+        return `Campaign *${showName}* launched. ${pushed}/${emailDrafts.length} prospects in Woodpecker campaign ${campaignId}. Reply monitoring active every 2h.${salesSheetLink ? `\n📊 [View Campaign Sales](${salesSheetLink})` : ''}`;
       },
       onReject: async () => `Campaign *${showName}* cancelled.`,
     });

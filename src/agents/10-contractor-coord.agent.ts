@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, appendRow, findRowByValue, objectToRow } from '../services/google/sheets';
+import { readSheet, appendRow, findRowByValue, objectToRow, sheetUrl } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
 
@@ -53,7 +53,8 @@ export class ContractorCoordAgent extends BaseAgent {
       notes: '',
     }));
 
-    await this.respond(ctx.chatId, `✅ Contractor added: ${name} (${company}) — ${specialty}`);
+    const contractorSheetLink = sheetUrl(SHEETS.CONTRACTOR_DB);
+    await this.respond(ctx.chatId, `✅ Contractor added: ${name} (${company}) — ${specialty}${contractorSheetLink ? `\n📊 [View Contractor DB](${contractorSheetLink})` : ''}`);
     return { success: true, message: `Contractor ${name} added`, confidence: 'HIGH' };
   }
 

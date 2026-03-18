@@ -100,3 +100,9 @@ export function objectToRow(config: SheetConfig, obj: Record<string, string>): s
   }
   return row;
 }
+
+// Returns a clickable Google Sheets URL for the given sheet config
+export function sheetUrl(config: SheetConfig): string {
+  const id = process.env[config.envKey] || '';
+  return id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : '';
+}
