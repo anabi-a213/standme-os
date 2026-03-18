@@ -88,6 +88,52 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
   }, 'sendEmail');
 }
 
+export async function searchEmailsByQuery(query: string, maxResults = 20): Promise<EmailMessage[]> {
+  return retry(async () => {
+    const response = await getGmailClient().users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults,
+    });
+
+    if (!response.data.messages) return [];
+
+    const emails: EmailMessage[] = [];
+    for (const msg of response.data.messages) {
+      const full = await getGmailClient().users.messages.get({
+        userId: 'me',
+        id: msg.id!,
+        format: 'full',
+      });
+
+      const headers = full.data.payload?.headers || [];
+      const getHeader = (name: string) => headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+      let body = '';
+      if (full.data.payload?.body?.data) {
+        body = Buffer.from(full.data.payload.body.data, 'base64').toString('utf-8');
+      } else if (full.data.payload?.parts) {
+        const textPart = full.data.payload.parts.find(p => p.mimeType === 'text/plain');
+        if (textPart?.body?.data) {
+          body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+        }
+      }
+
+      emails.push({
+        id: msg.id!,
+        threadId: msg.threadId || '',
+        from: getHeader('From'),
+        to: getHeader('To'),
+        subject: getHeader('Subject'),
+        body,
+        date: getHeader('Date'),
+        labels: full.data.labelIds || [],
+      });
+    }
+    return emails;
+  }, 'searchEmailsByQuery');
+}
+
 export async function createDraft(to: string, subject: string, body: string): Promise<string> {
   return retry(async () => {
     const fromEmail = process.env.SEND_FROM_EMAIL || 'info@standme.de';

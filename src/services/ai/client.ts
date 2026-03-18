@@ -174,6 +174,195 @@ BODY:
   };
 }
 
+export async function analyzeShow(showName: string, driveContent: string, knowledgeContext: string): Promise<{
+  summary: string;
+  industries: string[];
+  targetProfile: string;
+  painPoints: string;
+  standMeAngle: string;
+}> {
+  const prompt = `You are analysing a trade show to build a targeted email campaign for StandMe (exhibition stand design and build, MENA + Europe).
+
+SHOW: ${showName}
+
+KNOWLEDGE BASE CONTEXT:
+${knowledgeContext || 'No existing knowledge found.'}
+
+DRIVE FILES CONTENT:
+${driveContent || 'No Drive files found for this show.'}
+
+Based on all available information, provide a strategic show analysis in this exact JSON format:
+{
+  "summary": "2-3 sentence overview of the show: what it is, who attends, why companies exhibit here",
+  "industries": ["industry1", "industry2", "industry3"],
+  "targetProfile": "Description of the ideal exhibitor company profile we should target: size, type, what they care about at this show",
+  "painPoints": "Key pain points exhibitors face at this show: stand design pressure, last minute changes, quality issues, cost overruns, local supplier problems",
+  "standMeAngle": "The most compelling angle for StandMe's outreach at this specific show: what unique value do we offer that resonates with exhibitors here"
+}
+
+Return ONLY valid JSON. No other text.`;
+
+  const result = await generateText(prompt, 'You are a senior business analyst specialising in the exhibition industry. You return only valid JSON.', 600);
+
+  try {
+    return JSON.parse(result);
+  } catch {
+    return {
+      summary: `${showName} is a major trade show.`,
+      industries: ['General'],
+      targetProfile: 'Mid-to-large companies exhibiting with custom stands',
+      painPoints: 'Stand design, build quality, local logistics, cost management',
+      standMeAngle: 'Custom stand design and build with proven MENA and European delivery',
+    };
+  }
+}
+
+export async function generateCampaignEmail(context: {
+  companyName: string;
+  contactName: string;
+  showName: string;
+  showSummary: string;
+  standMeAngle: string;
+  painPoints: string;
+  companyContext: string;
+  industry: string;
+  emailNumber: number;
+}): Promise<{ subject: string; body: string }> {
+
+  const hooks: Record<number, string> = {
+    1: `First email. Open with something specific about ${context.showName} and what companies like ${context.companyName} typically face there. One sharp observation grounded in the show intelligence. One clear StandMe value. One easy CTA.`,
+    2: `Follow-up after no reply. Completely different angle. Lead with a show-specific insight or a specific result from a past project at a similar show. Not "just following up."`,
+    3: `Final touch. Short. Human. Reference the show date as a reason to act now. Easy yes or no.`,
+  };
+
+  const prompt = `Write a cold outreach email for StandMe targeting a company exhibiting at ${context.showName}.
+
+ABOUT STANDME: Custom exhibition stand design and build. MENA and Europe. We know what works on the show floor — creative, fast, built for results.
+
+SHOW INTELLIGENCE:
+${context.showSummary}
+
+OUR ANGLE FOR THIS SHOW:
+${context.standMeAngle}
+
+EXHIBITOR PAIN POINTS AT THIS SHOW:
+${context.painPoints}
+
+TARGET COMPANY:
+Company: ${context.companyName}
+Contact: ${context.contactName}
+Industry: ${context.industry}
+${context.companyContext ? `Known context:\n${context.companyContext}` : ''}
+
+EMAIL STRATEGY: ${hooks[context.emailNumber] || hooks[1]}
+
+RULES (non-negotiable):
+- Never use: "I hope this email finds you well", "I wanted to reach out", "touching base", "synergy", "leverage"
+- Never use em dashes
+- Subject: specific to this company and show. Not generic. Something they will open.
+- Body: maximum 5 lines. Grounded in the show intelligence above. One CTA.
+- Tone: direct, warm, expert. Like a smart colleague who knows the show.
+- Sign off as: Mo / StandMe
+
+Return in this exact format:
+SUBJECT: [subject line]
+BODY:
+[email body]`;
+
+  const result = await generateText(
+    prompt,
+    'You write cold emails that get replies. You know the exhibition industry deeply. Your emails are specific, human, and worth reading. No em dashes. No fluff.',
+    600
+  );
+
+  const subjectMatch = result.match(/SUBJECT:\s*(.+)/);
+  const bodyMatch = result.match(/BODY:\s*([\s\S]+)/);
+
+  return {
+    subject: subjectMatch?.[1]?.trim() || `Your stand at ${context.showName}`,
+    body: bodyMatch?.[1]?.trim() || result,
+  };
+}
+
+export async function generateSalesReply(context: {
+  companyName: string;
+  contactName: string;
+  showName: string;
+  prospectMessage: string;
+  conversationHistory: string;
+  collectedInfo: Record<string, string>;
+  missingInfo: string[];
+}): Promise<{ reply: string; classification: string; extractedInfo: Record<string, string> }> {
+
+  const missingList = context.missingInfo.length > 0
+    ? `\nWe still need from them: ${context.missingInfo.join(', ')}`
+    : '\nWe have all key information.';
+
+  const prompt = `You are Mo from StandMe handling a sales reply. Your job: keep the conversation moving toward a signed deal.
+
+COMPANY: ${context.companyName} (${context.contactName})
+SHOW: ${context.showName}
+
+CONVERSATION HISTORY:
+${context.conversationHistory || 'This is the first reply.'}
+
+THEIR LATEST MESSAGE:
+${context.prospectMessage}
+
+INFORMATION COLLECTED SO FAR:
+${Object.entries(context.collectedInfo).map(([k, v]) => `${k}: ${v}`).join('\n') || 'None yet'}
+${missingList}
+
+YOUR TASK:
+1. Classify this reply: INTERESTED | QUESTION | NOT_INTERESTED | MORE_INFO_NEEDED | READY_TO_CLOSE
+2. Extract any new info from their message (stand size, budget, dates, contact details, requirements)
+3. Write a reply that:
+   - Answers their question OR acknowledges their interest
+   - Naturally asks for the MOST IMPORTANT missing piece of information (one at a time)
+   - Moves the conversation toward booking a call or sending a brief
+   - Stays short (3-5 lines), warm, and human
+
+Return ONLY this JSON:
+{
+  "classification": "INTERESTED|QUESTION|NOT_INTERESTED|MORE_INFO_NEEDED|READY_TO_CLOSE",
+  "extractedInfo": { "standSize": "...", "budget": "...", "showDates": "...", "phone": "..." },
+  "reply": "The full reply email text, signed Mo / StandMe"
+}`;
+
+  const result = await generateText(
+    prompt,
+    'You are Mo from StandMe — direct, warm, expert in exhibition stands. You write short sales emails that move deals forward. Return only valid JSON.',
+    700
+  );
+
+  try {
+    return JSON.parse(result);
+  } catch {
+    return {
+      classification: 'QUESTION',
+      extractedInfo: {},
+      reply: `Thanks for getting back to me.\n\nHappy to help with your stand at ${context.showName}. To put together the right proposal, could you share the stand size you're working with?\n\nBest,\nMo / StandMe`,
+    };
+  }
+}
+
+export async function extractCompaniesFromText(text: string, showName: string): Promise<string[]> {
+  const prompt = `Extract a list of company names from this text. These are exhibitors or potential exhibitors at ${showName}.
+
+TEXT:
+${text.slice(0, 5000)}
+
+Return ONLY a JSON array of company name strings. No duplicates. No explanations. Example: ["Company A", "Company B"]`;
+
+  const result = await generateText(prompt, 'You extract company names from text. Return only a JSON array of strings.', 400);
+
+  try {
+    const parsed = JSON.parse(result);
+    if (Array.isArray(parsed)) return parsed.filter(c => typeof c === 'string' && c.length > 1);
+  } catch { /* ignore */ }
+  return [];
+}
+
 export async function generateMarketingContent(type: string, topic: string, context?: string): Promise<string> {
 
   const typeInstructions: Record<string, string> = {

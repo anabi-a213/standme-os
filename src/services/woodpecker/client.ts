@@ -135,3 +135,38 @@ export async function stopProspect(prospectId: number): Promise<void> {
     });
   }, 'stopProspect');
 }
+
+// ---- Create a new campaign ----
+
+export async function createCampaign(name: string, fromName: string, fromEmail: string): Promise<number> {
+  return retry(async () => {
+    const resp = await getWoodpeckerClient().post('/campaigns', {
+      name,
+      from_name: fromName,
+      from_email: fromEmail,
+      status: 'PAUSED', // start paused so Mo can review before activating
+    });
+    const id = resp.data?.id ?? resp.data?.campaign?.id;
+    if (!id) throw new Error('Woodpecker did not return a campaign ID');
+    return Number(id);
+  }, 'createCampaign');
+}
+
+// ---- Get all prospects in a campaign, optionally filtered by status ----
+
+export async function getProspectsByCampaign(
+  campaignId: number,
+  status?: string
+): Promise<WoodpeckerProspect[]> {
+  return retry(async () => {
+    const params: Record<string, string | number> = { campaign_id: campaignId };
+    if (status) params.status = status;
+
+    const resp = await getWoodpeckerClient().get('/prospects_list', { params });
+    const data = resp.data;
+    if (Array.isArray(data)) return data;
+    // Woodpecker sometimes returns { prospects: [...] }
+    if (Array.isArray(data?.prospects)) return data.prospects;
+    return [];
+  }, 'getProspectsByCampaign');
+}

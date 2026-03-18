@@ -27,6 +27,7 @@ import { DriveIndexerAgent } from './agents/14-drive-indexer.agent';
 import { MarketingContentAgent } from './agents/15-marketing-content.agent';
 import { CardManagerAgent } from './agents/08-card-manager.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
+import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
 
 
 async function main() {
@@ -52,6 +53,7 @@ async function main() {
     new LessonsLearnedAgent(),
     new DealAnalyserAgent(),
     new OutreachAgent(),
+    new CampaignBuilderAgent(),
     new DriveIndexerAgent(),
     new MarketingContentAgent(),
     new CrossBoardAgent(),
@@ -90,6 +92,9 @@ async function main() {
         `/techdeadlines — Technical deadlines\n` +
         `/outreach — Run outreach\n` +
         `/outreachstatus — Outreach stats\n` +
+        `/newcampaign [show] — Build full show campaign\n` +
+        `/salesreplies — Handle campaign replies (sales loop)\n` +
+        `/campaignstatus [show] — Campaign pipeline status\n` +
         `/contractors — List contractors\n` +
         `/addcontractor — Add contractor\n` +
         `/bookcontractor — Book contractor\n` +
@@ -111,7 +116,7 @@ async function main() {
     if (text === '/help') {
       await bot.sendMessage(msg.chat.id,
         `*StandMe OS Help*\n\n` +
-        `16 agents running. All actions require Mo's approval.\n` +
+        `17 agents running. All actions require Mo's approval.\n` +
         `Type any command or ask a question with /ask.\n\n` +
         `Your role: ${ctx.role}`,
         { parse_mode: 'Markdown' }

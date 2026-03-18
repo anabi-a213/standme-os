@@ -199,4 +199,31 @@ export const SHEETS: Record<string, SheetConfig> = {
     },
     headerRow: 1,
   },
+
+  CAMPAIGN_SALES: {
+    envKey: 'SHEET_CAMPAIGN_SALES',
+    tabName: 'CampaignSales',
+    columns: {
+      id: 'A',               // CS-timestamp
+      campaignId: 'B',       // Woodpecker campaign ID
+      showName: 'C',
+      companyName: 'D',
+      contactName: 'E',
+      contactEmail: 'F',
+      woodpeckerId: 'G',     // Woodpecker prospect ID
+      status: 'H',           // SENT | OPENED | REPLIED | INTERESTED | NOT_INTERESTED | QUALIFIED | LOST
+      classification: 'I',   // AI classification of last reply
+      standSize: 'J',        // collected during sales loop
+      budget: 'K',
+      showDates: 'L',
+      phone: 'M',
+      requirements: 'N',
+      conversationLog: 'O',  // JSON-encoded array of {role, message, date}
+      lastReplyDate: 'P',
+      lastActionDate: 'Q',
+      leadMasterId: 'R',     // set when converted to Lead Master
+      notes: 'S',
+    },
+    headerRow: 1,
+  },
 };
