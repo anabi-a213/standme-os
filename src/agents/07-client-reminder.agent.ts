@@ -52,11 +52,26 @@ export class ClientReminderAgent extends BaseAgent {
     }
 
     for (const reminder of reminders.slice(0, 5)) { // Cap at 5
+      const stageContext: Record<string, string> = {
+        'Proposal Sent': 'We sent them a proposal. They have not replied. The question is whether they have questions, want to negotiate, or went quiet.',
+        'Design/Brief': 'We are waiting for their feedback on a concept brief or design direction. Every day of silence costs us revision time.',
+      };
+
       const followUpDraft = await generateText(
-        `Draft a follow-up message for a client "${reminder.card.name}" who hasn't replied in ${reminder.daysSince} days. ` +
-        `Stage: ${reminder.stage}. Exhibition stand context. ` +
-        `Rules: NO "just checking in", NO "hope this finds you well", max 4 lines, direct and helpful.`,
-        'Write concise follow-up emails. Professional, never desperate.',
+        `Write a follow-up email for an exhibition stand client.\n\n` +
+        `Client / Project: ${reminder.card.name}\n` +
+        `Silence: ${reminder.daysSince} days\n` +
+        `Stage: ${reminder.stage}\n` +
+        `Context: ${stageContext[reminder.stage] || 'Active project, no response for several days.'}\n\n` +
+        `The email should:\n` +
+        `- Open with something useful or specific, not a check-in\n` +
+        `- Show we are on top of it and ready to move\n` +
+        `- Make it easy for them to reply (one clear question or CTA)\n` +
+        `- Feel like it comes from a human who actually cares about their project\n` +
+        `- Max 4 lines\n` +
+        `- Sign off as: Mo / StandMe\n\n` +
+        `NEVER write: "just checking in", "I hope this finds you well", "I wanted to follow up", "as per my last email", em dashes.`,
+        'You write follow-up emails for an exhibition stand company. Your tone is warm, direct, and professional. You know the pressure clients are under before a show. You write emails that get read and replied to.',
         300
       );
 

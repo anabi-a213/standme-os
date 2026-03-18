@@ -41,14 +41,31 @@ export class LessonsLearnedAgent extends BaseAgent {
 
     // Generate 8-section report
     const report = await generateText(
-      `Generate a Lessons Learned report for this exhibition stand project:\n\n${cardData}\n\n` +
-      `Write 8 sections (be specific, no filler):\n` +
-      `1. Project Overview\n2. What Went Well\n3. What Went Wrong\n` +
-      `4. Cost vs Budget\n5. Client Feedback\n6. Competitor Intel\n` +
-      `7. Timeline Performance\n8. What to Do Differently\n\n` +
-      `If information is missing, note what should be filled in manually.`,
-      'You are a project manager writing post-project reviews. Be honest and specific.',
-      2000
+      `Write a Lessons Learned report for this exhibition stand project.\n\n` +
+      `PROJECT DATA:\n${cardData}\n\n` +
+      `This document will be read by the StandMe team before the next similar project. It should be honest, specific, and immediately useful. Write it like a debrief from someone who was actually on the floor.\n\n` +
+      `Structure:\n\n` +
+      `# Lessons Learned: [Project Name]\n\n` +
+      `## 1. Project Snapshot\n` +
+      `What was this project? Show, client, stand size, key objectives. 3-4 sentences.\n\n` +
+      `## 2. What Worked Well\n` +
+      `Be specific. Not "good communication" but what exactly went right and why. What would you replicate next time without thinking twice?\n\n` +
+      `## 3. What Did Not Work\n` +
+      `Honest. Not defensive. What created problems, delays, or cost overruns? What decision in hindsight was wrong?\n\n` +
+      `## 4. Cost vs Budget Reality\n` +
+      `Where did the money actually go? Any surprises? What did we underestimate?\n\n` +
+      `## 5. Client Experience\n` +
+      `How did the client feel at different stages? At handover? On show day? What do they say when they refer us?\n\n` +
+      `## 6. Competitor Intelligence\n` +
+      `What other stands were on the floor? What were they doing? What did we learn about how our competitors approach this show?\n\n` +
+      `## 7. Timeline Performance\n` +
+      `Were we on time? Where did delays come from? What would a tighter timeline need to look like?\n\n` +
+      `## 8. What to Do Differently\n` +
+      `Three specific changes for next time. Actionable, not vague.\n\n` +
+      `If information is unavailable, write: [To be filled in by team] and note what question needs answering.\n\n` +
+      `Write with honesty and precision. No filler. No corporate language. No em dashes.`,
+      'You are a senior project director at an exhibition stand company. You have built stands across MENA and Europe. Your post-project reviews are blunt, specific, and genuinely useful to the next team who reads them.',
+      2500
     );
 
     // Create Google Doc

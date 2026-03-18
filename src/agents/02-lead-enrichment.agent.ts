@@ -44,11 +44,15 @@ export class LeadEnrichmentAgent extends BaseAgent {
       try {
         // Use AI to suggest DM search strategy
         const enrichmentResult = await generateText(
-          `For the company "${companyName}" in the ${industry || 'general'} industry, ` +
-          `who would typically be the decision maker for exhibition stand bookings? ` +
-          `Suggest likely titles and where to find them. Be specific.`,
-          'You are a B2B sales research assistant.',
-          300
+          `Company: "${companyName}" | Industry: ${industry || 'unknown'}\n\n` +
+          `This company likely exhibits at trade shows. Who signs off on exhibition stand budgets?\n\n` +
+          `Give me:\n` +
+          `1. Most likely decision-maker title (specific to this industry, not generic)\n` +
+          `2. Where to find them: LinkedIn search terms or company website path\n` +
+          `3. One conversation opener that would land with this person\n\n` +
+          `Be sharp. Skip anything generic.`,
+          'You are a senior B2B sales researcher who specialises in the exhibition industry across MENA and Europe. You know exactly who holds the budget for trade show stands. Your intel is specific, not generic.',
+          350
         );
 
         // Calculate outreach readiness

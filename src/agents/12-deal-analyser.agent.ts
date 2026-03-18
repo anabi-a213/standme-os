@@ -66,16 +66,21 @@ export class DealAnalyserAgent extends BaseAgent {
     ];
 
     // AI insight
+    const wonDeals = [...showCounts.values()].reduce((sum, v) => sum + v.won, 0);
+    const lostDeals = [...showCounts.values()].reduce((sum, v) => sum + v.lost, 0);
+
     const insight = await generateText(
-      `Based on this data, provide ONE key actionable insight:\n` +
-      `Shows: ${JSON.stringify(Object.fromEntries(showCounts))}\n` +
+      `StandMe pipeline data for this week:\n\n` +
+      `Shows breakdown: ${JSON.stringify(Object.fromEntries(showCounts))}\n` +
       `Industries: ${JSON.stringify(Object.fromEntries(industryCounts))}\n` +
-      `Sources: ${JSON.stringify(Object.fromEntries(sourceCounts))}\n` +
-      `Total lessons learned: ${lessons.length - 1}`,
-      'You are a sales analytics expert. One concise insight only.',
-      200
+      `Lead sources: ${JSON.stringify(Object.fromEntries(sourceCounts))}\n` +
+      `Won: ${wonDeals} | Lost: ${lostDeals} | Lessons logged: ${lessons.length - 1}\n\n` +
+      `Write ONE sharp insight that Mo should act on this week. Not a summary of the data. An actual recommendation based on what the numbers suggest. Where should the team focus? What pattern is emerging? What is being left on the table?\n\n` +
+      `2-3 sentences max. Direct. No em dashes. No filler.`,
+      'You are a sharp sales strategist who knows the exhibition industry. You read data and tell people what it actually means for the business, not what the numbers say on the surface.',
+      250
     );
-    sections.push({ label: 'KEY INSIGHT', content: `  ${insight}` });
+    sections.push({ label: 'THIS WEEK: ACT ON THIS', content: `  ${insight}` });
 
     const summary = formatType3('DEAL ANALYSIS', sections);
     await sendToMo(summary);
