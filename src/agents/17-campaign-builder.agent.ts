@@ -24,7 +24,7 @@ import { readSheet, appendRow, updateCell, objectToRow, sheetUrl } from '../serv
 import { createCard, findListByName } from '../services/trello/client';
 import {
   listCampaigns, getCampaignDetails, getCampaignStats,
-  getProspectsByCampaign, addProspectToCampaign, WoodpeckerProspect,
+  getProspectsByCampaign, addProspectToCampaign, addProspectsToCampaign, WoodpeckerProspect,
 } from '../services/woodpecker/client';
 import {
   analyzeShow, generateCampaignEmail, generateSalesReply, extractCompaniesFromText, generateText,
@@ -369,13 +369,25 @@ export class CampaignBuilderAgent extends BaseAgent {
     let addedCampaign = 0;
     const now         = new Date().toISOString();
 
+    // Pre-build enriched entries (industry hook lookup per unique industry)
+    type EnrichedEntry = {
+      exhibitor: ExhibitorRecord;
+      contact: { name: string; firstName: string; lastName: string; title: string; email: string; emailStatus: string; linkedinUrl: string };
+      industry: string;
+      snippet1: string;
+      leadId: string;
+    };
+    const entries: EnrichedEntry[] = [];
     for (const { exhibitor, contact } of verified) {
-      try {
-        const industry = exhibitor.industry || showAnalysis.industries[0] || 'Trade Show';
-        const snippet1 = await getIndustryHook(industry);
-        const leadId   = `SM-${Date.now()}-D`; // D = discovery origin
+      const industry = exhibitor.industry || showAnalysis.industries[0] || 'Trade Show';
+      const snippet1 = await getIndustryHook(industry);
+      const leadId   = `SM-${Date.now()}-${Math.random().toString(36).slice(2, 5)}-D`;
+      entries.push({ exhibitor, contact, industry, snippet1, leadId });
+    }
 
-        // LEAD_MASTER row
+    // Write LEAD_MASTER rows
+    for (const { exhibitor, contact, industry, snippet1, leadId } of entries) {
+      try {
         await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
           id:               leadId,
           timestamp:        now,
@@ -403,28 +415,45 @@ export class CampaignBuilderAgent extends BaseAgent {
           language:         (exhibitor.country || '').toLowerCase().includes('arab') ? 'ar' : 'en',
           notes:            [
             `Source: ${files.map(f => f.name).join(', ')}`,
-            exhibitor.country    ? `Country: ${exhibitor.country}`      : '',
-            exhibitor.website    ? `Website: ${exhibitor.website}`      : '',
+            exhibitor.country     ? `Country: ${exhibitor.country}`     : '',
+            exhibitor.website     ? `Website: ${exhibitor.website}`     : '',
             exhibitor.boothNumber ? `Booth: ${exhibitor.boothNumber}`   : '',
             `Email status: ${contact.emailStatus}`,
           ].filter(Boolean).join(' | '),
         }));
         addedMaster++;
+      } catch (err: any) {
+        logger.warn(`[CampaignBuilder/discover] LEAD_MASTER failed for ${exhibitor.companyName}: ${err.message}`);
+      }
+    }
 
-        // Woodpecker prospect
-        const wpId = await addProspectToCampaign(campaignId, {
-          email:      contact.email,
-          first_name: contact.firstName,
-          last_name:  contact.lastName,
-          company:    exhibitor.companyName,
-          industry,
-          snippet1,                                   // industry hook for email opening
-          snippet2:   contact.title,                  // DM title (personalisation)
-          snippet3:   exhibitor.website || exhibitor.country || '', // context field
-          tags:       `standme,${showName.toLowerCase().replace(/\s+/g, '-')},discovery`,
-        });
+    // Batch-send all Woodpecker prospects in one pass (100 per request)
+    const showTag = showName.toLowerCase().replace(/\s+/g, '-');
+    const wpProspects: WoodpeckerProspect[] = entries.map(({ exhibitor, contact, industry, snippet1 }) => ({
+      email:      contact.email,
+      first_name: contact.firstName,
+      last_name:  contact.lastName,
+      company:    exhibitor.companyName,
+      industry,
+      snippet1,
+      snippet2:   contact.title,
+      snippet3:   exhibitor.website || exhibitor.country || '',
+      tags:       `standme,${showTag},discovery`,
+    }));
 
-        // CAMPAIGN_SALES row — links everything together (skip if sheet not configured)
+    let wpIds: (number | null)[] = [];
+    try {
+      wpIds = await addProspectsToCampaign(campaignId, wpProspects);
+    } catch (err: any) {
+      logger.warn(`[CampaignBuilder/discover] Batch Woodpecker add failed: ${err.message}`);
+      wpIds = new Array(entries.length).fill(null);
+    }
+
+    // Write CAMPAIGN_SALES rows
+    for (let i = 0; i < entries.length; i++) {
+      const { exhibitor, contact, leadId } = entries[i];
+      const wpId = wpIds[i] ?? null;
+      try {
         const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         if (process.env[SHEETS.CAMPAIGN_SALES.envKey]) await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
           id:             salesId,
@@ -446,9 +475,8 @@ export class CampaignBuilderAgent extends BaseAgent {
           logoUrl:        '',
         }));
         addedCampaign++;
-
       } catch (err: any) {
-        logger.warn(`[CampaignBuilder/discover] Failed to add ${exhibitor.companyName}: ${err.message}`);
+        logger.warn(`[CampaignBuilder/discover] CAMPAIGN_SALES failed for ${exhibitor.companyName}: ${err.message}`);
       }
     }
 

@@ -141,13 +141,46 @@ export async function createCampaign(_name: string, _fromName: string, _fromEmai
 
 export async function addProspectToCampaign(campaignId: number, prospect: WoodpeckerProspect): Promise<number | null> {
   return retry(async () => {
-    const resp = await getWoodpeckerClient().post(`/campaign_list/${campaignId}/prospects`, {
+    const resp = await getWoodpeckerClient().post('/add_prospects_campaign', {
+      campaign: { campaign_id: campaignId },
+      update: true,
       prospects: [prospect],
     });
     // Woodpecker returns { status: 'OK', prospects: [{id, ...}] }
     const created = resp.data?.prospects?.[0];
     return created?.id ?? null;
   }, 'addProspectToCampaign');
+}
+
+/**
+ * Add multiple prospects to a campaign in batches (max 100 per request).
+ * Returns array of created/updated prospect IDs (null for failed).
+ */
+export async function addProspectsToCampaign(
+  campaignId: number,
+  prospects: WoodpeckerProspect[],
+  batchSize = 100,
+): Promise<(number | null)[]> {
+  const results: (number | null)[] = [];
+  for (let i = 0; i < prospects.length; i += batchSize) {
+    const batch = prospects.slice(i, i + batchSize);
+    const resp = await retry(async () => {
+      return getWoodpeckerClient().post('/add_prospects_campaign', {
+        campaign: { campaign_id: campaignId },
+        update: true,
+        prospects: batch,
+      });
+    }, `addProspectsBatch[${i}]`);
+    const returned: any[] = resp.data?.prospects ?? [];
+    for (const p of returned) {
+      results.push(p?.id ?? null);
+    }
+    // Small delay between batches to avoid rate limiting (409)
+    if (i + batchSize < prospects.length) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  return results;
 }
 
 export async function getProspectByEmail(email: string): Promise<WoodpeckerProspect | null> {
