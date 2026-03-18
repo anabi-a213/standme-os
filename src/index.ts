@@ -125,6 +125,7 @@ async function main() {
         `/casestudy /portfolio /insight — Content\n` +
         `/contentplan — Weekly content plan\n` +
         `/ask [question] — Ask the Brain\n` +
+        `/healthcheck — Check all system services\n` +
         `/help — Show this menu`,
         { parse_mode: 'Markdown' }
       );

@@ -184,7 +184,7 @@ export class BrainAgent extends BaseAgent {
     name: 'StandMe Brain',
     id: 'agent-04',
     description: 'Central intelligence — answers any question, connects all agents',
-    commands: ['/brain', '/ask', '/seedknowledge'],
+    commands: ['/brain', '/ask', '/seedknowledge', '/healthcheck'],
     schedule: '0 8 * * *',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -199,6 +199,11 @@ export class BrainAgent extends BaseAgent {
       return this.seedKnowledgeBase(ctx);
     }
 
+    // Health check: test all connected services and report status
+    if (ctx.command === '/healthcheck') {
+      return this.runHealthCheck(ctx);
+    }
+
     const message = ctx.args || ctx.command;
     const lang = await detectLanguage(message);
     const ack = lang === 'ar' ? '...' : lang === 'franco' ? 'ثانية...' : '...';
@@ -210,9 +215,13 @@ export class BrainAgent extends BaseAgent {
 
     try {
       // Build live data snapshot for context (max 8s — don't let slow APIs hang the bot)
-      const dataContext = await Promise.race([
+      let dataTimedOut = false;
+      const { data: dataContext, issues: dataIssues } = await Promise.race([
         this.buildDataContext(),
-        new Promise<string>(resolve => setTimeout(() => resolve('No live data available.'), 8000)),
+        new Promise<{ data: string; issues: string[] }>(resolve => setTimeout(() => {
+          dataTimedOut = true;
+          resolve({ data: 'No live data available.', issues: [] });
+        }, 8000)),
       ]);
 
       // Pull relevant knowledge base entries for this message
@@ -278,6 +287,17 @@ export class BrainAgent extends BaseAgent {
 
       await this.respond(ctx.chatId, response);
 
+      // Report any data source issues to Mo as a separate diagnostic message
+      const allIssues: string[] = [...dataIssues];
+      if (dataTimedOut) allIssues.push('Live data timed out (>8s) — Trello/Sheets may be slow');
+      if (allIssues.length > 0) {
+        const { sendToMo } = await import('../services/telegram/bot');
+        await sendToMo(
+          `⚠️ *Data source issues detected*\n\n${allIssues.map(i => `• ${i}`).join('\n')}\n\n_Your response was sent using cached/partial data._`,
+          'Markdown'
+        );
+      }
+
       // Trigger agent action if requested
       if (actionMatch) {
         const command = actionMatch[1].toLowerCase();
@@ -294,16 +314,32 @@ export class BrainAgent extends BaseAgent {
 
     } catch (err: any) {
       clearTimeout(stillWorkingTimeout);
+
+      // Tell the user what happened
       const errMsg = lang === 'ar'
         ? `معلش، في مشكلة: ${err.message}`
-        : `Couldn't complete that. ${err.message}`;
+        : `Something went wrong and I couldn't complete that.\n\n*Error:* ${err.message}`;
       await this.respond(ctx.chatId, errMsg);
+
+      // Also ping Mo directly if it wasn't already their own chat that got the error
+      try {
+        const { sendToMo } = await import('../services/telegram/bot');
+        const moId = process.env.MO_TELEGRAM_ID || '6140480367';
+        if (ctx.chatId.toString() !== moId) {
+          await sendToMo(
+            `🔴 *Brain agent crashed*\n\nUser: ${ctx.username || ctx.userId}\nMessage: _${message.slice(0, 200)}_\n\nError: \`${err.message}\``,
+            'Markdown'
+          );
+        }
+      } catch { /* don't recurse */ }
+
       return { success: false, message: err.message, confidence: 'LOW' };
     }
   }
 
-  private async buildDataContext(): Promise<string> {
+  private async buildDataContext(): Promise<{ data: string; issues: string[] }> {
     const lines: string[] = [];
+    const issues: string[] = [];
 
     try {
       // Pipeline snapshot
@@ -330,7 +366,9 @@ export class BrainAgent extends BaseAgent {
           lines.push(`  OVERDUE: ${overdue.join(', ')}`);
         }
       }
-    } catch { /* silent */ }
+    } catch (err: any) {
+      issues.push(`Trello: ${err.message}`);
+    }
 
     try {
       // Recent leads
@@ -342,7 +380,9 @@ export class BrainAgent extends BaseAgent {
           lines.push(`  ${r[2] || '?'} | ${r[6] || 'no show'} | Score:${r[12] || '?'} | ${r[15] || '?'}`);
         });
       }
-    } catch { /* silent */ }
+    } catch (err: any) {
+      issues.push(`Leads sheet: ${err.message}`);
+    }
 
     try {
       // Upcoming deadlines
@@ -358,9 +398,65 @@ export class BrainAgent extends BaseAgent {
       if (upcoming.length > 0) {
         lines.push(`\nDEADLINES IN NEXT 21 DAYS: ${upcoming.map(r => r[1]).join(', ')}`);
       }
-    } catch { /* silent */ }
+    } catch (err: any) {
+      issues.push(`Deadlines sheet: ${err.message}`);
+    }
 
-    return lines.length > 0 ? lines.join('\n') : 'No live data available.';
+    return {
+      data: lines.length > 0 ? lines.join('\n') : 'No live data available.',
+      issues,
+    };
+  }
+
+  private async runHealthCheck(ctx: AgentContext): Promise<AgentResponse> {
+    await this.respond(ctx.chatId, '🔍 Checking all services...');
+
+    const checks: { name: string; ok: boolean; detail: string }[] = [];
+
+    // Trello
+    try {
+      const salesBoardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+      if (salesBoardId) {
+        const cards = await getBoardCardsWithListNames(salesBoardId);
+        checks.push({ name: 'Trello Sales Board', ok: true, detail: `${cards.length} cards` });
+      } else {
+        checks.push({ name: 'Trello Sales Board', ok: false, detail: 'TRELLO_BOARD_SALES_PIPELINE not set' });
+      }
+    } catch (err: any) {
+      checks.push({ name: 'Trello Sales Board', ok: false, detail: err.message });
+    }
+
+    // Google Sheets
+    try {
+      const leads = await readSheet(SHEETS.LEAD_MASTER);
+      checks.push({ name: 'Google Sheets (Leads)', ok: true, detail: `${leads.length - 1} rows` });
+    } catch (err: any) {
+      checks.push({ name: 'Google Sheets (Leads)', ok: false, detail: err.message });
+    }
+
+    // Claude AI
+    try {
+      const ping = await generateText('Reply with exactly: OK', undefined, 10);
+      checks.push({ name: 'Claude AI', ok: ping.includes('OK'), detail: ping.includes('OK') ? 'responding' : `unexpected: ${ping.slice(0, 50)}` });
+    } catch (err: any) {
+      checks.push({ name: 'Claude AI', ok: false, detail: err.message });
+    }
+
+    // Key env vars
+    const requiredEnvs = ['TELEGRAM_BOT_TOKEN', 'ANTHROPIC_API_KEY', 'TRELLO_API_KEY', 'TRELLO_TOKEN'];
+    const missingEnvs = requiredEnvs.filter(k => !process.env[k]);
+    checks.push({
+      name: 'Env vars',
+      ok: missingEnvs.length === 0,
+      detail: missingEnvs.length === 0 ? 'all set' : `MISSING: ${missingEnvs.join(', ')}`,
+    });
+
+    const allOk = checks.every(c => c.ok);
+    const lines = checks.map(c => `${c.ok ? '✅' : '❌'} *${c.name}*: ${c.detail}`);
+    const summary = allOk ? '✅ All systems operational' : `⚠️ ${checks.filter(c => !c.ok).length} issue(s) found`;
+
+    await this.respond(ctx.chatId, `${summary}\n\n${lines.join('\n')}`);
+    return { success: true, message: 'Health check complete', confidence: 'HIGH' };
   }
 
   private async morningBriefing(ctx: AgentContext): Promise<AgentResponse> {
