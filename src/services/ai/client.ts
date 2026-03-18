@@ -339,7 +339,9 @@ export async function generateSalesReply(context: {
     showDates: 2,
     budget: 3,
     phone: 4,
-    requirements: 5,
+    website: 5,
+    requirements: 6,
+    logoUrl: 7,
   };
 
   const topMissing = context.missingInfo
@@ -376,16 +378,18 @@ YOUR SALES INTELLIGENCE:
 - If they seem ready to talk, offer a specific time slot, not "let me know when works."
 - READY_TO_CLOSE means: they have confirmed interest + have the key info OR have agreed to a call/meeting.
 - Create natural urgency only if real: show registration deadlines, technical submission dates, build crew availability.
+- Once stand size and budget are confirmed, naturally ask for their website — we use it as a design reference and to understand their brand before we start sketching concepts. This is standard practice.
+- If they send a logo or mention brand guidelines, note the URL/link in logoUrl.
 
 TASK:
 1. Classify: INTERESTED | QUESTION | NOT_INTERESTED | MORE_INFO_NEEDED | READY_TO_CLOSE
-2. Extract new info: stand size, budget, show dates, phone, requirements, decision timeline
+2. Extract new info from their message: stand size, budget, show dates, phone, their website URL, logo or brand asset URL/link, requirements, decision timeline
 3. Write a reply that advances the deal. Short (3-5 lines). Warm. Expert. Human.
 
 Return ONLY this JSON:
 {
   "classification": "INTERESTED|QUESTION|NOT_INTERESTED|MORE_INFO_NEEDED|READY_TO_CLOSE",
-  "extractedInfo": { "standSize": "...", "budget": "...", "showDates": "...", "phone": "...", "requirements": "...", "decisionTimeline": "..." },
+  "extractedInfo": { "standSize": "...", "budget": "...", "showDates": "...", "phone": "...", "website": "...", "logoUrl": "...", "requirements": "...", "decisionTimeline": "..." },
   "urgencyUsed": false,
   "reply": "Full reply text. Signed: Mo / StandMe"
 }`;

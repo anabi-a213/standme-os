@@ -223,6 +223,8 @@ export const SHEETS: Record<string, SheetConfig> = {
       lastActionDate: 'Q',
       leadMasterId: 'R',     // set when converted to Lead Master
       notes: 'S',
+      website: 'T',          // prospect website — needed for concept brief
+      logoUrl: 'U',          // logo/brand asset URL — needed for design
     },
     headerRow: 1,
   },

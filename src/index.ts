@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import express from 'express';
 import { initBot, getBot, buildContext, sendToMo, formatType2 } from './services/telegram/bot';
 import { registerAgent, getAgent, getAllAgents } from './agents/registry';
 import { startScheduler } from './scheduler';
@@ -185,6 +186,55 @@ async function main() {
         await bot.sendMessage(msg.chat.id, 'Unknown command. Type /help for available commands.');
       }
     }
+  });
+
+  // Start webhook server for external integrations (Woodpecker, etc.)
+  const webhookApp = express();
+  webhookApp.use(express.json());
+
+  // POST /webhook/woodpecker — receives reply/open/bounce events from Woodpecker
+  // Set this URL in Woodpecker: Settings → Integrations → Webhook → your Railway URL + /webhook/woodpecker
+  webhookApp.post('/webhook/woodpecker', async (req, res) => {
+    // Acknowledge immediately so Woodpecker doesn't retry
+    res.sendStatus(200);
+
+    const secret = process.env.WOODPECKER_WEBHOOK_SECRET;
+    if (secret && req.headers['x-woodpecker-secret'] !== secret) {
+      logger.warn('[Webhook] Woodpecker: invalid secret, ignoring');
+      return;
+    }
+
+    const { status, prospect } = req.body || {};
+    const prospectEmail = prospect?.email || '';
+
+    logger.info(`[Webhook] Woodpecker event: ${status} — ${prospectEmail}`);
+
+    // On reply: trigger immediate sales reply processing (don't wait for 2h cron)
+    if (status === 'REPLIED' && prospectEmail) {
+      const campaignAgent = getAgent('/salesreplies');
+      if (campaignAgent) {
+        const ctx = {
+          userId: 'webhook',
+          username: 'webhook',
+          chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
+          command: 'scheduled', // silent mode — no "Checking for replies..." message
+          args: '',
+          role: UserRole.ADMIN,
+          language: 'en' as const,
+        };
+        campaignAgent.run(ctx).catch((err: any) =>
+          logger.warn(`[Webhook] Reply processing error: ${err.message}`)
+        );
+      }
+    }
+  });
+
+  // Health check endpoint for Railway
+  webhookApp.get('/health', (_req, res) => res.json({ status: 'ok', agents: getAllAgents().length }));
+
+  const PORT = parseInt(process.env.PORT || '3000');
+  webhookApp.listen(PORT, () => {
+    logger.info(`  Webhook server on port ${PORT} (POST /webhook/woodpecker)`);
   });
 
   // Start scheduler

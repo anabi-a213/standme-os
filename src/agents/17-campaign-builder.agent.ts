@@ -21,6 +21,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, appendRow, updateCell, objectToRow, sheetUrl } from '../services/google/sheets';
+import { createCard, findListByName } from '../services/trello/client';
 import {
   listCampaigns, createCampaign, getCampaignDetails, getCampaignStats,
   getProspectsByCampaign, addProspectToCampaign, WoodpeckerProspect,
@@ -35,7 +36,9 @@ import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
 
-const SALES_INFO_FIELDS = ['standSize', 'budget', 'showDates', 'phone', 'requirements'];
+const SALES_INFO_FIELDS = ['standSize', 'budget', 'showDates', 'phone', 'website', 'requirements', 'logoUrl'];
+// Fields that must be present before we can start a concept brief
+const BRIEF_REQUIRED_FIELDS = ['standSize', 'budget', 'showDates', 'website'];
 
 export class CampaignBuilderAgent extends BaseAgent {
   config: AgentConfig = {
@@ -428,6 +431,7 @@ export class CampaignBuilderAgent extends BaseAgent {
         const contactEmail = (row[5] || '').toLowerCase();
         const currentStatus = (row[7] || '').toUpperCase();
         const lastReplyDate = row[15] || '';
+        const existingLeadMasterId = row[17] || '';
 
         if (!contactEmail) continue;
 
@@ -479,6 +483,8 @@ export class CampaignBuilderAgent extends BaseAgent {
           showDates: row[11] || '',
           phone: row[12] || '',
           requirements: row[13] || '',
+          website: row[19] || '',
+          logoUrl: row[20] || '',
         };
         const missingInfo = SALES_INFO_FIELDS.filter(f => !collectedInfo[f]);
 
@@ -538,6 +544,12 @@ export class CampaignBuilderAgent extends BaseAgent {
           ));
           await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'INTERESTED');
           await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', classification);
+
+          // Auto-enter into sales pipeline immediately
+          if (!existingLeadMasterId) {
+            await this.convertToLead(row, index, updatedInfo, showName, contactName, contactEmail);
+          }
+
           escalations++;
           newReplies++;
           continue;
@@ -572,6 +584,8 @@ export class CampaignBuilderAgent extends BaseAgent {
               await updateCell(SHEETS.CAMPAIGN_SALES, index, 'O', JSON.stringify(conversationHistory).slice(0, 5000));
               await updateCell(SHEETS.CAMPAIGN_SALES, index, 'P', replyDate);
               await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', new Date().toISOString());
+              if (updatedInfo.website) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'T', updatedInfo.website);
+              if (updatedInfo.logoUrl) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'U', updatedInfo.logoUrl);
 
               // Save sent reply to KB for future learning
               await saveKnowledge({
@@ -581,6 +595,22 @@ export class CampaignBuilderAgent extends BaseAgent {
                 tags: `sent-reply,outreach,${classification.toLowerCase()},${showName.toLowerCase().replace(/\s+/g, '-')}`,
                 content: `Sent reply to ${companyName} (${showName}): "${reply.slice(0, 400)}"`,
               });
+
+              // Auto-enter pipeline when prospect shows interest
+              if (classification === 'INTERESTED' && !existingLeadMasterId) {
+                await this.convertToLead(row, index, updatedInfo, showName, contactName, contactEmail);
+              }
+
+              // When all key fields are collected, prompt Mo to run a concept brief
+              const isReadyForBrief = BRIEF_REQUIRED_FIELDS.every(f => updatedInfo[f]);
+              if (isReadyForBrief) {
+                await sendToMo(formatType2(
+                  `Brief Ready: ${companyName}`,
+                  `All key info collected for *${companyName}* — ${showName}.\n\n` +
+                  `Size: ${updatedInfo.standSize} sqm\nBudget: ${updatedInfo.budget}\nDates: ${updatedInfo.showDates}\nWebsite: ${updatedInfo.website}\n\n` +
+                  `Run: \`/brief ${companyName} | ${showName}\` to generate the concept brief.`
+                ));
+              }
 
               return `Reply sent to *${companyName}* (${contactEmail}). Classification: ${classification}${urgencyUsed ? ' [urgency used]' : ''}`;
             } catch (err: any) {
@@ -696,6 +726,97 @@ export class CampaignBuilderAgent extends BaseAgent {
   // =====================================================================
   // Helpers
   // =====================================================================
+
+  /**
+   * Convert a campaign reply into a full sales pipeline entry.
+   * Creates a LEAD_MASTER row + Trello card in "02 Qualifying".
+   * Safe to call multiple times — skips if leadMasterId already set on the row.
+   */
+  private async convertToLead(
+    row: string[],
+    sheetIndex: number,
+    info: Record<string, string>,
+    showName: string,
+    contactName: string,
+    contactEmail: string
+  ): Promise<void> {
+    const companyName = row[3] || '';
+    const campaignIdVal = row[1] || '';
+
+    try {
+      const leadId = `SM-${Date.now()}-C`; // C suffix = campaign origin
+
+      await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
+        id: leadId,
+        timestamp: new Date().toISOString(),
+        companyName,
+        contactName,
+        contactEmail,
+        contactTitle: '',
+        showName,
+        showCity: '',
+        standSize: info.standSize || '',
+        budget: info.budget || '',
+        industry: '',
+        leadSource: 'woodpecker-campaign',
+        score: '9',
+        scoreBreakdown: JSON.stringify({ showFit: 2, sizeSignal: 2, industryFit: 1, dmSignal: 2, timeline: 2 }),
+        confidence: 'HIGH',
+        status: 'HOT',
+        trelloCardId: '',
+        enrichmentStatus: 'DONE',
+        dmName: contactName,
+        dmTitle: '',
+        dmLinkedIn: '',
+        dmEmail: contactEmail,
+        outreachReadiness: 'CONTACTED',
+        language: 'en',
+        notes: `Campaign ${campaignIdVal}. Website: ${info.website || '—'}. Logo: ${info.logoUrl || '—'}`,
+      }));
+
+      // Trello card in "02 Qualifying" — they already replied, so skip "01 New Inquiry"
+      let trelloCardId = '';
+      const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+      if (boardId) {
+        try {
+          const list = await findListByName(boardId, '02 Qualifying');
+          if (list) {
+            const card = await createCard(
+              list.id,
+              `${companyName} — ${showName}`,
+              `Lead: ${leadId} | HOT (Campaign Reply)\n` +
+              `Contact: ${contactName} (${contactEmail})\n` +
+              `Size: ${info.standSize || 'TBC'} sqm | Budget: ${info.budget || 'TBC'}\n` +
+              `Dates: ${info.showDates || 'TBC'}\n` +
+              `Website: ${info.website || 'TBC'}\n` +
+              `Logo: ${info.logoUrl || 'TBC'}\n` +
+              `Source: Woodpecker Campaign ${campaignIdVal}`
+            );
+            trelloCardId = card.id;
+          }
+        } catch (err: any) {
+          logger.warn(`[CampaignBuilder] Trello card failed for ${companyName}: ${err.message}`);
+        }
+      }
+
+      // Link CAMPAIGN_SALES back to the lead
+      await updateCell(SHEETS.CAMPAIGN_SALES, sheetIndex, 'R', leadId);
+
+      await sendToMo(formatType2(
+        `Pipeline Entry: ${companyName}`,
+        `*${companyName}* replied to the ${showName} campaign and is now in the pipeline.\n\n` +
+        `Lead ID: ${leadId} (HOT)\n` +
+        `Contact: ${contactName} — ${contactEmail}\n` +
+        `${info.standSize ? `Stand: ${info.standSize} sqm\n` : ''}` +
+        `${info.budget ? `Budget: ${info.budget}\n` : ''}` +
+        `${info.website ? `Website: ${info.website}\n` : ''}` +
+        (trelloCardId ? `\nTrello: 02 Qualifying ✅` : '')
+      ));
+
+    } catch (err: any) {
+      logger.warn(`[CampaignBuilder] convertToLead failed for ${companyName}: ${err.message}`);
+    }
+  }
 
   private async resolveOrCreateCampaign(ctx: AgentContext, showName: string): Promise<number | null> {
     const fromEnv = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '');
