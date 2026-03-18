@@ -42,6 +42,21 @@ export async function appendRow(config: SheetConfig, values: string[]): Promise<
   }, 'appendRow');
 }
 
+// Append multiple rows in a single API call — use this instead of looping appendRow
+export async function appendRows(config: SheetConfig, rows: string[][]): Promise<void> {
+  if (rows.length === 0) return;
+  const sheetId = getSheetId(config);
+
+  await retry(async () => {
+    await getSheetsClient().spreadsheets.values.append({
+      spreadsheetId: sheetId,
+      range: `${config.tabName}!A:Z`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: rows },
+    });
+  }, 'appendRows');
+}
+
 export async function updateCell(config: SheetConfig, row: number, col: string, value: string): Promise<void> {
   const sheetId = getSheetId(config);
 

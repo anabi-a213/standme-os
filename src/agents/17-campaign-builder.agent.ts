@@ -20,7 +20,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, appendRow, updateCell, objectToRow, sheetUrl } from '../services/google/sheets';
+import { readSheet, appendRow, appendRows, updateCell, objectToRow, sheetUrl } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import {
   listCampaigns, getCampaignDetails, getCampaignStats,
@@ -385,46 +385,47 @@ export class CampaignBuilderAgent extends BaseAgent {
       entries.push({ exhibitor, contact, industry, snippet1, leadId });
     }
 
-    // Write LEAD_MASTER rows
-    for (const { exhibitor, contact, industry, snippet1, leadId } of entries) {
-      try {
-        await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
-          id:               leadId,
-          timestamp:        now,
-          companyName:      exhibitor.companyName,
-          contactName:      contact.name,
-          contactEmail:     exhibitor.contactEmail || '',
-          contactTitle:     exhibitor.contactTitle || '',
-          showName,
-          showCity:         '',
-          standSize:        '',
-          budget:           '',
-          industry,
-          leadSource:       'exhibitor-list',
-          score:            '6',
-          scoreBreakdown:   JSON.stringify({ showFit: 2, exhibitorList: 2, dmFound: 2 }),
-          confidence:       contact.emailStatus === 'verified' ? 'HIGH' : 'MEDIUM',
-          status:           'WARM',
-          trelloCardId:     '',
-          enrichmentStatus: 'DONE',
-          dmName:           contact.name,
-          dmTitle:          contact.title,
-          dmLinkedIn:       contact.linkedinUrl,
-          dmEmail:          contact.email,
-          outreachReadiness: 'READY',
-          language:         (exhibitor.country || '').toLowerCase().includes('arab') ? 'ar' : 'en',
-          notes:            [
-            `Source: ${files.map(f => f.name).join(', ')}`,
-            exhibitor.country     ? `Country: ${exhibitor.country}`     : '',
-            exhibitor.website     ? `Website: ${exhibitor.website}`     : '',
-            exhibitor.boothNumber ? `Booth: ${exhibitor.boothNumber}`   : '',
-            `Email status: ${contact.emailStatus}`,
-          ].filter(Boolean).join(' | '),
-        }));
-        addedMaster++;
-      } catch (err: any) {
-        logger.warn(`[CampaignBuilder/discover] LEAD_MASTER failed for ${exhibitor.companyName}: ${err.message}`);
-      }
+    // Write LEAD_MASTER rows — single bulk API call
+    const masterRows = entries.map(({ exhibitor, contact, industry, leadId }) =>
+      objectToRow(SHEETS.LEAD_MASTER, {
+        id:               leadId,
+        timestamp:        now,
+        companyName:      exhibitor.companyName,
+        contactName:      contact.name,
+        contactEmail:     exhibitor.contactEmail || '',
+        contactTitle:     exhibitor.contactTitle || '',
+        showName,
+        showCity:         '',
+        standSize:        '',
+        budget:           '',
+        industry,
+        leadSource:       'exhibitor-list',
+        score:            '6',
+        scoreBreakdown:   JSON.stringify({ showFit: 2, exhibitorList: 2, dmFound: 2 }),
+        confidence:       contact.emailStatus === 'verified' ? 'HIGH' : 'MEDIUM',
+        status:           'WARM',
+        trelloCardId:     '',
+        enrichmentStatus: 'DONE',
+        dmName:           contact.name,
+        dmTitle:          contact.title,
+        dmLinkedIn:       contact.linkedinUrl,
+        dmEmail:          contact.email,
+        outreachReadiness: 'READY',
+        language:         (exhibitor.country || '').toLowerCase().includes('arab') ? 'ar' : 'en',
+        notes:            [
+          `Source: ${files.map(f => f.name).join(', ')}`,
+          exhibitor.country     ? `Country: ${exhibitor.country}`     : '',
+          exhibitor.website     ? `Website: ${exhibitor.website}`     : '',
+          exhibitor.boothNumber ? `Booth: ${exhibitor.boothNumber}`   : '',
+          `Email status: ${contact.emailStatus}`,
+        ].filter(Boolean).join(' | '),
+      })
+    );
+    try {
+      await appendRows(SHEETS.LEAD_MASTER, masterRows);
+      addedMaster = masterRows.length;
+    } catch (err: any) {
+      logger.warn(`[CampaignBuilder/discover] LEAD_MASTER bulk write failed: ${err.message}`);
     }
 
     // Batch-send all Woodpecker prospects in one pass (100 per request)
@@ -449,13 +450,12 @@ export class CampaignBuilderAgent extends BaseAgent {
       wpIds = new Array(entries.length).fill(null);
     }
 
-    // Write CAMPAIGN_SALES rows
-    for (let i = 0; i < entries.length; i++) {
-      const { exhibitor, contact, leadId } = entries[i];
-      const wpId = wpIds[i] ?? null;
-      try {
-        const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        if (process.env[SHEETS.CAMPAIGN_SALES.envKey]) await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
+    // Write CAMPAIGN_SALES rows — single bulk API call
+    if (process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+      const salesRows = entries.map(({ exhibitor, contact, leadId }, i) => {
+        const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${i}`;
+        const wpId = wpIds[i] ?? null;
+        return objectToRow(SHEETS.CAMPAIGN_SALES, {
           id:             salesId,
           campaignId:     String(campaignId),
           showName,
@@ -473,10 +473,13 @@ export class CampaignBuilderAgent extends BaseAgent {
           notes:          `Discovery from ${files.map(f => f.name).join(', ')}`,
           website:        exhibitor.website || '',
           logoUrl:        '',
-        }));
-        addedCampaign++;
+        });
+      });
+      try {
+        await appendRows(SHEETS.CAMPAIGN_SALES, salesRows);
+        addedCampaign = salesRows.length;
       } catch (err: any) {
-        logger.warn(`[CampaignBuilder/discover] CAMPAIGN_SALES failed for ${exhibitor.companyName}: ${err.message}`);
+        logger.warn(`[CampaignBuilder/discover] CAMPAIGN_SALES bulk write failed: ${err.message}`);
       }
     }
 
