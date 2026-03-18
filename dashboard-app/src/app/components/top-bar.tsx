@@ -53,19 +53,19 @@ export function TopBar({ onOpenCommandPalette, onOpenShortcuts, systemStats, age
           >
             {/* Brand logo */}
             <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-md bg-white shadow-[var(--shadow-gold)]">
-                <img
-                  src="/dashboard/standme-logo.png"
-                  alt="StandMe"
-                  className="h-8 w-8 object-contain"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                    const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                    if (fallback) fallback.style.display = 'flex';
-                  }}
-                />
-                {/* Fallback if image not loaded */}
-                <span className="hidden font-mono text-sm font-bold text-black">SM</span>
+              <img
+                src="/dashboard/standme-logo.png"
+                alt="StandMe"
+                className="h-7 w-auto object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                  if (fallback) fallback.style.display = 'flex';
+                }}
+              />
+              {/* Fallback if image not loaded */}
+              <div className="hidden h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)] shadow-[var(--shadow-gold)]">
+                <span className="font-mono text-sm font-bold text-black">SM</span>
               </div>
 
               {/* Wordmark */}
