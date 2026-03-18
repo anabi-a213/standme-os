@@ -373,7 +373,8 @@ export async function createGoogleDoc(name: string, content: string, folderId?: 
   return retry(async () => {
     const docs = google.docs({ version: 'v1', auth: getGoogleAuth() });
 
-    const resolvedFolder = folderId || process.env.DRIVE_FOLDER_AGENTS || '';
+    // Use explicit arg → env var → known StandMe OS Drive folder
+    const resolvedFolder = folderId || process.env.DRIVE_FOLDER_AGENTS || '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl';
     const fileMetadata: drive_v3.Schema$File = {
       name,
       mimeType: 'application/vnd.google-apps.document',
