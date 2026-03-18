@@ -673,7 +673,7 @@ export class CampaignBuilderAgent extends BaseAgent {
             const wpId = await addProspectToCampaign(campaignId, prospect);
             const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-            await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
+            if (process.env[SHEETS.CAMPAIGN_SALES.envKey]) await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
               id: salesId,
               campaignId: String(campaignId),
               showName,
@@ -733,6 +733,10 @@ export class CampaignBuilderAgent extends BaseAgent {
     let escalations = 0;
 
     try {
+      if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+        if (!isScheduled) await this.respond(ctx.chatId, 'SHEET_CAMPAIGN_SALES not configured — set this env var to enable reply tracking.');
+        return { success: false, message: 'SHEET_CAMPAIGN_SALES not set', confidence: 'LOW' };
+      }
       const salesRows = await readSheet(SHEETS.CAMPAIGN_SALES);
       const activeRecords = salesRows.slice(1)
         .map((r, i) => ({ row: r, index: i + 2 }))
@@ -996,6 +1000,10 @@ export class CampaignBuilderAgent extends BaseAgent {
     const showFilter = ctx.args.trim().toLowerCase();
     await this.respond(ctx.chatId, 'Fetching campaign status...');
 
+    if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+      await this.respond(ctx.chatId, 'SHEET_CAMPAIGN_SALES not configured — set this env var to enable campaign status tracking.');
+      return { success: false, message: 'SHEET_CAMPAIGN_SALES not set', confidence: 'LOW' };
+    }
     const salesRows = await readSheet(SHEETS.CAMPAIGN_SALES);
     const records = salesRows.slice(1).filter(r =>
       !showFilter || (r[2] || '').toLowerCase().includes(showFilter)
@@ -1072,6 +1080,7 @@ export class CampaignBuilderAgent extends BaseAgent {
    */
   public async handleWebhookEvent(eventType: string, prospectEmail: string): Promise<void> {
     if (!prospectEmail) return;
+    if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) return;
 
     try {
       const salesRows = await readSheet(SHEETS.CAMPAIGN_SALES);
@@ -1236,7 +1245,7 @@ export class CampaignBuilderAgent extends BaseAgent {
   }
 
   private async resolveOrCreateCampaign(ctx: AgentContext, showName: string): Promise<number | null> {
-    const fromEnv = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '');
+    const fromEnv = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '0');
     if (fromEnv > 0) return fromEnv;
 
     let campaigns: { id: number; name: string; status: string }[] = [];

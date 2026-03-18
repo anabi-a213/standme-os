@@ -42,6 +42,16 @@ async function main() {
   // Drive folder IDs are saved here by /setupdrive — no Railway env vars needed for them.
   await loadRuntimeConfig();
 
+  // Warn about optional but important sheet env vars
+  const optionalSheets: Record<string, string> = {
+    SHEET_CAMPAIGN_SALES: '/newcampaign, /discover, /salesreplies, /campaignstatus',
+  };
+  for (const [key, commands] of Object.entries(optionalSheets)) {
+    if (!process.env[key]) {
+      logger.warn(`[Startup] ${key} not set — ${commands} will run in degraded mode`);
+    }
+  }
+
   // Auto-check and create any missing Google Sheets tabs
   initSheets().catch(err => logger.warn(`[Sheets Init] Failed: ${err.message}`));
 

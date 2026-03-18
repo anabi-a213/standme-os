@@ -222,11 +222,11 @@ export class OutreachAgent extends BaseAgent {
 
   private async resolveCampaignId(ctx: AgentContext, args: string, silent = false): Promise<number | null> {
     // 1. Explicit ID passed as arg e.g. /outreach 12345
-    const fromArg = parseInt(args?.trim() || '');
+    const fromArg = parseInt(args?.trim() || '0');
     if (fromArg > 0) return fromArg;
 
     // 2. Env var override
-    const fromEnv = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '');
+    const fromEnv = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '0');
     if (fromEnv > 0) return fromEnv;
 
     // 3. Fetch live campaigns from Woodpecker
