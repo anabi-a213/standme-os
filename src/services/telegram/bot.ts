@@ -16,8 +16,21 @@ export function getBot(): TelegramBot {
 export function initBot(): TelegramBot {
   const bot = getBot();
 
-  bot.on('polling_error', (error) => {
+  bot.on('polling_error', (error: any) => {
     logger.error(`Telegram polling error: ${error.message}`);
+    // 409 = another instance is still polling (happens during Railway rolling deploy)
+    // Stop polling and retry after 10s to let the old container finish shutting down
+    if (error.message && error.message.includes('409')) {
+      logger.info('[Bot] 409 Conflict — stopping polling, retrying in 10s...');
+      bot.stopPolling().then(() => {
+        setTimeout(() => {
+          logger.info('[Bot] Restarting polling after 409 backoff');
+          bot.startPolling();
+        }, 10000);
+      }).catch(() => {
+        setTimeout(() => bot.startPolling(), 10000);
+      });
+    }
   });
 
   logger.info('Telegram bot initialized and polling');
