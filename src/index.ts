@@ -2,8 +2,13 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
+import { createServer } from 'http';
+import cookieParser from 'cookie-parser';
 import { initBot, getBot, buildContext, sendToMo, formatType2 } from './services/telegram/bot';
 import { registerAgent, getAgent, getAllAgents } from './agents/registry';
+import { dashboardBus } from './services/dashboard/event-bus';
+import { initDashboardSocket } from './services/dashboard/socket';
+import { dashboardRouter } from './services/dashboard/routes';
 import { startScheduler } from './scheduler';
 import { logger } from './utils/logger';
 import { writeSystemLog } from './utils/system-log';
@@ -82,6 +87,7 @@ async function main() {
 
   for (const agent of agents) {
     registerAgent(agent);
+    dashboardBus.registerAgent(agent.config.id, agent.config.name);
     logger.info(`  Registered: ${agent.config.name} (${agent.config.commands.join(', ')})`);
   }
 
@@ -203,14 +209,16 @@ async function main() {
     }
   });
 
-  // Start webhook server for external integrations (Woodpecker, etc.)
-  const webhookApp = express();
-  webhookApp.use(express.json());
+  // Start webhook + dashboard server
+  const app = express();
+  app.use(express.json());
+  app.use(cookieParser());
+
+  // Dashboard routes (served at /dashboard)
+  app.use('/dashboard', dashboardRouter);
 
   // POST /webhook/woodpecker — receives reply/open/bounce events from Woodpecker
-  // Set this URL in Woodpecker: Settings → Integrations → Webhook → your Railway URL + /webhook/woodpecker
-  webhookApp.post('/webhook/woodpecker', async (req, res) => {
-    // Acknowledge immediately so Woodpecker doesn't retry
+  app.post('/webhook/woodpecker', async (req, res) => {
     res.sendStatus(200);
 
     const secret = process.env.WOODPECKER_WEBHOOK_SECRET;
@@ -224,12 +232,12 @@ async function main() {
     const eventType = (status || '').toUpperCase();
 
     logger.info(`[Webhook] Woodpecker: ${eventType} — ${prospectEmail}`);
+    dashboardBus.logEvent('agent-17', 'Campaign Builder', `Webhook: ${eventType} — ${prospectEmail}`);
 
     const campaignAgent = getAgent('/salesreplies');
     if (!campaignAgent || !prospectEmail) return;
 
     if (eventType === 'REPLIED') {
-      // Trigger full AI sales reply loop immediately (no 2h wait)
       const ctx = {
         userId: 'webhook',
         username: 'webhook',
@@ -243,18 +251,22 @@ async function main() {
         logger.warn(`[Webhook] Reply processing error: ${err.message}`)
       );
     } else if (['OPENED', 'BOUNCED', 'INVALID', 'INTERESTED', 'NOT_INTERESTED', 'UNSUBSCRIBED'].includes(eventType)) {
-      // Direct status updates — no full loop needed
       (campaignAgent as any).handleWebhookEvent(eventType, prospectEmail)
         .catch((err: any) => logger.warn(`[Webhook] Event error: ${err.message}`));
     }
   });
 
   // Health check endpoint for Railway
-  webhookApp.get('/health', (_req, res) => res.json({ status: 'ok', agents: getAllAgents().length }));
+  app.get('/health', (_req, res) => res.json({ status: 'ok', agents: getAllAgents().length }));
+
+  // Redirect root to dashboard
+  app.get('/', (_req, res) => res.redirect('/dashboard'));
 
   const PORT = parseInt(process.env.PORT || '3000');
-  webhookApp.listen(PORT, () => {
-    logger.info(`  Webhook server on port ${PORT} (POST /webhook/woodpecker)`);
+  const httpServer = createServer(app);
+  initDashboardSocket(httpServer);
+  httpServer.listen(PORT, () => {
+    logger.info(`  Server on port ${PORT} — Dashboard: /dashboard | Webhook: /webhook/woodpecker`);
   });
 
   // Start scheduler

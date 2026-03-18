@@ -4,6 +4,7 @@ import { writeSystemLog, LogResult } from '../utils/system-log';
 import { logger } from '../utils/logger';
 import { getBot, formatType1, formatType2, formatType3, sendToMo } from '../services/telegram/bot';
 import { getThreadContext, getActiveFocus, saveThreadEntry } from '../services/thread-context';
+import { dashboardBus } from '../services/dashboard/event-bus';
 
 export abstract class BaseAgent {
   abstract config: AgentConfig;
@@ -14,6 +15,7 @@ export abstract class BaseAgent {
   async run(context: AgentContext): Promise<AgentResponse> {
     const startTime = Date.now();
     logger.info(`[${this.config.id}] Starting: ${this.config.name}`);
+    dashboardBus.agentStarted(this.config.id, this.config.name, context.command);
 
     // Inject thread context so every agent knows what the user has been working on
     if (context.userId !== 'SYSTEM') {
@@ -42,6 +44,7 @@ export abstract class BaseAgent {
         result: result.success ? 'SUCCESS' : 'FAIL',
       });
 
+      dashboardBus.agentFinished(this.config.id, this.config.name, result.success, duration, result.message);
       logger.info(`[${this.config.id}] Completed in ${duration}ms`);
       return result;
     } catch (error: any) {
@@ -59,6 +62,9 @@ export abstract class BaseAgent {
         `Agent ${this.config.name} Error`,
         `Command: ${context.command}\nError: ${errMsg}`
       ));
+
+      const errorDuration = Date.now() - startTime;
+      dashboardBus.agentFinished(this.config.id, this.config.name, false, errorDuration, errMsg);
 
       return {
         success: false,
@@ -97,6 +103,7 @@ export abstract class BaseAgent {
 
   // Send TYPE 1 action message
   async sendAction(chatId: number, what: string, why: string, detail: string, approveId: string): Promise<void> {
+    dashboardBus.approvalEvent(this.config.id, this.config.name, what, approveId);
     await this.respond(chatId, formatType1(what, why, detail, approveId));
   }
 
