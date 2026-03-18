@@ -52,9 +52,11 @@ export class TechnicalDeadlineAgent extends BaseAgent {
         }
       }
 
-      // Check if re-verification needed (every 7 days)
+      // Check if re-verification needed (every 7 days, or never verified at all)
       const lastVerified = row[12];
-      if (lastVerified) {
+      if (!lastVerified) {
+        alerts.push(`🔄 UNVERIFIED: ${showName} (${client}) — deadlines have never been verified`);
+      } else {
         const verifiedDate = new Date(lastVerified);
         const daysSinceVerify = Math.ceil((now.getTime() - verifiedDate.getTime()) / (1000 * 60 * 60 * 24));
         if (daysSinceVerify >= 7) {
