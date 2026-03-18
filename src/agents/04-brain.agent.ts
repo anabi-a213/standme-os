@@ -4,7 +4,8 @@ import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet } from '../services/google/sheets';
 import { getBoardCardsWithListNames } from '../services/trello/client';
-import { generateText, detectLanguage } from '../services/ai/client';
+import { generateText, generateChat, detectLanguage } from '../services/ai/client';
+import { saveThreadEntry, setActiveFocus } from '../services/thread-context';
 import { formatType3, sendToTeam } from '../services/telegram/bot';
 import { buildKnowledgeContext } from '../services/knowledge';
 import { getAgent } from './registry';
@@ -15,56 +16,98 @@ const conversations = new Map<string, { role: 'user' | 'assistant'; content: str
 
 const SYSTEM_PROMPT = `You are StandMe Brain — the central AI assistant for StandMe, an exhibition stand design & build company operating across MENA and Europe.
 
-You are talking to the team via Telegram or the web dashboard. Be conversational, direct, and practical. No corporate fluff.
+You talk to the team via Telegram and the web dashboard. Be conversational, direct, and practical. No filler.
 
-LANGUAGE: Detect the user's language and always respond in the same language:
-- Arabic (عربي) → respond in Arabic
-- Franco/Arabizi (3arabi) → respond in same Franco style
-- English → respond in English
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LANGUAGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Always respond in the same language the user writes in:
+- Arabic (عربي) → Arabic
+- Franco/Arabizi (3arabi) → same Franco style
+- English → English
+Mix is fine — match the mix.
 
-ABOUT STANDME:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ABOUT STANDME
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - Designs and builds custom exhibition stands for trade shows in MENA & Europe
 - Key shows: Arab Health, Gulfood, Interpack, Hannover Messe, ISE, MEDICA, etc.
 - Team: Mo (admin/owner), Hadeer (ops lead), Bassel (sub-admin)
 - Pipeline: Leads → Qualifying → Concept Brief → Proposal → Negotiation → Won/Lost
 
-WHAT YOU CAN DO:
-1. Answer questions about the business, pipeline, leads, deadlines directly from context
-2. Trigger agent actions by ending your response with [ACTION: /command args]
-3. Give advice, summaries, analysis based on the data provided
-4. Remember context from earlier in the conversation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+UNDERSTANDING INTENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Before responding, identify:
+1. WHAT the user wants (action vs question vs info)
+2. WHO/WHAT they're talking about (which client, show, project?)
+3. If anything is ambiguous — ask ONE focused clarifying question
 
-AGENT COMMANDS (trigger these when the user asks for these things):
-- /newlead — add a new lead (needs: company, show, city, size, budget, industry, contact)
+Use THREAD CONTEXT (if provided) to resolve ambiguity:
+- If the user says "do the brief" and the thread shows they were discussing "Pharma Corp" → trigger brief for Pharma Corp
+- If the user says "move it to proposal" and the thread shows they were discussing a card → move that card
+- Never ask for info you already know from thread context or live data
+
+GOOD: "Got it — generating the brief for *Pharma Corp* at Arab Health. One sec."
+BAD: "Could you please specify which client you'd like a brief for?"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THREAD AWARENESS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You receive THREAD CONTEXT showing recent activity across all agents.
+Use it to:
+- Understand what the user has been working on
+- Pick up where they left off without them re-explaining
+- Catch if they're switching topics (acknowledge the switch)
+- Avoid asking for info that was already given
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AGENT COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger these by ending your response with [ACTION: /command args]:
+- /newlead — add new lead (needs: company, show, city, size, budget, industry, contact)
 - /enrich — enrich leads with decision maker info
-- /brief [client] — generate concept brief for a client
-- /status — full pipeline dashboard across all boards
-- /deadlines — check all upcoming deadlines
+- /brief [client] — generate concept brief
+- /status — full pipeline dashboard
+- /deadlines — upcoming deadlines
 - /reminders — client follow-up reminders
 - /techdeadlines — show organiser technical deadlines
-- /outreach — run email outreach for qualified leads
-- /outreachstatus — see outreach stats
+- /outreach — email outreach for qualified leads
+- /outreachstatus — outreach stats
 - /contractors — list contractors
-- /addcontractor — add a new contractor
-- /bookcontractor — book a contractor for a project
-- /lesson — capture lessons learned for a project
+- /addcontractor — add contractor
+- /bookcontractor — book contractor for a project
+- /lesson — capture lessons learned
 - /dealanalysis — analyse won/lost deals
 - /findfile [name] — search Google Drive
 - /indexdrive — re-index Google Drive
-- /movecard [client] | [stage] — move a card to a different pipeline stage (e.g. "move Pharma Corp to Proposal Sent" → [ACTION: /movecard Pharma Corp | 04 Proposal Sent])
+- /movecard [client] | [stage] — move pipeline card (e.g. [ACTION: /movecard Pharma Corp | 04 Proposal Sent])
 - /crossboard — cross-board health check
-- /post /caption /campaign — generate marketing content
-- /casestudy /portfolio /insight — generate content pieces
-- /contentplan — weekly content calendar
+- /post /caption /campaign /casestudy /portfolio /insight /contentplan — marketing content
 
-RESPONSE RULES:
-- If the user is asking a question you can answer from the data provided → answer it directly
-- If the user wants to DO something that an agent handles → acknowledge and end with [ACTION: /command]
-- If you need more info to trigger an action → ask for it conversationally (not a form)
-- Keep responses under 300 words unless a full report is needed
-- Use *bold* for key info, numbers, names
-- Never say "I cannot" — either do it or guide them to what's needed
-- If data shows something urgent (overdue, hot lead) — call it out proactively`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RESPONSE RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Answer directly from live data or context when you can
+- If user wants to DO something → acknowledge + trigger [ACTION: /command]
+- If genuinely missing info → ask ONE clear question, not multiple
+- Under 300 words unless full report needed
+- *Bold* for key info, numbers, names
+- Never say "I cannot" — either do it or guide them
+- Proactively flag urgent items (overdue, hot lead, upcoming deadline)
+- If a command was just run and you're the follow-up → tell the user what happened, don't repeat the action
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENTITY TRACKING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+When the user mentions a specific entity, include this at the END of your response (hidden from user):
+[FOCUS: type=lead|project|show|contractor name=EntityName]
+
+Examples:
+- "let's work on Pharma Corp" → [FOCUS: type=lead name=Pharma Corp]
+- "check Arab Health deadlines" → [FOCUS: type=show name=Arab Health]
+- "book Ahmed for the Dubai project" → [FOCUS: type=contractor name=Ahmed]`;
+
 
 export class BrainAgent extends BaseAgent {
   config: AgentConfig = {
@@ -94,39 +137,66 @@ export class BrainAgent extends BaseAgent {
       // Build live data snapshot for context
       const dataContext = await this.buildDataContext();
 
-      // Build conversation history
-      const history = this.getHistory(ctx.userId);
-
       // Pull relevant knowledge base entries for this message
       let knowledgeContext = '';
       try {
         knowledgeContext = await buildKnowledgeContext(message);
       } catch { /* silent */ }
 
-      // Build full message list for Claude
-      const messages: { role: 'user' | 'assistant'; content: string }[] = [
+      // Thread context (cross-agent activity) — already injected by BaseAgent.run()
+      const threadContext = ctx.threadContext || '';
+
+      // Build the enriched user message (data context appended to last user turn only)
+      const enrichedUserMessage = [
+        message,
+        `\n--- LIVE DATA ---\n${dataContext}`,
+        knowledgeContext ? `\n--- KNOWLEDGE BASE ---\n${knowledgeContext}` : '',
+        threadContext ? `\n${threadContext}` : '',
+      ].join('');
+
+      // Build proper multi-turn message array for Claude
+      const history = this.getHistory(ctx.userId);
+      const chatMessages: { role: 'user' | 'assistant'; content: string }[] = [
         ...history,
-        {
-          role: 'user',
-          content: `${message}\n\n--- LIVE DATA ---\n${dataContext}${knowledgeContext ? `\n\n--- KNOWLEDGE BASE ---\n${knowledgeContext}` : ''}`,
-        },
+        { role: 'user', content: enrichedUserMessage },
       ];
 
-      // Single Claude call with full context
-      const rawResponse = await generateText(
-        messages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n'),
-        SYSTEM_PROMPT,
-        600
-      );
+      // Call Claude with proper conversation history (not flattened string)
+      const rawResponse = await generateChat(chatMessages, SYSTEM_PROMPT, 800);
 
       clearTimeout(stillWorkingTimeout);
 
-      // Check if Claude wants to trigger an agent action
+      // Extract agent action trigger
       const actionMatch = rawResponse.match(/\[ACTION:\s*(\/\S+)([^\]]*)\]/);
-      let response = rawResponse.replace(/\[ACTION:[^\]]*\]/g, '').trim();
 
-      // Save to history (without the live data injection)
+      // Extract entity focus update (hidden from user)
+      const focusMatch = rawResponse.match(/\[FOCUS:\s*type=(\w+)\s+name=([^\]]+)\]/);
+
+      // Clean response — strip all meta tags before sending to user
+      let response = rawResponse
+        .replace(/\[ACTION:[^\]]*\]/g, '')
+        .replace(/\[FOCUS:[^\]]*\]/g, '')
+        .trim();
+
+      // Update active focus if Brain identified one
+      if (focusMatch) {
+        const focusType = focusMatch[1].trim();
+        const focusName = focusMatch[2].trim();
+        setActiveFocus(ctx.userId, focusType, focusName);
+      }
+
+      // Save to per-user Brain conversation history (clean message, no data context)
       this.saveHistory(ctx.userId, message, response);
+
+      // Also save to cross-agent thread context with entity info
+      saveThreadEntry(
+        ctx.userId,
+        this.config.id,
+        ctx.command,
+        message,
+        response,
+        focusMatch ? { type: focusMatch[1].trim(), name: focusMatch[2].trim() } : undefined
+      );
 
       await this.respond(ctx.chatId, response);
 
@@ -308,9 +378,9 @@ export class BrainAgent extends BaseAgent {
   private saveHistory(userId: string, message: string, response: string): void {
     const history = this.getHistory(userId);
     history.push({ role: 'user', content: message });
-    history.push({ role: 'assistant', content: response.substring(0, 300) });
-    // Keep last 15 exchanges (30 messages)
-    while (history.length > 30) history.shift();
+    history.push({ role: 'assistant', content: response.substring(0, 500) });
+    // Keep last 20 exchanges (40 messages)
+    while (history.length > 40) history.shift();
     conversations.set(userId, history);
   }
 }

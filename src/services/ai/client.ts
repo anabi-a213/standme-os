@@ -24,6 +24,29 @@ export async function generateText(prompt: string, systemPrompt?: string, maxTok
   }, 'generateText');
 }
 
+/**
+ * Multi-turn conversation with proper message history.
+ * Use this instead of generateText when you have a real conversation to continue.
+ * The last message in the array must have role 'user'.
+ */
+export async function generateChat(
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  systemPrompt?: string,
+  maxTokens = 2000
+): Promise<string> {
+  return retry(async () => {
+    const response = await getAIClient().messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: maxTokens,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages,
+    }, { timeout: 30000 });
+
+    const block = response.content[0];
+    return block.type === 'text' ? block.text : '';
+  }, 'generateChat');
+}
+
 export async function classifyIntent(message: string): Promise<string> {
   const intents = [
     'status_check', 'lead_query', 'project_query', 'deadline_query',

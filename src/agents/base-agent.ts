@@ -3,6 +3,7 @@ import { ConfidenceLevel } from '../types/confidence';
 import { writeSystemLog, LogResult } from '../utils/system-log';
 import { logger } from '../utils/logger';
 import { getBot, formatType1, formatType2, formatType3, sendToMo } from '../services/telegram/bot';
+import { getThreadContext, getActiveFocus, saveThreadEntry } from '../services/thread-context';
 
 export abstract class BaseAgent {
   abstract config: AgentConfig;
@@ -14,9 +15,26 @@ export abstract class BaseAgent {
     const startTime = Date.now();
     logger.info(`[${this.config.id}] Starting: ${this.config.name}`);
 
+    // Inject thread context so every agent knows what the user has been working on
+    if (context.userId !== 'SYSTEM') {
+      context.threadContext = getThreadContext(context.userId);
+      context.activeFocus = getActiveFocus(context.userId);
+    }
+
     try {
       const result = await this.execute(context);
       const duration = Date.now() - startTime;
+
+      // Save this interaction to thread so future agents have context
+      if (context.userId !== 'SYSTEM') {
+        saveThreadEntry(
+          context.userId,
+          this.config.id,
+          context.command,
+          context.args,
+          result.message
+        );
+      }
 
       await this.log({
         actionType: context.command,

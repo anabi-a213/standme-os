@@ -18,6 +18,10 @@ export interface AgentContext {
   args: string;
   role: UserRole;
   language: 'ar' | 'en' | 'franco';
+  /** Recent cross-agent activity for this user — injected automatically by BaseAgent.run() */
+  threadContext?: string;
+  /** What entity (lead/project/show/contractor) the user is currently focused on */
+  activeFocus?: { type: string; name: string };
 }
 
 export interface AgentResponse {
