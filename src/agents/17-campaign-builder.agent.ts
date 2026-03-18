@@ -434,7 +434,6 @@ export class CampaignBuilderAgent extends BaseAgent {
     await this.respond(ctx.chatId, summary);
 
     await this.log({
-      agent: 'CampaignBuilder',
       actionType: 'LEAD_DISCOVERY',
       showName,
       detail: `Discovered ${addedMaster} leads from "${file.name}" → Woodpecker campaign #${campaignId}`,
