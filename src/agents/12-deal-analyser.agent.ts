@@ -3,7 +3,6 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet } from '../services/google/sheets';
-import { createGoogleDoc } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType3 } from '../services/telegram/bot';
 import { saveKnowledge } from '../services/knowledge';
