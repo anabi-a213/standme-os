@@ -3,6 +3,7 @@ dotenv.config();
 
 import express from 'express';
 import { createServer } from 'http';
+import path from 'path';
 import cookieParser from 'cookie-parser';
 import { initBot, getBot, buildContext, sendToMo, formatType2 } from './services/telegram/bot';
 import { registerAgent, getAgent, getAllAgents } from './agents/registry';
@@ -213,6 +214,7 @@ async function main() {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
+  app.use(express.static(path.join(process.cwd(), 'public')));
 
   // Dashboard routes (served at /dashboard)
   app.use('/dashboard', dashboardRouter);

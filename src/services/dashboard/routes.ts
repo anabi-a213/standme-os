@@ -36,7 +36,7 @@ router.get('/', (req: Request, res: Response) => {
       <body><form method="GET"><h1>StandMe OS Dashboard</h1><input name="key" type="password" placeholder="Enter password" autofocus><br><button type="submit">Login</button></form></body></html>`);
     return;
   }
-  res.sendFile(path.join(__dirname, '../../../public/dashboard.html'));
+  res.sendFile(path.join(process.cwd(), 'public', 'dashboard.html'));
 });
 
 // API: Agent statuses

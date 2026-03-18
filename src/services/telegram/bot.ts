@@ -8,7 +8,10 @@ let _bot: TelegramBot | null = null;
 
 export function getBot(): TelegramBot {
   if (!_bot) {
-    _bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN || '', { polling: true });
+    // polling: false so that getBot() callers (agents sending messages) never
+    // accidentally start polling. Only initBot() starts polling, after the
+    // error handler is attached — preventing 409 race conditions.
+    _bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN || '', { polling: false });
   }
   return _bot;
 }
@@ -16,6 +19,8 @@ export function getBot(): TelegramBot {
 export function initBot(): TelegramBot {
   const bot = getBot();
 
+  // Attach error handler BEFORE starting polling so the 409 handler is always
+  // in place when two instances briefly overlap (Railway rolling deploy).
   bot.on('polling_error', (error: any) => {
     logger.error(`Telegram polling error: ${error.message}`);
     // 409 = another instance is still polling (happens during Railway rolling deploy)
@@ -33,6 +38,7 @@ export function initBot(): TelegramBot {
     }
   });
 
+  bot.startPolling();
   logger.info('Telegram bot initialized and polling');
   return bot;
 }
