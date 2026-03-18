@@ -92,8 +92,11 @@ async function main() {
     logger.info(`  Registered: ${agent.config.name} (${agent.config.commands.join(', ')})`);
   }
 
-  // Initialize Telegram bot
-  const bot = initBot();
+  // Initialize Telegram bot (skip polling in local dashboard-only mode)
+  if (process.env.DASHBOARD_ONLY === 'true') {
+    logger.info('[Bot] DASHBOARD_ONLY mode — Telegram polling disabled');
+  }
+  const bot = process.env.DASHBOARD_ONLY === 'true' ? getBot() : initBot();
 
   // Handle all messages
   bot.on('message', async (msg) => {
