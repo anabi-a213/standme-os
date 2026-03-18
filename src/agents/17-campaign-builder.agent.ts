@@ -31,7 +31,7 @@ import {
 } from '../services/ai/client';
 import { searchKnowledge, buildKnowledgeContext, saveKnowledge, getKnowledgeByTopic } from '../services/knowledge';
 import { searchFiles, readFileContent } from '../services/google/drive';
-import { findExhibitorFile, listExhibitorFiles, parseExhibitorFile, ExhibitorRecord } from '../services/drive-exhibitor';
+import { findExhibitorFile, findExhibitorFiles, listExhibitorFiles, parseExhibitorFile, ExhibitorRecord } from '../services/drive-exhibitor';
 import { findDecisionMaker } from '../services/apollo';
 import { searchEmailsByQuery, sendEmail } from '../services/google/gmail';
 import { registerApproval } from '../services/approvals';
@@ -152,12 +152,12 @@ export class CampaignBuilderAgent extends BaseAgent {
       return { success: false, message: 'No show name', confidence: 'LOW' };
     }
 
-    await this.respond(ctx.chatId, `Starting lead discovery for *${showName}*...\n\nScanning Drive folder for exhibitor list...`);
+    await this.respond(ctx.chatId, `Starting lead discovery for *${showName}*...\n\nScanning Drive folder for exhibitor files...`);
 
-    // ---- 1. Find exhibitor file ----
+    // ---- 1. Find all matching exhibitor files ----
 
-    const file = await findExhibitorFile(showName);
-    if (!file) {
+    const files = await findExhibitorFiles(showName);
+    if (!files.length) {
       const allFiles = await listExhibitorFiles();
       const fileList = allFiles.length
         ? allFiles.map(f => `  • ${f.name}`).join('\n')
@@ -171,30 +171,49 @@ export class CampaignBuilderAgent extends BaseAgent {
       return { success: false, message: 'No exhibitor file found', confidence: 'LOW' };
     }
 
-    await this.respond(ctx.chatId, `Found: *${file.name}*\nParsing columns and data...`);
+    await this.respond(ctx.chatId, `Found *${files.length}* file(s):\n${files.map(f => `  • ${f.name}`).join('\n')}\n\nParsing columns and data...`);
 
-    // ---- 2. Parse file (auto-detects format, AI column normalisation) ----
+    // ---- 2. Parse all files and merge (deduplicate by company name) ----
 
     let exhibitors: ExhibitorRecord[] = [];
-    try {
-      exhibitors = await parseExhibitorFile(file);
-    } catch (err: any) {
-      await this.respond(ctx.chatId, `Could not parse file: ${err.message}`);
-      return { success: false, message: err.message, confidence: 'LOW' };
+    const seenCompanies = new Set<string>();
+    for (const file of files) {
+      try {
+        const records = await parseExhibitorFile(file);
+        for (const r of records) {
+          const key = r.companyName.toLowerCase().trim();
+          if (!seenCompanies.has(key)) {
+            seenCompanies.add(key);
+            exhibitors.push(r);
+          }
+        }
+      } catch (err: any) {
+        await this.respond(ctx.chatId, `Warning: could not parse "${file.name}": ${err.message}`);
+      }
     }
 
     if (!exhibitors.length) {
-      await this.respond(ctx.chatId, 'File parsed but no company records found. Check file format and try again.');
+      await this.respond(ctx.chatId, 'Files parsed but no company records found. Check file format and try again.');
       return { success: false, message: 'Empty file', confidence: 'LOW' };
     }
 
+    // ---- 3. Detect if file already has email data (skip Apollo if yes) ----
+
+    const withEmail = exhibitors.filter(e => e.contactEmail && e.contactEmail.includes('@')).length;
+    const fileHasEmails = withEmail > 0;
+    // If the file provides emails for any records, we're in "file-only mode" —
+    // use file data as-is and skip Apollo entirely (no slow API calls, no enrichment needed)
+    const skipApollo = fileHasEmails;
+
     await this.respond(
       ctx.chatId,
-      `Parsed *${exhibitors.length}* companies from *${file.name}*.\n\n` +
-      `Searching Apollo for decision makers... (this takes a few minutes — one search per company)`
+      `Parsed *${exhibitors.length}* unique companies from ${files.length} file(s).\n` +
+      (skipApollo
+        ? `Email data found in file (*${withEmail}* records have emails) — skipping Apollo, using file data directly.`
+        : `No email data in file — will search Apollo for decision makers...`)
     );
 
-    // ---- 3. Load LEAD_MASTER + CAMPAIGN_SALES for deduplication ----
+    // ---- 4. Load LEAD_MASTER + CAMPAIGN_SALES for deduplication ----
 
     const [existingLeads, existingSales] = await Promise.all([
       readSheet(SHEETS.LEAD_MASTER),
@@ -217,7 +236,7 @@ export class CampaignBuilderAgent extends BaseAgent {
       if (email && show.includes(showName.toLowerCase())) existingEmails.add(email);
     }
 
-    // ---- 4. Apollo search — find DM per company ----
+    // ---- 5. Build verified lead list ----
 
     interface VerifiedLead {
       exhibitor: ExhibitorRecord;
@@ -228,9 +247,9 @@ export class CampaignBuilderAgent extends BaseAgent {
     }
 
     const verified: VerifiedLead[] = [];
-    let skippedDupe = 0;
-    let noContact   = 0;
-    let processed   = 0;
+    let skippedDupe  = 0;
+    let noContact    = 0;
+    let processed    = 0;
 
     for (const exhibitor of exhibitors) {
       processed++;
@@ -239,7 +258,7 @@ export class CampaignBuilderAgent extends BaseAgent {
       // Skip companies already in the pipeline for this show
       if (existingCompanies.has(companyKey)) { skippedDupe++; continue; }
 
-      // If the list already has a valid email, use it directly (no Apollo call needed)
+      // Use email from file if present
       if (exhibitor.contactEmail && exhibitor.contactEmail.includes('@')) {
         if (existingEmails.has(exhibitor.contactEmail.toLowerCase())) { skippedDupe++; continue; }
         verified.push({
@@ -257,7 +276,10 @@ export class CampaignBuilderAgent extends BaseAgent {
         continue;
       }
 
-      // Apollo search
+      // File has email column but this row is missing one — skip (no Apollo)
+      if (skipApollo) { noContact++; continue; }
+
+      // File has no email data at all — fall back to Apollo
       const contact = await findDecisionMaker(
         exhibitor.companyName,
         exhibitor.website,
@@ -282,18 +304,20 @@ export class CampaignBuilderAgent extends BaseAgent {
       await this.respond(
         ctx.chatId,
         `No new verified contacts found.\n\n` +
-        `Scanned: ${exhibitors.length} | Skipped (already in pipeline): ${skippedDupe} | No DM found: ${noContact}\n\n` +
-        `Tip: Ensure APOLLO_API_KEY is set and the exhibitor file includes company websites.`
+        `Scanned: ${exhibitors.length} | Skipped (already in pipeline): ${skippedDupe} | No email/DM: ${noContact}\n\n` +
+        (skipApollo
+          ? `Tip: The file has emails but all records are already in the pipeline or have no email in the file.`
+          : `Tip: Ensure APOLLO_API_KEY is set and the exhibitor file includes company websites.`)
       );
       return { success: false, message: 'No new verified contacts', confidence: 'LOW' };
     }
 
     await this.respond(
       ctx.chatId,
-      `Apollo search done:\n` +
+      (skipApollo ? `File data loaded:\n` : `Apollo search done:\n`) +
       `  ${exhibitors.length} companies scanned\n` +
       `  ${skippedDupe} already in pipeline (skipped)\n` +
-      `  ${noContact} no DM found\n` +
+      `  ${noContact} no email in file (skipped)\n` +
       `  *${verified.length} new verified contacts*\n\n` +
       `Running show analysis and writing records...`
     );

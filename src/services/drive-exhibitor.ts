@@ -180,27 +180,28 @@ export async function listExhibitorFiles(): Promise<DriveFile[]> {
 /**
  * Find the exhibitor file for a given show by matching the filename.
  * Case-insensitive, ignores spaces, strips extension.
+ * Returns the first/best match (use findExhibitorFiles for all matches).
  */
 export async function findExhibitorFile(showName: string): Promise<DriveFile | null> {
+  const matches = await findExhibitorFiles(showName);
+  return matches[0] || null;
+}
+
+/**
+ * Find ALL exhibitor files for a given show (e.g. multiple xlsx files for the same show).
+ * Returns every file whose name matches the show name keywords.
+ */
+export async function findExhibitorFiles(showName: string): Promise<DriveFile[]> {
   const files  = await listExhibitorFiles();
   const needle = showName.toLowerCase().replace(/\s+/g, '');
+  const words  = showName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
 
-  // Exact partial match first
-  let match = files.find(f => {
-    const base = f.name.toLowerCase().replace(/\s+/g, '').replace(/\.(xlsx?|csv|gsheet)$/, '');
-    return base.includes(needle) || needle.includes(base);
+  return files.filter(f => {
+    const base  = f.name.toLowerCase().replace(/\s+/g, '').replace(/\.(xlsx?|csv|gsheet)$/, '');
+    const fname = f.name.toLowerCase();
+    // Partial needle match OR all significant words present
+    return base.includes(needle) || needle.includes(base) || words.every(w => fname.includes(w));
   });
-
-  // Looser word-by-word match if nothing found
-  if (!match) {
-    const words = showName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    match = files.find(f => {
-      const fname = f.name.toLowerCase();
-      return words.every(w => fname.includes(w));
-    });
-  }
-
-  return match || null;
 }
 
 /**
