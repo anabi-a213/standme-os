@@ -6,6 +6,7 @@ import { readSheet } from '../services/google/sheets';
 import { getBoardCardsWithListNames } from '../services/trello/client';
 import { generateText, detectLanguage } from '../services/ai/client';
 import { formatType3, sendToTeam } from '../services/telegram/bot';
+import { buildKnowledgeContext } from '../services/knowledge';
 import { getAgent } from './registry';
 import { logger } from '../utils/logger';
 
@@ -95,12 +96,18 @@ export class BrainAgent extends BaseAgent {
       // Build conversation history
       const history = this.getHistory(ctx.userId);
 
+      // Pull relevant knowledge base entries for this message
+      let knowledgeContext = '';
+      try {
+        knowledgeContext = await buildKnowledgeContext(message);
+      } catch { /* silent */ }
+
       // Build full message list for Claude
       const messages: { role: 'user' | 'assistant'; content: string }[] = [
         ...history,
         {
           role: 'user',
-          content: `${message}\n\n--- LIVE DATA ---\n${dataContext}`,
+          content: `${message}\n\n--- LIVE DATA ---\n${dataContext}${knowledgeContext ? `\n\n--- KNOWLEDGE BASE ---\n${knowledgeContext}` : ''}`,
         },
       ];
 

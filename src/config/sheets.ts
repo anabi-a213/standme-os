@@ -184,4 +184,19 @@ export const SHEETS: Record<string, SheetConfig> = {
     },
     headerRow: 1,
   },
+
+  KNOWLEDGE_BASE: {
+    envKey: 'SHEET_KNOWLEDGE_BASE',
+    tabName: 'Knowledge',
+    columns: {
+      id: 'A',
+      source: 'B',
+      sourceType: 'C',  // drive / trello / sheet / manual
+      topic: 'D',       // company / show / contractor / project / general
+      tags: 'E',        // comma-separated keywords
+      content: 'F',     // the actual knowledge (max ~500 chars)
+      lastUpdated: 'G',
+    },
+    headerRow: 1,
+  },
 };

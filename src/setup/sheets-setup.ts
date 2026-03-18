@@ -75,6 +75,11 @@ const SHEET_CONFIGS: {
     headers: ['Timestamp', 'Agent', 'Action Type', 'Show Name',
       'Detail', 'Result', 'Retry', 'Notes'],
   },
+  {
+    envKey: 'SHEET_KNOWLEDGE_BASE',
+    tabName: 'Knowledge',
+    headers: ['ID', 'Source', 'Source Type', 'Topic', 'Tags', 'Content', 'Last Updated'],
+  },
 ];
 
 async function setupSheets() {
