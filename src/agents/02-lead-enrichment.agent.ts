@@ -5,6 +5,7 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
+import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 
 export class LeadEnrichmentAgent extends BaseAgent {
   config: AgentConfig = {
@@ -42,17 +43,22 @@ export class LeadEnrichmentAgent extends BaseAgent {
       await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'IN_PROGRESS');
 
       try {
-        // Use AI to suggest DM search strategy
+        // Pull existing knowledge about this company and industry
+        const knowledgeCtx = await buildKnowledgeContext(`${companyName} ${industry || ''}`);
+
+        // Use AI to suggest DM search strategy — enriched with KB context
         const enrichmentResult = await generateText(
           `Company: "${companyName}" | Industry: ${industry || 'unknown'}\n\n` +
-          `This company likely exhibits at trade shows. Who signs off on exhibition stand budgets?\n\n` +
+          `${knowledgeCtx ? `WHAT WE ALREADY KNOW:\n${knowledgeCtx}\n\n` : ''}` +
+          `This company exhibits at trade shows. Who signs off on exhibition stand budgets?\n\n` +
           `Give me:\n` +
           `1. Most likely decision-maker title (specific to this industry, not generic)\n` +
           `2. Where to find them: LinkedIn search terms or company website path\n` +
-          `3. One conversation opener that would land with this person\n\n` +
+          `3. What this person cares about most when choosing a stand designer\n` +
+          `4. One conversation opener that would land with this person\n\n` +
           `Be sharp. Skip anything generic.`,
           'You are a senior B2B sales researcher who specialises in the exhibition industry across MENA and Europe. You know exactly who holds the budget for trade show stands. Your intel is specific, not generic.',
-          350
+          400
         );
 
         // Calculate outreach readiness
@@ -66,6 +72,15 @@ export class LeadEnrichmentAgent extends BaseAgent {
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'ENRICHED');
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'W', readiness.toString());
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'Y', `AI Enrichment: ${enrichmentResult.substring(0, 200)}`);
+
+        // Save enrichment research to KB so all agents benefit
+        await saveKnowledge({
+          source: `enrichment-${lead.data[0]}`,
+          sourceType: 'sheet',
+          topic: companyName,
+          tags: `enrichment,decision-maker,buyer-persona,${(industry || '').toLowerCase()}`,
+          content: `DM research for ${companyName} (${industry || 'unknown'}): ${enrichmentResult.slice(0, 400)}`,
+        });
 
         // If readiness 7+, add to outreach queue
         if (readiness >= 7) {

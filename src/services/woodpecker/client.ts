@@ -136,6 +136,40 @@ export async function stopProspect(prospectId: number): Promise<void> {
   }, 'stopProspect');
 }
 
+// ---- Get campaign details including email sequences ----
+
+export interface WoodpeckerEmailStep {
+  id?: number;
+  step?: number;
+  subject: string;
+  body: string;
+  delay?: number; // days after previous step
+}
+
+export interface WoodpeckerCampaignDetails extends WoodpeckerCampaign {
+  from_name?: string;
+  from_email?: string;
+  emails?: WoodpeckerEmailStep[];
+}
+
+export async function getCampaignDetails(campaignId: number): Promise<WoodpeckerCampaignDetails> {
+  return retry(async () => {
+    const resp = await getWoodpeckerClient().get(`/campaign_list/${campaignId}`);
+    const d = resp.data;
+    // Woodpecker returns either the campaign object directly or nested
+    const campaign = Array.isArray(d) ? d[0] : (d?.campaign ?? d);
+    return {
+      id: campaign.id ?? campaignId,
+      name: campaign.name ?? '',
+      status: campaign.status ?? '',
+      from_name: campaign.from_name ?? '',
+      from_email: campaign.from_email ?? '',
+      // Email sequences are under 'emails' or 'steps' depending on API version
+      emails: campaign.emails ?? campaign.steps ?? [],
+    };
+  }, 'getCampaignDetails');
+}
+
 // ---- Create a new campaign ----
 
 export async function createCampaign(name: string, fromName: string, fromEmail: string): Promise<number> {

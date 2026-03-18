@@ -8,6 +8,7 @@ import { appendRow, readSheet, rowToObject, objectToRow } from '../services/goog
 import { createCard, findListByName } from '../services/trello/client';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { detectLanguage } from '../services/ai/client';
+import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 
 export class LeadIntakeAgent extends BaseAgent {
   config: AgentConfig = {
@@ -97,6 +98,15 @@ export class LeadIntakeAgent extends BaseAgent {
 
     // Write to Lead Master Sheet
     await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
+
+    // Save to Knowledge Base — makes this lead's context available to all agents
+    await saveKnowledge({
+      source: `lead-${leadId}`,
+      sourceType: 'sheet',
+      topic: companyName,
+      tags: `lead,company,${(industry || '').toLowerCase()},${(showName || '').toLowerCase().replace(/\s+/g, '-')},${scoreResult.status.toLowerCase()}`,
+      content: `${companyName} (${industry || 'unknown industry'}) attending ${showName || 'unknown show'}. Lead score: ${scoreResult.total}/10 (${scoreResult.status}). Contact: ${contactName || 'unknown'}. Budget: ${budget || 'unknown'}. Stand: ${standSize || 'unknown'} sqm. Language: ${language}.`,
+    });
 
     // Create Trello card for HOT/WARM leads
     let trelloCardId = '';

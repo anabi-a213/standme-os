@@ -7,6 +7,7 @@ import { getCard } from '../services/trello/client';
 import { createGoogleDoc } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
+import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 
 export class LessonsLearnedAgent extends BaseAgent {
   config: AgentConfig = {
@@ -39,10 +40,14 @@ export class LessonsLearnedAgent extends BaseAgent {
 
     await this.respond(ctx.chatId, `Generating lessons learned report...`);
 
+    // Pull KB context for this project to enrich the report
+    const kbContext = await buildKnowledgeContext(cardIdOrName);
+
     // Generate 8-section report
     const report = await generateText(
       `Write a Lessons Learned report for this exhibition stand project.\n\n` +
       `PROJECT DATA:\n${cardData}\n\n` +
+      `${kbContext ? `ADDITIONAL CONTEXT FROM KNOWLEDGE BASE:\n${kbContext}\n\n` : ''}` +
       `This document will be read by the StandMe team before the next similar project. It should be honest, specific, and immediately useful. Write it like a debrief from someone who was actually on the floor.\n\n` +
       `Structure:\n\n` +
       `# Lessons Learned: [Project Name]\n\n` +
@@ -92,6 +97,15 @@ export class LessonsLearnedAgent extends BaseAgent {
       date: new Date().toISOString().split('T')[0],
     }));
 
+    // Save key lessons to Knowledge Base — every agent benefits from project history
+    await saveKnowledge({
+      source: doc.url,
+      sourceType: 'drive',
+      topic: cardIdOrName,
+      tags: `lessons-learned,project,post-mortem,institutional-knowledge`,
+      content: `Lessons from "${cardIdOrName}": ${report.slice(0, 450)}`,
+    });
+
     await sendToMo(formatType1(
       `Lessons Learned: ${cardIdOrName}`,
       'Report generated',
@@ -109,6 +123,15 @@ export class LessonsLearnedAgent extends BaseAgent {
       await this.respond(ctx.chatId, 'Usage: /addlesson [your lesson/note]');
       return { success: false, message: 'No lesson provided', confidence: 'LOW' };
     }
+
+    // Save to Knowledge Base immediately so all agents see it
+    await saveKnowledge({
+      source: 'manual-lesson',
+      sourceType: 'manual',
+      topic: 'lessons-learned',
+      tags: `lesson,manual,institutional-knowledge`,
+      content: ctx.args.slice(0, 500),
+    });
 
     await appendRow(SHEETS.LESSONS_LEARNED, objectToRow(SHEETS.LESSONS_LEARNED, {
       id: `LL-${Date.now()}`,

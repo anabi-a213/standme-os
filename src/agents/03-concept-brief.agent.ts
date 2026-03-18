@@ -6,6 +6,7 @@ import { readSheet, findRowByValue } from '../services/google/sheets';
 import { addComment } from '../services/trello/client';
 import { createGoogleDoc } from '../services/google/drive';
 import { generateBrief, generateText } from '../services/ai/client';
+import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { sendToTeam } from '../services/telegram/bot';
 
@@ -86,7 +87,7 @@ export class ConceptBriefAgent extends BaseAgent {
       }
     }
 
-    // Get lessons learned for context
+    // Get lessons learned from both the sheet and the Knowledge Base
     let lessonsContext = '';
     try {
       const lessons = await readSheet(SHEETS.LESSONS_LEARNED);
@@ -98,6 +99,12 @@ export class ConceptBriefAgent extends BaseAgent {
         lessonsContext = relevantLessons.map(r => `${r[7] || ''} ${r[8] || ''}`).join('\n').substring(0, 500);
       }
     } catch { /* lessons are optional */ }
+
+    // Enrich with Knowledge Base — show context, company history, past briefs
+    const kbContext = await buildKnowledgeContext(`${showName} ${companyName} ${industry} brief design stand`);
+    if (kbContext) {
+      lessonsContext = `${lessonsContext}\n\nKNOWLEDGE BASE CONTEXT:\n${kbContext}`.trim();
+    }
 
     // Generate brief
     await this.respond(ctx.chatId, `Generating concept brief for ${companyName}...`);
@@ -117,6 +124,15 @@ export class ConceptBriefAgent extends BaseAgent {
       `Concept Brief — ${companyName} — ${showName}`,
       briefContent
     );
+
+    // Save brief to Knowledge Base — future briefs and emails benefit from this
+    await saveKnowledge({
+      source: doc.url,
+      sourceType: 'drive',
+      topic: companyName,
+      tags: `brief,concept,${showName.toLowerCase().replace(/\s+/g, '-')},${(industry || '').toLowerCase()},design`,
+      content: `Concept brief for ${companyName} at ${showName}. ${standSize}sqm, budget ${budget}. Key concepts: ${briefContent.slice(200, 600)}`,
+    });
 
     // Send to Mo for approval
     await sendToMo(formatType1(

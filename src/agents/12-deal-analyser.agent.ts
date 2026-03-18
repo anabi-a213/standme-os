@@ -6,6 +6,7 @@ import { readSheet } from '../services/google/sheets';
 import { createGoogleDoc } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType3 } from '../services/telegram/bot';
+import { saveKnowledge } from '../services/knowledge';
 
 export class DealAnalyserAgent extends BaseAgent {
   config: AgentConfig = {
@@ -81,6 +82,28 @@ export class DealAnalyserAgent extends BaseAgent {
       250
     );
     sections.push({ label: 'THIS WEEK: ACT ON THIS', content: `  ${insight}` });
+
+    // Save weekly insight to KB so all agents have strategic context
+    await saveKnowledge({
+      source: 'deal-analyser-weekly',
+      sourceType: 'sheet',
+      topic: 'deal-analysis',
+      tags: `analytics,weekly,pipeline,strategy,${new Date().toISOString().split('T')[0]}`,
+      content: `Weekly insight (${new Date().toISOString().split('T')[0]}): ${insight} | Top show: ${topShow?.[0] || 'unknown'}. Top industry: ${topIndustry?.[0] || 'unknown'}. Won: ${wonDeals}, Lost: ${lostDeals}.`,
+    });
+
+    // Save per-show performance so campaign builder can use it
+    for (const [show, data] of showCounts) {
+      if (data.total >= 3) {
+        await saveKnowledge({
+          source: 'deal-analyser-show',
+          sourceType: 'sheet',
+          topic: show,
+          tags: `show-performance,analytics,${show.toLowerCase().replace(/\s+/g, '-')}`,
+          content: `${show} performance: ${data.total} leads, ${data.won} won, ${data.lost} lost. Win rate: ${data.total > 0 ? Math.round((data.won / data.total) * 100) : 0}%.`,
+        }).catch(() => { /* non-blocking */ });
+      }
+    }
 
     const summary = formatType3('DEAL ANALYSIS', sections);
     await sendToMo(summary);

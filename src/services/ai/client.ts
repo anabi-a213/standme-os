@@ -180,39 +180,48 @@ export async function analyzeShow(showName: string, driveContent: string, knowle
   targetProfile: string;
   painPoints: string;
   standMeAngle: string;
+  buyingTriggers: string;
+  typicalTimeline: string;
+  commonObjections: string;
 }> {
-  const prompt = `You are analysing a trade show to build a targeted email campaign for StandMe (exhibition stand design and build, MENA + Europe).
+  const prompt = `You are a senior sales strategist who has personally sold exhibition stands at every major trade show in MENA and Europe for 15 years. You know the psychology of exhibitors: the budget pressure, the fear of looking smaller than competitors, the technical deadline anxiety, the internal approval chains.
 
-SHOW: ${showName}
+SHOW TO ANALYSE: ${showName}
 
-KNOWLEDGE BASE CONTEXT:
-${knowledgeContext || 'No existing knowledge found.'}
+KNOWLEDGE BASE (from past projects and files):
+${knowledgeContext || 'No existing knowledge — rely on industry expertise.'}
 
-DRIVE FILES CONTENT:
-${driveContent || 'No Drive files found for this show.'}
+DRIVE FILES:
+${driveContent || 'No Drive files found — rely on industry expertise.'}
 
-Based on all available information, provide a strategic show analysis in this exact JSON format:
+Analyse this show as a sales target for StandMe. Return this exact JSON:
 {
-  "summary": "2-3 sentence overview of the show: what it is, who attends, why companies exhibit here",
-  "industries": ["industry1", "industry2", "industry3"],
-  "targetProfile": "Description of the ideal exhibitor company profile we should target: size, type, what they care about at this show",
-  "painPoints": "Key pain points exhibitors face at this show: stand design pressure, last minute changes, quality issues, cost overruns, local supplier problems",
-  "standMeAngle": "The most compelling angle for StandMe's outreach at this specific show: what unique value do we offer that resonates with exhibitors here"
+  "summary": "2-3 sentences: what the show is, who really attends, the competitive pressure on the show floor that makes stand quality matter",
+  "industries": ["primary industry", "secondary", "tertiary"],
+  "targetProfile": "The ideal company to target: size, role of the person signing off on the stand budget, what they care about most at this show, what makes them switch suppliers",
+  "painPoints": "The 3-4 real pain points exhibitors have at this show. Not generic — specific to this show's format, location, organiser rules, and typical exhibitor profile",
+  "standMeAngle": "Our strongest sales angle for this show specifically. What problem do we solve that no generic local contractor can? What proof point resonates most here?",
+  "buyingTriggers": "What makes a company at this show pick up the phone to book a stand designer RIGHT NOW? What event, deadline, or realisation triggers the decision?",
+  "typicalTimeline": "When do companies at this show start making stand decisions? How long does the sales cycle typically run? What are the key dates?",
+  "commonObjections": "The 2-3 most common objections we will face from companies at this show and how to handle them as StandMe"
 }
 
-Return ONLY valid JSON. No other text.`;
+Return ONLY valid JSON. Be specific, not generic. Your analysis will directly drive email copy and sales conversations.`;
 
-  const result = await generateText(prompt, 'You are a senior business analyst specialising in the exhibition industry. You return only valid JSON.', 600);
+  const result = await generateText(prompt, 'You are a world-class sales strategist specialising in exhibition stands. You return only valid JSON. Your insights are specific, actionable, and grounded in real exhibition industry dynamics.', 900);
 
   try {
     return JSON.parse(result);
   } catch {
     return {
-      summary: `${showName} is a major trade show.`,
+      summary: `${showName} is a major trade show where exhibitor stand quality directly impacts brand perception and lead generation.`,
       industries: ['General'],
-      targetProfile: 'Mid-to-large companies exhibiting with custom stands',
-      painPoints: 'Stand design, build quality, local logistics, cost management',
-      standMeAngle: 'Custom stand design and build with proven MENA and European delivery',
+      targetProfile: 'Mid-to-large companies with custom stand requirements and allocated exhibition budget',
+      painPoints: 'Last-minute design changes, local contractor reliability, cost overruns, technical deadline stress',
+      standMeAngle: 'Custom stand design and build with proven delivery across MENA and Europe, fixed-price proposals',
+      buyingTriggers: 'Competitor doing a bigger stand, bad experience with previous supplier, upcoming show registration deadline',
+      typicalTimeline: '4-6 months before show. Decision made 3 months out. Brief required 10 weeks before build.',
+      commonObjections: 'We already have a supplier | Budget is not confirmed yet | Too early to think about it',
     };
   }
 }
@@ -224,45 +233,52 @@ export async function generateCampaignEmail(context: {
   showSummary: string;
   standMeAngle: string;
   painPoints: string;
+  buyingTriggers: string;
+  commonObjections: string;
   companyContext: string;
   industry: string;
   emailNumber: number;
+  pastEmailExamples?: string;
 }): Promise<{ subject: string; body: string }> {
 
-  const hooks: Record<number, string> = {
-    1: `First email. Open with something specific about ${context.showName} and what companies like ${context.companyName} typically face there. One sharp observation grounded in the show intelligence. One clear StandMe value. One easy CTA.`,
-    2: `Follow-up after no reply. Completely different angle. Lead with a show-specific insight or a specific result from a past project at a similar show. Not "just following up."`,
-    3: `Final touch. Short. Human. Reference the show date as a reason to act now. Easy yes or no.`,
+  const strategies: Record<number, string> = {
+    1: `STRATEGY: Pattern interrupt. Most cold emails from stand designers open with "We design exhibition stands." Don't. Open with the show, a specific pressure this company faces there, or something about their industry at that moment. Make them think "this person gets it." One sharp observation. One clear StandMe value statement. One low-friction CTA (a question, not a meeting request).`,
+    2: `STRATEGY: Different angle, new value. Never reference the first email. Lead with a specific case study, a result from a similar company at a similar show, or a counterintuitive insight about exhibiting at ${context.showName}. Create curiosity. Make them feel they are missing something.`,
+    3: `STRATEGY: Short, human, time-bound. The show is coming. Something that would take 90 seconds to read and 10 seconds to reply yes or no. Reference the timeline pressure without being pushy. Feel like a message from a real person on a real day, not a sequence.`,
   };
 
-  const prompt = `Write a cold outreach email for StandMe targeting a company exhibiting at ${context.showName}.
+  const prompt = `You are Mo from StandMe — 15 years designing and building exhibition stands across MENA and Europe. You have closed deals with exhibitors at Arab Health, Gulfood, Hannover Messe, ISE, MEDICA, Interpack, and dozens more. You know the floor. You know the pressure. You know what makes companies pick up the phone.
 
-ABOUT STANDME: Custom exhibition stand design and build. MENA and Europe. We know what works on the show floor — creative, fast, built for results.
-
-SHOW INTELLIGENCE:
-${context.showSummary}
-
-OUR ANGLE FOR THIS SHOW:
-${context.standMeAngle}
-
-EXHIBITOR PAIN POINTS AT THIS SHOW:
-${context.painPoints}
-
-TARGET COMPANY:
+WRITE A COLD EMAIL TO:
 Company: ${context.companyName}
 Contact: ${context.contactName}
+Show: ${context.showName}
 Industry: ${context.industry}
-${context.companyContext ? `Known context:\n${context.companyContext}` : ''}
+${context.companyContext ? `\nWHAT WE KNOW ABOUT THIS COMPANY:\n${context.companyContext}` : ''}
 
-EMAIL STRATEGY: ${hooks[context.emailNumber] || hooks[1]}
+SHOW INTELLIGENCE (use this, do not say it explicitly):
+${context.showSummary}
 
-RULES (non-negotiable):
-- Never use: "I hope this email finds you well", "I wanted to reach out", "touching base", "synergy", "leverage"
-- Never use em dashes
-- Subject: specific to this company and show. Not generic. Something they will open.
-- Body: maximum 5 lines. Grounded in the show intelligence above. One CTA.
-- Tone: direct, warm, expert. Like a smart colleague who knows the show.
-- Sign off as: Mo / StandMe
+OUR STRONGEST ANGLE AT THIS SHOW:
+${context.standMeAngle}
+
+WHAT TRIGGERS DECISIONS:
+${context.buyingTriggers}
+
+COMMON OBJECTIONS WE'LL FACE:
+${context.commonObjections}
+${context.pastEmailExamples ? `\nSUCCESSFUL EMAIL EXAMPLES FROM PAST CAMPAIGNS (learn the style and what works):\n${context.pastEmailExamples}` : ''}
+
+${strategies[context.emailNumber] || strategies[1]}
+
+RULES:
+- Never start with "I hope", "I wanted to reach out", "just following up", "touching base"
+- Never use em dashes, "synergy", "leverage", "value proposition"
+- Subject: makes them open it. Specific. Not "Your stand at ${context.showName}." Something earned.
+- Body: 4-5 lines maximum. Every line earns its place. One CTA at the end.
+- The CTA should be easy to say yes to: a question, a 15-minute call, a quick response
+- Tone: Mo is direct, warm, confident. He knows the industry. Not a salesperson — a trusted expert.
+- Sign as: Mo / StandMe
 
 Return in this exact format:
 SUBJECT: [subject line]
@@ -271,15 +287,15 @@ BODY:
 
   const result = await generateText(
     prompt,
-    'You write cold emails that get replies. You know the exhibition industry deeply. Your emails are specific, human, and worth reading. No em dashes. No fluff.',
-    600
+    'You are Mo from StandMe. Senior, credible, direct. You write cold emails that land because they are specific and human. No em dashes. No filler. No corporate speak. Every word earns its place.',
+    700
   );
 
   const subjectMatch = result.match(/SUBJECT:\s*(.+)/);
   const bodyMatch = result.match(/BODY:\s*([\s\S]+)/);
 
   return {
-    subject: subjectMatch?.[1]?.trim() || `Your stand at ${context.showName}`,
+    subject: subjectMatch?.[1]?.trim() || `${context.showName} — quick question`,
     body: bodyMatch?.[1]?.trim() || result,
   };
 }
@@ -292,56 +308,85 @@ export async function generateSalesReply(context: {
   conversationHistory: string;
   collectedInfo: Record<string, string>;
   missingInfo: string[];
-}): Promise<{ reply: string; classification: string; extractedInfo: Record<string, string> }> {
+  knowledgeContext?: string;
+}): Promise<{ reply: string; classification: string; extractedInfo: Record<string, string>; urgencyUsed: boolean }> {
 
-  const missingList = context.missingInfo.length > 0
-    ? `\nWe still need from them: ${context.missingInfo.join(', ')}`
-    : '\nWe have all key information.';
+  const missingPriority: Record<string, number> = {
+    standSize: 1,
+    showDates: 2,
+    budget: 3,
+    phone: 4,
+    requirements: 5,
+  };
 
-  const prompt = `You are Mo from StandMe handling a sales reply. Your job: keep the conversation moving toward a signed deal.
+  const topMissing = context.missingInfo
+    .sort((a, b) => (missingPriority[a] || 9) - (missingPriority[b] || 9))
+    .slice(0, 2);
 
-COMPANY: ${context.companyName} (${context.contactName})
-SHOW: ${context.showName}
+  const collectedSummary = Object.entries(context.collectedInfo)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(' | ') || 'none yet';
 
-CONVERSATION HISTORY:
+  const prompt = `You are Mo from StandMe. You have 15 years closing exhibition stand deals. You know how to read a prospect's reply and respond in a way that moves the deal forward without being pushy.
+
+DEAL IN PROGRESS:
+Company: ${context.companyName} (${context.contactName})
+Show: ${context.showName}
+Collected so far: ${collectedSummary}
+Still need: ${topMissing.join(', ') || 'nothing — we have all key info'}
+
+${context.knowledgeContext ? `KNOWLEDGE BASE CONTEXT:\n${context.knowledgeContext}\n` : ''}
+
+CONVERSATION SO FAR:
 ${context.conversationHistory || 'This is the first reply.'}
 
 THEIR LATEST MESSAGE:
 ${context.prospectMessage}
 
-INFORMATION COLLECTED SO FAR:
-${Object.entries(context.collectedInfo).map(([k, v]) => `${k}: ${v}`).join('\n') || 'None yet'}
-${missingList}
+YOUR SALES INTELLIGENCE:
+- If they show ANY interest, the deal is alive. Move to qualify (size, budget, dates) without interrogating.
+- Ask for ONE thing at a time. Two questions = no answer.
+- If they mention a competitor or existing supplier, acknowledge it then differentiate (speed, quality, specific show experience).
+- If they mention budget concerns, don't drop price — reframe value. Offer a site visit or concept sketch.
+- If they give you stand size and show dates, propose a call or initial concept meeting immediately.
+- If they seem ready to talk, offer a specific time slot, not "let me know when works."
+- READY_TO_CLOSE means: they have confirmed interest + have the key info OR have agreed to a call/meeting.
+- Create natural urgency only if real: show registration deadlines, technical submission dates, build crew availability.
 
-YOUR TASK:
-1. Classify this reply: INTERESTED | QUESTION | NOT_INTERESTED | MORE_INFO_NEEDED | READY_TO_CLOSE
-2. Extract any new info from their message (stand size, budget, dates, contact details, requirements)
-3. Write a reply that:
-   - Answers their question OR acknowledges their interest
-   - Naturally asks for the MOST IMPORTANT missing piece of information (one at a time)
-   - Moves the conversation toward booking a call or sending a brief
-   - Stays short (3-5 lines), warm, and human
+TASK:
+1. Classify: INTERESTED | QUESTION | NOT_INTERESTED | MORE_INFO_NEEDED | READY_TO_CLOSE
+2. Extract new info: stand size, budget, show dates, phone, requirements, decision timeline
+3. Write a reply that advances the deal. Short (3-5 lines). Warm. Expert. Human.
 
 Return ONLY this JSON:
 {
   "classification": "INTERESTED|QUESTION|NOT_INTERESTED|MORE_INFO_NEEDED|READY_TO_CLOSE",
-  "extractedInfo": { "standSize": "...", "budget": "...", "showDates": "...", "phone": "..." },
-  "reply": "The full reply email text, signed Mo / StandMe"
+  "extractedInfo": { "standSize": "...", "budget": "...", "showDates": "...", "phone": "...", "requirements": "...", "decisionTimeline": "..." },
+  "urgencyUsed": false,
+  "reply": "Full reply text. Signed: Mo / StandMe"
 }`;
 
   const result = await generateText(
     prompt,
-    'You are Mo from StandMe — direct, warm, expert in exhibition stands. You write short sales emails that move deals forward. Return only valid JSON.',
-    700
+    'You are Mo from StandMe. Expert sales professional. You read prospects like a book and write replies that move deals forward. You are warm, direct, and specific. Return only valid JSON.',
+    800
   );
 
   try {
-    return JSON.parse(result);
+    const parsed = JSON.parse(result);
+    return {
+      classification: parsed.classification || 'QUESTION',
+      extractedInfo: parsed.extractedInfo || {},
+      urgencyUsed: parsed.urgencyUsed || false,
+      reply: parsed.reply || `Thanks for your message. Could you share the stand size you're working with for ${context.showName}?\n\nBest,\nMo / StandMe`,
+    };
   } catch {
     return {
       classification: 'QUESTION',
       extractedInfo: {},
-      reply: `Thanks for getting back to me.\n\nHappy to help with your stand at ${context.showName}. To put together the right proposal, could you share the stand size you're working with?\n\nBest,\nMo / StandMe`,
+      urgencyUsed: false,
+      reply: `Thanks for your message.\n\nHappy to help with your stand at ${context.showName}. To put together the right approach, could you share the stand size?\n\nBest,\nMo / StandMe`,
     };
   }
 }

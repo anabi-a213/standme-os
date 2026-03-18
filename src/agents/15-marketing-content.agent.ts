@@ -6,6 +6,7 @@ import { readSheet } from '../services/google/sheets';
 import { createGoogleDoc } from '../services/google/drive';
 import { generateMarketingContent } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
+import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 
 export class MarketingContentAgent extends BaseAgent {
   config: AgentConfig = {
@@ -27,19 +28,24 @@ export class MarketingContentAgent extends BaseAgent {
 
     await this.respond(ctx.chatId, `Generating ${contentType}...`);
 
-    // Get extra context for case studies
+    // Get extra context: lessons learned sheet + Knowledge Base
     let extraContext = '';
-    if (contentType === 'casestudy') {
-      try {
+    try {
+      // Always pull KB context — gives the AI the full picture
+      const kbContext = await buildKnowledgeContext(`${topic} ${contentType} exhibition stand`);
+      if (kbContext) extraContext = `KNOWLEDGE BASE:\n${kbContext}`;
+
+      if (contentType === 'casestudy' || contentType === 'portfolio' || contentType === 'insight') {
         const lessons = await readSheet(SHEETS.LESSONS_LEARNED);
         const relevant = lessons.filter(r =>
           r.some(cell => cell?.toLowerCase().includes(topic.toLowerCase()))
         );
         if (relevant.length > 0) {
-          extraContext = relevant.map(r => `${r[1]}: ${r[7] || ''} ${r[8] || ''}`).join('\n');
+          const lessonsText = relevant.map(r => `${r[1]}: ${r[7] || ''} ${r[8] || ''}`).join('\n');
+          extraContext = `${extraContext}\n\nLESSONS LEARNED:\n${lessonsText}`.trim();
         }
-      } catch { /* optional */ }
-    }
+      }
+    } catch { /* optional */ }
 
     const content = await generateMarketingContent(contentType, topic || 'weekly plan', extraContext);
 
@@ -48,6 +54,15 @@ export class MarketingContentAgent extends BaseAgent {
       `${contentType.toUpperCase()} — ${topic || 'Content Plan'} — ${new Date().toISOString().split('T')[0]}`,
       content
     );
+
+    // Save content to KB — future content and email agents learn from it
+    await saveKnowledge({
+      source: doc.url,
+      sourceType: 'drive',
+      topic: topic || 'marketing',
+      tags: `marketing,${contentType},content,brand-voice`,
+      content: `${contentType.toUpperCase()} about "${topic || 'general'}": ${content.slice(0, 400)}`,
+    }).catch(() => { /* non-blocking */ });
 
     // Send to Mo for approval
     await sendToMo(formatType1(

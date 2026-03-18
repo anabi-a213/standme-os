@@ -95,6 +95,7 @@ async function main() {
         `/newcampaign [show] — Build full show campaign\n` +
         `/salesreplies — Handle campaign replies (sales loop)\n` +
         `/campaignstatus [show] — Campaign pipeline status\n` +
+        `/indexwoodpecker — Index all Woodpecker emails to Knowledge Base\n` +
         `/contractors — List contractors\n` +
         `/addcontractor — Add contractor\n` +
         `/bookcontractor — Book contractor\n` +

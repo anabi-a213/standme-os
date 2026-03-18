@@ -5,6 +5,7 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
 import { addProspectToCampaign, getCampaignStats, listCampaigns, WoodpeckerProspect } from '../services/woodpecker/client';
 import { generateOutreachEmail } from '../services/ai/client';
+import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
@@ -50,6 +51,9 @@ export class OutreachAgent extends BaseAgent {
 
       if (!dmEmail) continue;
 
+      // Pull context from Knowledge Base — company history, show intel, past email patterns
+      const companyContext = await buildKnowledgeContext(`${company} ${showName} outreach email`);
+
       // Generate personalised email
       let email: { subject: string; body: string };
       try {
@@ -57,7 +61,7 @@ export class OutreachAgent extends BaseAgent {
           companyName: company,
           contactName: dmName,
           showName,
-          industry: '',
+          industry: companyContext ? `(context: ${companyContext.slice(0, 200)})` : '',
           emailNumber: 1,
         });
       } catch (err: any) {
@@ -91,6 +95,15 @@ export class OutreachAgent extends BaseAgent {
         snippet3: email.body.slice(0, 255),
         tags: `standme-outreach,${showName.toLowerCase().replace(/\s+/g, '-')}`,
       };
+
+      // Save outreach attempt to KB
+      await saveKnowledge({
+        source: `outreach-${logId}`,
+        sourceType: 'manual',
+        topic: company,
+        tags: `outreach,email,${showName.toLowerCase().replace(/\s+/g, '-')},pending`,
+        content: `Outreach email drafted for ${company} (${dmEmail}) at ${showName}. Subject: ${email.subject}. Body preview: ${email.body.slice(0, 200)}`,
+      }).catch(() => { /* non-blocking */ });
 
       // Register approval callback — this fires when Mo types /approve_outreach_xxx
       const approvalId = `outreach_${leadId}`;
