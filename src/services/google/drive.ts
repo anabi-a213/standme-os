@@ -267,12 +267,29 @@ export async function readPdfAsText(fileId: string): Promise<string> {
   }, 'readPdfAsText');
 }
 
+// ---- Read Google Slides as plain text ----
+
+export async function readSlidesAsText(fileId: string): Promise<string> {
+  return retry(async () => {
+    const response = await getDriveClient().files.export({
+      fileId,
+      mimeType: 'text/plain',
+      supportsAllDrives: true,
+    } as any).catch(() => null);
+
+    if (!response) return '';
+    const text = response.data as string;
+    return typeof text === 'string' ? text.slice(0, 6000) : '';
+  }, 'readSlidesAsText');
+}
+
 // ---- Read any file content based on type ----
 
 export async function readFileContent(file: DriveFile): Promise<string> {
   const mime = file.mimeType;
   if (mime === 'application/vnd.google-apps.document') return readDocContent(file.id);
   if (mime === 'application/vnd.google-apps.spreadsheet') return readSheetAsText(file.id);
+  if (mime === 'application/vnd.google-apps.presentation') return readSlidesAsText(file.id);
   if (mime === 'application/pdf') return readPdfAsText(file.id);
   return '';
 }
