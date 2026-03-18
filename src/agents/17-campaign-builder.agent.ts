@@ -387,7 +387,7 @@ export class CampaignBuilderAgent extends BaseAgent {
           outreachReadiness: 'READY',
           language:         (exhibitor.country || '').toLowerCase().includes('arab') ? 'ar' : 'en',
           notes:            [
-            `Source: ${file.name}`,
+            `Source: ${files.map(f => f.name).join(', ')}`,
             exhibitor.country    ? `Country: ${exhibitor.country}`      : '',
             exhibitor.website    ? `Website: ${exhibitor.website}`      : '',
             exhibitor.boothNumber ? `Booth: ${exhibitor.boothNumber}`   : '',
@@ -426,7 +426,7 @@ export class CampaignBuilderAgent extends BaseAgent {
           lastReplyDate:  '',
           lastActionDate: now,
           leadMasterId:   leadId,
-          notes:          `Discovery from ${file.name}`,
+          notes:          `Discovery from ${files.map(f => f.name).join(', ')}`,
           website:        exhibitor.website || '',
           logoUrl:        '',
         }));
@@ -441,7 +441,7 @@ export class CampaignBuilderAgent extends BaseAgent {
 
     const summary =
       `*${showName} — Lead Discovery Complete*\n\n` +
-      `File: *${file.name}*\n` +
+      `Files: *${files.map(f => f.name).join(', ')}*\n` +
       `Companies scanned: ${exhibitors.length}\n` +
       `Already in pipeline: ${skippedDupe}\n` +
       `No DM found: ${noContact}\n` +
@@ -460,7 +460,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     await this.log({
       actionType: 'LEAD_DISCOVERY',
       showName,
-      detail: `Discovered ${addedMaster} leads from "${file.name}" → Woodpecker campaign #${campaignId}`,
+      detail: `Discovered ${addedMaster} leads from "${files.map(f => f.name).join(', ')}" → Woodpecker campaign #${campaignId}`,
       result: 'SUCCESS',
     });
 
