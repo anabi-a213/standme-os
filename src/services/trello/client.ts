@@ -20,6 +20,7 @@ function getTrelloClient(): AxiosInstance {
   if (!_client) {
     _client = axios.create({
       baseURL: 'https://api.trello.com/1',
+      timeout: 10000,
       params: {
         key: process.env.TRELLO_API_KEY,
         token: process.env.TRELLO_TOKEN,

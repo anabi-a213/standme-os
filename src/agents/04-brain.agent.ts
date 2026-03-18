@@ -209,8 +209,11 @@ export class BrainAgent extends BaseAgent {
     }, 12000);
 
     try {
-      // Build live data snapshot for context
-      const dataContext = await this.buildDataContext();
+      // Build live data snapshot for context (max 8s — don't let slow APIs hang the bot)
+      const dataContext = await Promise.race([
+        this.buildDataContext(),
+        new Promise<string>(resolve => setTimeout(() => resolve('No live data available.'), 8000)),
+      ]);
 
       // Pull relevant knowledge base entries for this message
       let knowledgeContext = '';
