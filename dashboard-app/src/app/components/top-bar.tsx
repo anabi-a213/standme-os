@@ -51,19 +51,32 @@ export function TopBar({ onOpenCommandPalette, onOpenShortcuts, systemStats, age
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
           >
-            {/* Gold monogram */}
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)] shadow-[var(--shadow-gold)]">
-              <span className="font-mono text-sm font-bold text-black">SM</span>
-            </div>
+            {/* Brand logo */}
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-md bg-white shadow-[var(--shadow-gold)]">
+                <img
+                  src="/dashboard/standme-logo.png"
+                  alt="StandMe"
+                  className="h-8 w-8 object-contain"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                    if (fallback) fallback.style.display = 'flex';
+                  }}
+                />
+                {/* Fallback if image not loaded */}
+                <span className="hidden font-mono text-sm font-bold text-black">SM</span>
+              </div>
 
-            {/* Wordmark */}
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold tracking-tight text-[var(--text)]">
-                STANDME OS
-              </span>
-              <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-                Intelligence Platform
-              </span>
+              {/* Wordmark */}
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold tracking-tight text-[var(--text)]">
+                  STANDME OS
+                </span>
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+                  Intelligence Platform
+                </span>
+              </div>
             </div>
           </motion.div>
 

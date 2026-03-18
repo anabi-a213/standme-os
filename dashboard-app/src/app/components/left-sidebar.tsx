@@ -136,17 +136,31 @@ export function LeftSidebar({ onCommandClick, runningCommands, agentConfigs }: L
     <div className="fixed left-0 top-[var(--topbar-height)] z-40 h-[calc(100vh-var(--topbar-height))] w-[var(--sidebar-width)] border-r border-[var(--border-subtle)] bg-[var(--surface)]/80 backdrop-blur-xl">
       <div className="flex h-full flex-col">
         {/* Logo section */}
-        <div className="border-b border-[var(--border-subtle)] px-5 py-6">
+        <div className="border-b border-[var(--border-subtle)] px-4 pb-4 pt-5">
           <motion.div
-            className="mb-4 flex items-center gap-3"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
+            className="mb-3 flex items-center justify-center"
           >
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)] shadow-[var(--shadow-gold)]">
-              <span className="font-mono text-base font-bold text-black">SM</span>
+            {/* Full logo on white bg */}
+            <div className="flex w-full items-center justify-center overflow-hidden rounded-lg bg-white px-3 py-2 shadow-[var(--shadow-gold)]">
+              <img
+                src="/dashboard/standme-logo.png"
+                alt="StandMe Group"
+                className="h-14 w-auto object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                  if (fallback) fallback.style.display = 'flex';
+                }}
+              />
+              {/* Fallback */}
+              <div className="hidden h-14 w-full items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)]">
+                <span className="font-mono text-lg font-bold text-black">SM</span>
+              </div>
             </div>
           </motion.div>
-          <div className="mx-auto h-px w-[40%] bg-gradient-to-r from-transparent via-[var(--gold)] to-transparent opacity-50" />
+          <div className="mx-auto h-px w-[60%] bg-gradient-to-r from-transparent via-[var(--gold)] to-transparent opacity-40" />
         </div>
 
         {/* Command groups */}
