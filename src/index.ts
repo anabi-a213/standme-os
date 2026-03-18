@@ -205,27 +205,32 @@ async function main() {
     }
 
     const { status, prospect } = req.body || {};
-    const prospectEmail = prospect?.email || '';
+    const prospectEmail = (prospect?.email || '').toLowerCase();
+    const eventType = (status || '').toUpperCase();
 
-    logger.info(`[Webhook] Woodpecker event: ${status} — ${prospectEmail}`);
+    logger.info(`[Webhook] Woodpecker: ${eventType} — ${prospectEmail}`);
 
-    // On reply: trigger immediate sales reply processing (don't wait for 2h cron)
-    if (status === 'REPLIED' && prospectEmail) {
-      const campaignAgent = getAgent('/salesreplies');
-      if (campaignAgent) {
-        const ctx = {
-          userId: 'webhook',
-          username: 'webhook',
-          chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
-          command: 'scheduled', // silent mode — no "Checking for replies..." message
-          args: '',
-          role: UserRole.ADMIN,
-          language: 'en' as const,
-        };
-        campaignAgent.run(ctx).catch((err: any) =>
-          logger.warn(`[Webhook] Reply processing error: ${err.message}`)
-        );
-      }
+    const campaignAgent = getAgent('/salesreplies');
+    if (!campaignAgent || !prospectEmail) return;
+
+    if (eventType === 'REPLIED') {
+      // Trigger full AI sales reply loop immediately (no 2h wait)
+      const ctx = {
+        userId: 'webhook',
+        username: 'webhook',
+        chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
+        command: 'scheduled',
+        args: '',
+        role: UserRole.ADMIN,
+        language: 'en' as const,
+      };
+      campaignAgent.run(ctx).catch((err: any) =>
+        logger.warn(`[Webhook] Reply processing error: ${err.message}`)
+      );
+    } else if (['OPENED', 'BOUNCED', 'INVALID', 'INTERESTED', 'NOT_INTERESTED', 'UNSUBSCRIBED'].includes(eventType)) {
+      // Direct status updates — no full loop needed
+      (campaignAgent as any).handleWebhookEvent(eventType, prospectEmail)
+        .catch((err: any) => logger.warn(`[Webhook] Event error: ${err.message}`));
     }
   });
 

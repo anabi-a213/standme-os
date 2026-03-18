@@ -728,6 +728,84 @@ export class CampaignBuilderAgent extends BaseAgent {
   // =====================================================================
 
   /**
+   * Called by the Woodpecker webhook for all non-reply events.
+   * Updates CAMPAIGN_SALES status and notifies Mo where needed.
+   */
+  public async handleWebhookEvent(eventType: string, prospectEmail: string): Promise<void> {
+    if (!prospectEmail) return;
+
+    try {
+      const salesRows = await readSheet(SHEETS.CAMPAIGN_SALES);
+      const match = salesRows.slice(1)
+        .map((row, i) => ({ row, index: i + 2 }))
+        .find(({ row }) => (row[5] || '').toLowerCase() === prospectEmail.toLowerCase());
+
+      if (!match) {
+        logger.warn(`[CampaignBuilder] Webhook ${eventType}: no record for ${prospectEmail}`);
+        return;
+      }
+
+      const { row, index } = match;
+      const companyName = row[3] || '';
+      const showName    = row[2] || '';
+      const contactName = row[4] || '';
+      const existingLeadMasterId = row[17] || '';
+      const currentStatus = (row[7] || '').toUpperCase();
+      const now = new Date().toISOString();
+
+      switch (eventType.toUpperCase()) {
+
+        case 'OPENED':
+          // Only move forward — don't overwrite REPLIED/INTERESTED with OPENED
+          if (currentStatus === 'SENT') {
+            await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'OPENED');
+            await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', now);
+            logger.info(`[CampaignBuilder] ${companyName} opened email`);
+          }
+          break;
+
+        case 'BOUNCED':
+        case 'INVALID':
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'BOUNCED');
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', eventType.toUpperCase());
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', now);
+          await sendToMo(formatType2(
+            `Bounced: ${companyName}`,
+            `*${companyName}* — ${showName}\nEmail bounced: ${prospectEmail}\n\nFind the correct contact email and update manually.`
+          ));
+          break;
+
+        case 'INTERESTED':
+          // Manually marked as interested in Woodpecker UI
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'INTERESTED');
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', now);
+          if (!existingLeadMasterId) {
+            const collectedInfo: Record<string, string> = {
+              standSize: row[9] || '', budget: row[10] || '',
+              showDates: row[11] || '', phone: row[12] || '',
+              requirements: row[13] || '', website: row[19] || '', logoUrl: row[20] || '',
+            };
+            await this.convertToLead(row, index, collectedInfo, showName, contactName, prospectEmail);
+          }
+          break;
+
+        case 'NOT_INTERESTED':
+        case 'UNSUBSCRIBED':
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'NOT_INTERESTED');
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', eventType.toUpperCase());
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', now);
+          await sendToMo(formatType2(
+            `Not Interested: ${companyName}`,
+            `*${companyName}* — ${showName}\n${eventType === 'UNSUBSCRIBED' ? 'Unsubscribed' : 'Marked not interested'}: ${prospectEmail}\n\nRecord closed automatically.`
+          ));
+          break;
+      }
+    } catch (err: any) {
+      logger.warn(`[CampaignBuilder] handleWebhookEvent (${eventType}) error: ${err.message}`);
+    }
+  }
+
+  /**
    * Convert a campaign reply into a full sales pipeline entry.
    * Creates a LEAD_MASTER row + Trello card in "02 Qualifying".
    * Safe to call multiple times — skips if leadMasterId already set on the row.
