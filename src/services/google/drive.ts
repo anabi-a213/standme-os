@@ -512,8 +512,10 @@ export async function createGoogleDoc(name: string, content: string, folderId?: 
       });
     }
 
-    // Share with the full team — non-blocking, errors are logged not thrown
-    shareWithTeam(docId).catch(() => {});
+    // Share with the full team — must complete before returning the URL so the
+    // link is accessible when sent to the user. Errors are logged inside
+    // shareWithTeam/enableLinkSharing, not re-thrown.
+    await shareWithTeam(docId);
 
     return {
       id: docId,
