@@ -426,30 +426,35 @@ export async function createFolder(name: string, parentId?: string): Promise<str
 // ---- Create Google Doc ----
 
 // ---- Make a file editable by anyone with the link ----
+// Returns true if it succeeded, false if the org policy blocks it.
 
-export async function enableLinkSharing(fileId: string): Promise<void> {
+export async function enableLinkSharing(fileId: string): Promise<boolean> {
   try {
     await getDriveClient().permissions.create({
       fileId,
       supportsAllDrives: true,
       requestBody: { type: 'anyone', role: 'writer' },
     });
+    return true;
   } catch (err: any) {
-    logger.warn(`[Drive] Could not enable link sharing for ${fileId}: ${err.message}`);
+    logger.error(`[Drive] enableLinkSharing FAILED for ${fileId}: ${err.message} (code: ${err.code}) — org policy may block public sharing`);
+    return false;
   }
 }
 
 // ---- Share a file with the StandMe team ----
-// Enables "anyone with the link can edit" + grants domain-level access
-// to standme.de and any extra emails in TEAM_SHARE_EMAILS. Non-fatal.
+// Tries: (1) anyone-with-link, (2) standme.de domain, (3) TEAM_SHARE_EMAILS,
+// (4) DRIVE_OWNER_EMAIL. At least one must succeed or we log an error.
 
 export async function shareWithTeam(fileId: string): Promise<void> {
   const drive = getDriveClient();
+  let anySucceeded = false;
 
-  // Anyone with the link can edit (covers team + external reviewers)
-  await enableLinkSharing(fileId);
+  // 1. Anyone with the link can edit
+  const linkOk = await enableLinkSharing(fileId);
+  if (linkOk) anySucceeded = true;
 
-  // Also explicitly share with standme.de domain so it shows in their Drive
+  // 2. standme.de domain — shows the file in every team member's Drive
   try {
     await drive.permissions.create({
       fileId,
@@ -457,11 +462,12 @@ export async function shareWithTeam(fileId: string): Promise<void> {
       sendNotificationEmail: false,
       requestBody: { type: 'domain', domain: 'standme.de', role: 'writer' },
     });
+    anySucceeded = true;
   } catch (err: any) {
     logger.warn(`[Drive] Could not share ${fileId} with standme.de domain: ${err.message}`);
   }
 
-  // Extra individual emails outside the domain — no notification emails
+  // 3. Extra individual emails from TEAM_SHARE_EMAILS
   const extras = (process.env.TEAM_SHARE_EMAILS || '')
     .split(',')
     .map(e => e.trim())
@@ -475,51 +481,72 @@ export async function shareWithTeam(fileId: string): Promise<void> {
         sendNotificationEmail: false,
         requestBody: { type: 'user', emailAddress: email, role: 'writer' },
       });
+      anySucceeded = true;
     } catch (err: any) {
       logger.warn(`[Drive] Could not share ${fileId} with ${email}: ${err.message}`);
     }
   }
+
+  // 4. DRIVE_OWNER_EMAIL — explicit fallback for the file owner / main admin
+  const ownerEmail = process.env.DRIVE_OWNER_EMAIL;
+  if (ownerEmail && !extras.includes(ownerEmail)) {
+    try {
+      await drive.permissions.create({
+        fileId,
+        supportsAllDrives: true,
+        sendNotificationEmail: false,
+        requestBody: { type: 'user', emailAddress: ownerEmail, role: 'writer' },
+      });
+      anySucceeded = true;
+    } catch (err: any) {
+      logger.warn(`[Drive] Could not share ${fileId} with DRIVE_OWNER_EMAIL (${ownerEmail}): ${err.message}`);
+    }
+  }
+
+  if (!anySucceeded) {
+    logger.error(`[Drive] shareWithTeam: ALL sharing methods failed for ${fileId}. File may only be accessible to the bot account. Set DRIVE_OWNER_EMAIL or TEAM_SHARE_EMAILS in .env to fix this.`);
+  }
 }
 
 // ---- Create Google Doc ----
+// File creation and content writing are separated from retry so a failed
+// batchUpdate does not create duplicate orphaned documents.
 
 export async function createGoogleDoc(name: string, content: string, folderId?: string): Promise<{ id: string; url: string }> {
-  return retry(async () => {
-    const docs = google.docs({ version: 'v1', auth: getGoogleAuth() });
+  const docs = google.docs({ version: 'v1', auth: getGoogleAuth() });
 
-    // Use explicit arg → env var → known StandMe OS Drive folder
-    const resolvedFolder = folderId || process.env.DRIVE_FOLDER_AGENTS || '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl';
-    const fileMetadata: drive_v3.Schema$File = {
-      name,
-      mimeType: 'application/vnd.google-apps.document',
-    };
-    if (resolvedFolder) fileMetadata.parents = [resolvedFolder];
+  // Use explicit arg → env var → known StandMe OS Drive folder
+  const resolvedFolder = folderId || process.env.DRIVE_FOLDER_AGENTS || '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl';
+  const fileMetadata: drive_v3.Schema$File = {
+    name,
+    mimeType: 'application/vnd.google-apps.document',
+  };
+  if (resolvedFolder) fileMetadata.parents = [resolvedFolder];
 
-    const file = await getDriveClient().files.create({
-      requestBody: fileMetadata,
-      fields: 'id, webViewLink',
-      supportsAllDrives: true,
-    });
+  // Create the file once — not inside retry to avoid duplicate orphaned docs
+  const file = await getDriveClient().files.create({
+    requestBody: fileMetadata,
+    fields: 'id, webViewLink',
+    supportsAllDrives: true,
+  });
 
-    const docId = file.data.id || '';
+  const docId = file.data.id || '';
+  const url = file.data.webViewLink || `https://docs.google.com/document/d/${docId}/edit`;
 
-    if (content) {
+  // Write content — retry only this step if it fails (file already exists)
+  if (content) {
+    await retry(async () => {
       await docs.documents.batchUpdate({
         documentId: docId,
         requestBody: {
           requests: [{ insertText: { location: { index: 1 }, text: content } }],
         },
       });
-    }
+    }, `writeDocContent(${docId})`);
+  }
 
-    // Share with the full team — must complete before returning the URL so the
-    // link is accessible when sent to the user. Errors are logged inside
-    // shareWithTeam/enableLinkSharing, not re-thrown.
-    await shareWithTeam(docId);
+  // Share — must complete before returning the URL so clicking it works immediately
+  await shareWithTeam(docId);
 
-    return {
-      id: docId,
-      url: file.data.webViewLink || `https://docs.google.com/document/d/${docId}/edit`,
-    };
-  }, 'createGoogleDoc');
+  return { id: docId, url };
 }
