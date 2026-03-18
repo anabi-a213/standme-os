@@ -51,21 +51,24 @@ export class DriveIndexerAgent extends BaseAgent {
       return { success: false, message: err.message, confidence: 'LOW' };
     }
 
-    const envLines = Object.entries(resolved)
-      .filter(([k]) => k !== 'ROOT')
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n');
-
     const count = Object.keys(resolved).length - 1; // exclude ROOT
+
+    // Folder IDs are auto-saved to Knowledge Base by setupDriveFolderTree().
+    // They are loaded back into memory at every bot startup via loadRuntimeConfig().
+    // No Railway variable update or restart needed.
     const msg =
-      `*Drive folder tree set up!* (${count} folders created/found)\n\n` +
-      `Add these to your *.env* file so agents save files to the right folders:\n\n` +
-      `\`\`\`\n${envLines}\n\`\`\`\n\n` +
-      `Once added, restart the bot. All agents will then save files to the correct location.\n` +
-      `Run /foldertree to verify the structure.`;
+      `*Drive folder tree ready!* ${count} folders created/verified.\n\n` +
+      `All folder IDs *automatically saved* to Knowledge Base.\n` +
+      `Bot loads them at startup — no Railway update, no restart needed.\n\n` +
+      `Agents now route files to:\n` +
+      `  • Concept briefs → /01_Sales/Proposals\n` +
+      `  • Lessons Won → /06_Lessons_Learned/Won_Deals\n` +
+      `  • Lessons Lost → /06_Lessons_Learned/Lost_Deals\n` +
+      `  • Marketing → /01_Sales/Outreach_Assets\n\n` +
+      `Run /foldertree to verify the full structure.`;
 
     await this.respond(ctx.chatId, msg);
-    return { success: true, message: `Drive tree set up: ${count} folders`, confidence: 'HIGH' };
+    return { success: true, message: `Drive tree set up: ${count} folders, auto-saved`, confidence: 'HIGH' };
   }
 
   // ── /newprojectfolder — Create project folder + 11 subfolders ──

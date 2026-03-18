@@ -2,6 +2,7 @@ import { google, drive_v3 } from 'googleapis';
 import { getGoogleAuth } from './auth';
 import { retry } from '../../utils/retry';
 import { logger } from '../../utils/logger';
+import { saveRuntimeConfigs } from '../runtime-config';
 
 let _drive: drive_v3.Drive | null = null;
 
@@ -479,6 +480,10 @@ export async function setupDriveFolderTree(): Promise<Record<string, string>> {
   // Invalidate cache so agents see the new folders
   invalidateFolderCache();
 
+  // Auto-save all folder IDs to Knowledge Base so Railway never needs updating
+  await saveRuntimeConfigs(resolved);
+  logger.info('[Drive] Folder IDs auto-saved to Knowledge Base — no .env update needed');
+
   return resolved;
 }
 
@@ -507,6 +512,9 @@ export async function createProjectFolderTree(
   }
 
   invalidateFolderCache();
+  // Save project folder ID to Knowledge Base for persistence
+  const projectKey = `DRIVE_PROJECT_${projectId.replace(/[^A-Z0-9]/gi, '_').toUpperCase()}`;
+  await saveRuntimeConfigs({ [projectKey]: projectFolderId, ...Object.fromEntries(Object.entries(subfolders).map(([k, v]) => [`${projectKey}_${k.replace(/[^A-Z0-9]/gi, '_').toUpperCase()}`, v])) });
 
   const url = `https://drive.google.com/drive/folders/${projectFolderId}`;
   logger.info(`[Drive] Project folder created: ${folderName} (${projectFolderId})`);

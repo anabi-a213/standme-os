@@ -9,6 +9,7 @@ import { writeSystemLog } from './utils/system-log';
 import { canApprove, getUserRole, UserRole } from './config/access';
 import { handleApproval } from './services/approvals';
 import { initSheets } from './services/google/sheets-init';
+import { loadRuntimeConfig } from './services/runtime-config';
 
 // Import all agents
 import { LeadIntakeAgent } from './agents/01-lead-intake.agent';
@@ -34,6 +35,11 @@ async function main() {
   logger.info('========================================');
   logger.info('  StandMe OS — Starting...');
   logger.info('========================================');
+
+  // Load dynamic config (Drive folder IDs, etc.) from Knowledge Base into process.env
+  // This runs BEFORE agents start so all folder IDs are available immediately.
+  // Drive folder IDs are saved here by /setupdrive — no Railway env vars needed for them.
+  await loadRuntimeConfig();
 
   // Auto-check and create any missing Google Sheets tabs
   initSheets().catch(err => logger.warn(`[Sheets Init] Failed: ${err.message}`));
