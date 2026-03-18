@@ -88,6 +88,49 @@ export async function listAllFilesInFolder(folderId: string): Promise<DriveFile[
   }, 'listAllFilesInFolder');
 }
 
+// ---- StandMe OS folder tree: discover subfolders and route by keyword ----
+// Reads the subfolders of the StandMe OS root once, caches them in memory,
+// then routes agent-created docs to the best-matching subfolder.
+
+const STANDME_ROOT = '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl';
+
+interface FolderEntry { id: string; name: string; }
+let _folderCache: FolderEntry[] | null = null;
+let _folderCacheTime = 0;
+const FOLDER_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+export async function listStandMeSubfolders(): Promise<FolderEntry[]> {
+  const now = Date.now();
+  if (_folderCache && now - _folderCacheTime < FOLDER_CACHE_TTL) return _folderCache;
+
+  try {
+    const resp = await getDriveClient().files.list({
+      q: `'${STANDME_ROOT}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: 'files(id, name)',
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true,
+    } as any);
+    _folderCache = ((resp.data as any).files || []).map((f: any) => ({ id: f.id, name: f.name }));
+    _folderCacheTime = now;
+    logger.info(`[Drive] StandMe folder tree: ${_folderCache!.map(f => f.name).join(', ')}`);
+  } catch (err: any) {
+    logger.warn(`[Drive] Could not read StandMe folder tree: ${err.message}`);
+    _folderCache = [];
+  }
+  return _folderCache!;
+}
+
+// Find the best subfolder ID for a set of keywords (e.g. ['brief', 'concept']).
+// Returns the StandMe OS root if no match found.
+export async function resolveAgentFolder(keywords: string[]): Promise<{ id: string; name: string }> {
+  const folders = await listStandMeSubfolders();
+  for (const kw of keywords) {
+    const match = folders.find(f => f.name.toLowerCase().includes(kw.toLowerCase()));
+    if (match) return match;
+  }
+  return { id: STANDME_ROOT, name: 'StandMe OS' };
+}
+
 // ---- List ALL files in personal drive (full tree, paginated) ----
 
 export async function listAllPersonalFiles(): Promise<DriveFile[]> {

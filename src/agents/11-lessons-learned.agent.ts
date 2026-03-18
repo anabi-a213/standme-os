@@ -4,7 +4,7 @@ import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, objectToRow, sheetUrl } from '../services/google/sheets';
 import { getCard } from '../services/trello/client';
-import { createGoogleDoc } from '../services/google/drive';
+import { createGoogleDoc, resolveAgentFolder } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
@@ -74,9 +74,13 @@ export class LessonsLearnedAgent extends BaseAgent {
     );
 
     // Create Google Doc
+    // Resolve the right subfolder inside StandMe OS for lessons/project reviews
+    const lessonsFolder = await resolveAgentFolder(['lesson', 'learned', 'project', 'review', 'debrief']);
+
     const doc = await createGoogleDoc(
       `Lessons Learned — ${cardIdOrName}`,
-      report
+      report,
+      lessonsFolder.id
     );
 
     // Log to Drive Index so the team can find it
@@ -84,8 +88,8 @@ export class LessonsLearnedAgent extends BaseAgent {
       fileName: `Lessons Learned — ${cardIdOrName}`,
       fileId: doc.id,
       fileUrl: doc.url,
-      folderPath: '/StandMe OS',
-      parentFolder: '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl',
+      folderPath: `/${lessonsFolder.name}`,
+      parentFolder: lessonsFolder.id,
       fileType: 'Google Doc',
       lastModified: new Date().toISOString(),
       linkedProject: cardIdOrName,

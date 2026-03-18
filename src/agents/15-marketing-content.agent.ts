@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, appendRow, objectToRow } from '../services/google/sheets';
-import { createGoogleDoc } from '../services/google/drive';
+import { createGoogleDoc, resolveAgentFolder } from '../services/google/drive';
 import { generateMarketingContent } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
@@ -49,17 +49,20 @@ export class MarketingContentAgent extends BaseAgent {
 
     const content = await generateMarketingContent(contentType, topic || 'weekly plan', extraContext);
 
+    // Resolve the right subfolder inside StandMe OS for marketing/content
+    const marketingFolder = await resolveAgentFolder(['marketing', 'content', 'social', 'brand']);
+
     // Save as Google Doc
     const docName = `${contentType.toUpperCase()} — ${topic || 'Content Plan'} — ${new Date().toISOString().split('T')[0]}`;
-    const doc = await createGoogleDoc(docName, content);
+    const doc = await createGoogleDoc(docName, content, marketingFolder.id);
 
     // Log to Drive Index so the team can find it
     appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
       fileName: docName,
       fileId: doc.id,
       fileUrl: doc.url,
-      folderPath: '/StandMe OS',
-      parentFolder: '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl',
+      folderPath: `/${marketingFolder.name}`,
+      parentFolder: marketingFolder.id,
       fileType: 'Google Doc',
       lastModified: new Date().toISOString(),
       linkedProject: topic || 'marketing',
