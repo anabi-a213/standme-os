@@ -24,13 +24,18 @@ export function initBot(): TelegramBot {
   return bot;
 }
 
+// Escape Markdown special chars in user/AI-generated content to prevent Telegram parse errors
+function escapeMd(text: string): string {
+  return text.replace(/[*_`[\]]/g, '\\$&');
+}
+
 // Format messages according to the 3 types
 export function formatType1(what: string, why: string, detail: string, approveId: string): string {
-  return `⚡ *ACTION NEEDED*\n\n*What:* ${what}\n*Why:* ${why}\n\n${detail}\n\n/approve\\_${approveId} | /reject\\_${approveId}`;
+  return `⚡ *ACTION NEEDED*\n\n*What:* ${escapeMd(what)}\n*Why:* ${escapeMd(why)}\n\n${escapeMd(detail)}\n\n/approve\\_${approveId} | /reject\\_${approveId}`;
 }
 
 export function formatType2(topic: string, detail: string): string {
-  return `⚠️ *HEADS UP*\n\n*${topic}*\n\n${detail}`;
+  return `⚠️ *HEADS UP*\n\n*${escapeMd(topic)}*\n\n${escapeMd(detail)}`;
 }
 
 export function formatType3(title: string, sections: { label: string; content: string }[]): string {
