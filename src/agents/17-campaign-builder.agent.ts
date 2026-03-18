@@ -27,10 +27,12 @@ import {
   getProspectsByCampaign, addProspectToCampaign, WoodpeckerProspect,
 } from '../services/woodpecker/client';
 import {
-  analyzeShow, generateCampaignEmail, generateSalesReply, extractCompaniesFromText,
+  analyzeShow, generateCampaignEmail, generateSalesReply, extractCompaniesFromText, generateText,
 } from '../services/ai/client';
 import { searchKnowledge, buildKnowledgeContext, saveKnowledge, getKnowledgeByTopic } from '../services/knowledge';
 import { searchFiles, readFileContent } from '../services/google/drive';
+import { findExhibitorFile, listExhibitorFiles, parseExhibitorFile, ExhibitorRecord } from '../services/drive-exhibitor';
+import { findDecisionMaker } from '../services/apollo';
 import { searchEmailsByQuery, sendEmail } from '../services/google/gmail';
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
@@ -45,13 +47,14 @@ export class CampaignBuilderAgent extends BaseAgent {
     name: 'Campaign Builder',
     id: 'agent-17',
     description: 'Build and run full show email campaigns with professional sales loop via Woodpecker',
-    commands: ['/newcampaign', '/salesreplies', '/campaignstatus', '/indexwoodpecker'],
+    commands: ['/newcampaign', '/discover', '/salesreplies', '/campaignstatus', '/indexwoodpecker'],
     schedule: '0 */2 * * *', // every 2 hours for reply monitoring
     requiredRole: UserRole.ADMIN,
   };
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
     if (ctx.command === '/salesreplies' || ctx.command === 'scheduled') return this.handleSalesReplies(ctx);
+    if (ctx.command === '/discover') return this.discoverLeads(ctx);
     if (ctx.command === '/campaignstatus') return this.showCampaignStatus(ctx);
     if (ctx.command === '/indexwoodpecker') return this.indexWoodpeckerEmails(ctx);
     return this.buildCampaign(ctx);
@@ -128,6 +131,316 @@ export class CampaignBuilderAgent extends BaseAgent {
       `The agent will now use these as reference when writing new emails.`;
 
     await this.respond(ctx.chatId, summary);
+    return { success: true, message: summary, confidence: 'HIGH' };
+  }
+
+  // =====================================================================
+  // /discover [show name]
+  // Scans the exhibitor list in Drive → finds DMs via Apollo →
+  // writes to LEAD_MASTER + CAMPAIGN_SALES → creates Woodpecker campaign
+  // =====================================================================
+
+  private async discoverLeads(ctx: AgentContext): Promise<AgentResponse> {
+    const showName = ctx.args.trim();
+    if (!showName) {
+      await this.respond(
+        ctx.chatId,
+        'Usage: /discover [show name]\n\nExample: /discover Arab Health\n\n' +
+        'Scans the exhibitor list from Drive, finds decision makers via Apollo, ' +
+        'and builds a Woodpecker campaign automatically. No manual steps needed.'
+      );
+      return { success: false, message: 'No show name', confidence: 'LOW' };
+    }
+
+    await this.respond(ctx.chatId, `Starting lead discovery for *${showName}*...\n\nScanning Drive folder for exhibitor list...`);
+
+    // ---- 1. Find exhibitor file ----
+
+    const file = await findExhibitorFile(showName);
+    if (!file) {
+      const allFiles = await listExhibitorFiles();
+      const fileList = allFiles.length
+        ? allFiles.map(f => `  • ${f.name}`).join('\n')
+        : '  (folder is empty)';
+      await this.respond(
+        ctx.chatId,
+        `No file found matching "*${showName}*" in the exhibitor folder.\n\n` +
+        `Available files:\n${fileList}\n\n` +
+        `Upload the exhibitor list to the Drive folder and run /discover again.`
+      );
+      return { success: false, message: 'No exhibitor file found', confidence: 'LOW' };
+    }
+
+    await this.respond(ctx.chatId, `Found: *${file.name}*\nParsing columns and data...`);
+
+    // ---- 2. Parse file (auto-detects format, AI column normalisation) ----
+
+    let exhibitors: ExhibitorRecord[] = [];
+    try {
+      exhibitors = await parseExhibitorFile(file);
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `Could not parse file: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    if (!exhibitors.length) {
+      await this.respond(ctx.chatId, 'File parsed but no company records found. Check file format and try again.');
+      return { success: false, message: 'Empty file', confidence: 'LOW' };
+    }
+
+    await this.respond(
+      ctx.chatId,
+      `Parsed *${exhibitors.length}* companies from *${file.name}*.\n\n` +
+      `Searching Apollo for decision makers... (this takes a few minutes — one search per company)`
+    );
+
+    // ---- 3. Load LEAD_MASTER + CAMPAIGN_SALES for deduplication ----
+
+    const [existingLeads, existingSales] = await Promise.all([
+      readSheet(SHEETS.LEAD_MASTER),
+      readSheet(SHEETS.CAMPAIGN_SALES),
+    ]);
+
+    // Companies already in LEAD_MASTER for this show
+    const existingCompanies = new Set<string>();
+    for (const row of existingLeads.slice(1)) {
+      const co   = (row[2] || '').toLowerCase().trim();
+      const show = (row[6] || '').toLowerCase();
+      if (co && show.includes(showName.toLowerCase())) existingCompanies.add(co);
+    }
+
+    // Emails already in CAMPAIGN_SALES for this show (prevent double-sending)
+    const existingEmails = new Set<string>();
+    for (const row of existingSales.slice(1)) {
+      const show  = (row[2] || '').toLowerCase();
+      const email = (row[5] || '').toLowerCase();
+      if (email && show.includes(showName.toLowerCase())) existingEmails.add(email);
+    }
+
+    // ---- 4. Apollo search — find DM per company ----
+
+    interface VerifiedLead {
+      exhibitor: ExhibitorRecord;
+      contact: {
+        name: string; firstName: string; lastName: string;
+        title: string; email: string; emailStatus: string; linkedinUrl: string;
+      };
+    }
+
+    const verified: VerifiedLead[] = [];
+    let skippedDupe = 0;
+    let noContact   = 0;
+    let processed   = 0;
+
+    for (const exhibitor of exhibitors) {
+      processed++;
+      const companyKey = exhibitor.companyName.toLowerCase().trim();
+
+      // Skip companies already in the pipeline for this show
+      if (existingCompanies.has(companyKey)) { skippedDupe++; continue; }
+
+      // If the list already has a valid email, use it directly (no Apollo call needed)
+      if (exhibitor.contactEmail && exhibitor.contactEmail.includes('@')) {
+        if (existingEmails.has(exhibitor.contactEmail.toLowerCase())) { skippedDupe++; continue; }
+        verified.push({
+          exhibitor,
+          contact: {
+            name:        exhibitor.contactName || exhibitor.companyName,
+            firstName:   (exhibitor.contactName || '').split(' ')[0] || '',
+            lastName:    (exhibitor.contactName || '').split(' ').slice(1).join(' ') || '',
+            title:       exhibitor.contactTitle || '',
+            email:       exhibitor.contactEmail,
+            emailStatus: 'from_list',
+            linkedinUrl: '',
+          },
+        });
+        continue;
+      }
+
+      // Apollo search
+      const contact = await findDecisionMaker(
+        exhibitor.companyName,
+        exhibitor.website,
+        exhibitor.contactEmail,
+      );
+
+      if (!contact) { noContact++; continue; }
+      if (existingEmails.has(contact.email.toLowerCase())) { skippedDupe++; continue; }
+
+      verified.push({ exhibitor, contact });
+
+      // Progress update every 25 companies so Mo knows it's running
+      if (processed % 25 === 0) {
+        await this.respond(
+          ctx.chatId,
+          `Progress: ${processed}/${exhibitors.length} scanned — ${verified.length} verified so far...`
+        );
+      }
+    }
+
+    if (!verified.length) {
+      await this.respond(
+        ctx.chatId,
+        `No new verified contacts found.\n\n` +
+        `Scanned: ${exhibitors.length} | Skipped (already in pipeline): ${skippedDupe} | No DM found: ${noContact}\n\n` +
+        `Tip: Ensure APOLLO_API_KEY is set and the exhibitor file includes company websites.`
+      );
+      return { success: false, message: 'No new verified contacts', confidence: 'LOW' };
+    }
+
+    await this.respond(
+      ctx.chatId,
+      `Apollo search done:\n` +
+      `  ${exhibitors.length} companies scanned\n` +
+      `  ${skippedDupe} already in pipeline (skipped)\n` +
+      `  ${noContact} no DM found\n` +
+      `  *${verified.length} new verified contacts*\n\n` +
+      `Running show analysis and writing records...`
+    );
+
+    // ---- 5. Show analysis (one call — used for snippets + scoring) ----
+
+    const showAnalysis = await analyzeShow(showName, '', '');
+
+    // ---- 6. Resolve / create Woodpecker campaign for this show ----
+
+    const campaignId = await this.resolveOrCreateCampaign(ctx, showName);
+    if (!campaignId) return { success: false, message: 'No Woodpecker campaign', confidence: 'LOW' };
+
+    // ---- 7. Industry hook cache — one Claude call per industry, not per company ----
+
+    const industryHooks = new Map<string, string>();
+
+    async function getIndustryHook(industry: string): Promise<string> {
+      if (industryHooks.has(industry)) return industryHooks.get(industry)!;
+      const hook = await generateText(
+        `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at ${showName}. ` +
+        `Be specific about what this industry cares about on the show floor. No em dashes. No filler.`,
+        'You write cold email opening lines. Return only the sentence, nothing else.',
+        60,
+      );
+      const trimmed = hook.trim();
+      industryHooks.set(industry, trimmed);
+      return trimmed;
+    }
+
+    // ---- 8. Write to LEAD_MASTER + CAMPAIGN_SALES + Woodpecker ----
+
+    let addedMaster   = 0;
+    let addedCampaign = 0;
+    const now         = new Date().toISOString();
+
+    for (const { exhibitor, contact } of verified) {
+      try {
+        const industry = exhibitor.industry || showAnalysis.industries[0] || 'Trade Show';
+        const snippet1 = await getIndustryHook(industry);
+        const leadId   = `SM-${Date.now()}-D`; // D = discovery origin
+
+        // LEAD_MASTER row
+        await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
+          id:               leadId,
+          timestamp:        now,
+          companyName:      exhibitor.companyName,
+          contactName:      contact.name,
+          contactEmail:     exhibitor.contactEmail || '',
+          contactTitle:     exhibitor.contactTitle || '',
+          showName,
+          showCity:         '',
+          standSize:        '',
+          budget:           '',
+          industry,
+          leadSource:       'exhibitor-list',
+          score:            '6',
+          scoreBreakdown:   JSON.stringify({ showFit: 2, exhibitorList: 2, dmFound: 2 }),
+          confidence:       contact.emailStatus === 'verified' ? 'HIGH' : 'MEDIUM',
+          status:           'WARM',
+          trelloCardId:     '',
+          enrichmentStatus: 'DONE',
+          dmName:           contact.name,
+          dmTitle:          contact.title,
+          dmLinkedIn:       contact.linkedinUrl,
+          dmEmail:          contact.email,
+          outreachReadiness: 'READY',
+          language:         (exhibitor.country || '').toLowerCase().includes('arab') ? 'ar' : 'en',
+          notes:            [
+            `Source: ${file.name}`,
+            exhibitor.country    ? `Country: ${exhibitor.country}`      : '',
+            exhibitor.website    ? `Website: ${exhibitor.website}`      : '',
+            exhibitor.boothNumber ? `Booth: ${exhibitor.boothNumber}`   : '',
+            `Email status: ${contact.emailStatus}`,
+          ].filter(Boolean).join(' | '),
+        }));
+        addedMaster++;
+
+        // Woodpecker prospect
+        const wpId = await addProspectToCampaign(campaignId, {
+          email:      contact.email,
+          first_name: contact.firstName,
+          last_name:  contact.lastName,
+          company:    exhibitor.companyName,
+          industry,
+          snippet1,                                   // industry hook for email opening
+          snippet2:   contact.title,                  // DM title (personalisation)
+          snippet3:   exhibitor.website || exhibitor.country || '', // context field
+          tags:       `standme,${showName.toLowerCase().replace(/\s+/g, '-')},discovery`,
+        });
+
+        // CAMPAIGN_SALES row — links everything together
+        const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
+          id:             salesId,
+          campaignId:     String(campaignId),
+          showName,
+          companyName:    exhibitor.companyName,
+          contactName:    contact.name,
+          contactEmail:   contact.email,
+          woodpeckerId:   String(wpId || ''),
+          status:         'SENT',
+          classification: '',
+          standSize: '', budget: '', showDates: '', phone: '', requirements: '',
+          conversationLog: '[]',
+          lastReplyDate:  '',
+          lastActionDate: now,
+          leadMasterId:   leadId,
+          notes:          `Discovery from ${file.name}`,
+          website:        exhibitor.website || '',
+          logoUrl:        '',
+        }));
+        addedCampaign++;
+
+      } catch (err: any) {
+        logger.warn(`[CampaignBuilder/discover] Failed to add ${exhibitor.companyName}: ${err.message}`);
+      }
+    }
+
+    // ---- 9. Notify Mo ----
+
+    const summary =
+      `*${showName} — Lead Discovery Complete*\n\n` +
+      `File: *${file.name}*\n` +
+      `Companies scanned: ${exhibitors.length}\n` +
+      `Already in pipeline: ${skippedDupe}\n` +
+      `No DM found: ${noContact}\n` +
+      `Added to LEAD_MASTER: ${addedMaster}\n` +
+      `Added to Woodpecker campaign #${campaignId}: ${addedCampaign}\n\n` +
+      `*Woodpecker campaign is ready.*\n` +
+      `Set up your email sequence in Woodpecker using these personalisation fields:\n` +
+      `  {{snippet1}} — industry-specific hook (unique per company type)\n` +
+      `  {{snippet2}} — DM job title\n` +
+      `  {{snippet3}} — company website or country\n\n` +
+      `Once the sequence is set, activate the campaign. All replies will be handled automatically every 2h.`;
+
+    await sendToMo(formatType2(`Discovery Done: ${showName}`, summary));
+    await this.respond(ctx.chatId, summary);
+
+    await this.log({
+      agent: 'CampaignBuilder',
+      actionType: 'LEAD_DISCOVERY',
+      showName,
+      detail: `Discovered ${addedMaster} leads from "${file.name}" → Woodpecker campaign #${campaignId}`,
+      result: 'SUCCESS',
+    });
+
     return { success: true, message: summary, confidence: 'HIGH' };
   }
 
