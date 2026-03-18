@@ -76,6 +76,18 @@ export async function listFiles(folderId?: string, query?: string): Promise<Driv
   }, 'listFiles');
 }
 
+// ---- List ALL files inside a folder recursively (not just direct children) ----
+
+export async function listAllFilesInFolder(folderId: string): Promise<DriveFile[]> {
+  return retry(async () => {
+    return fetchAllPages({
+      q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true,
+    });
+  }, 'listAllFilesInFolder');
+}
+
 // ---- List ALL files in personal drive (full tree, paginated) ----
 
 export async function listAllPersonalFiles(): Promise<DriveFile[]> {
@@ -328,14 +340,31 @@ export async function createFolder(name: string, parentId?: string): Promise<str
 
 // ---- Create Google Doc ----
 
+// ---- Make a file editable by anyone with the link ----
+
+export async function enableLinkSharing(fileId: string): Promise<void> {
+  try {
+    await getDriveClient().permissions.create({
+      fileId,
+      supportsAllDrives: true,
+      requestBody: { type: 'anyone', role: 'writer' },
+    });
+  } catch (err: any) {
+    logger.warn(`[Drive] Could not enable link sharing for ${fileId}: ${err.message}`);
+  }
+}
+
 // ---- Share a file with the StandMe team ----
-// Grants writer access to the standme.de domain and any individual emails
-// listed in TEAM_SHARE_EMAILS (comma-separated). Errors are non-fatal.
+// Enables "anyone with the link can edit" + grants domain-level access
+// to standme.de and any extra emails in TEAM_SHARE_EMAILS. Non-fatal.
 
 export async function shareWithTeam(fileId: string): Promise<void> {
   const drive = getDriveClient();
 
-  // Share with entire standme.de Google Workspace domain — no notification emails
+  // Anyone with the link can edit (covers team + external reviewers)
+  await enableLinkSharing(fileId);
+
+  // Also explicitly share with standme.de domain so it shows in their Drive
   try {
     await drive.permissions.create({
       fileId,
@@ -347,7 +376,7 @@ export async function shareWithTeam(fileId: string): Promise<void> {
     logger.warn(`[Drive] Could not share ${fileId} with standme.de domain: ${err.message}`);
   }
 
-  // Also share with any extra emails configured individually — no notification emails
+  // Extra individual emails outside the domain — no notification emails
   const extras = (process.env.TEAM_SHARE_EMAILS || '')
     .split(',')
     .map(e => e.trim())

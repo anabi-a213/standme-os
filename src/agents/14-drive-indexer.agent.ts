@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, readSheet, objectToRow } from '../services/google/sheets';
-import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, DriveFile } from '../services/google/drive';
+import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { saveKnowledge, searchKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
@@ -14,7 +14,7 @@ export class DriveIndexerAgent extends BaseAgent {
     name: 'Drive Indexer',
     id: 'agent-14',
     description: 'Index all Google Drive files (personal + shared) with content understanding and growing knowledge base',
-    commands: ['/indexdrive', '/findfile', '/readfile', '/knowledge'],
+    commands: ['/indexdrive', '/findfile', '/readfile', '/knowledge', '/shareallfiles'],
     schedule: '0 8 * * 1',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -23,7 +23,37 @@ export class DriveIndexerAgent extends BaseAgent {
     if (ctx.command === '/findfile') return this.findFile(ctx);
     if (ctx.command === '/readfile') return this.readFile(ctx);
     if (ctx.command === '/knowledge') return this.queryKnowledge(ctx);
+    if (ctx.command === '/shareallfiles') return this.shareAllFiles(ctx);
     return this.indexDrive(ctx);
+  }
+
+  private async shareAllFiles(ctx: AgentContext): Promise<AgentResponse> {
+    const folderId = process.env.DRIVE_FOLDER_AGENTS || '19FU-EKvNdpiOjjUBWafQWVoo2YTGDZsl';
+    await this.respond(ctx.chatId, `Opening all files in StandMe OS folder to "anyone with the link can edit"...`);
+
+    let done = 0;
+    let failed = 0;
+
+    try {
+      const files = await listAllFilesInFolder(folderId);
+      await this.respond(ctx.chatId, `Found ${files.length} files. Applying link sharing...`);
+
+      for (const file of files) {
+        try {
+          await enableLinkSharing(file.id);
+          done++;
+        } catch {
+          failed++;
+        }
+      }
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `Failed to list folder: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    const summary = `Done. ${done} files are now open to edit by link.${failed > 0 ? ` (${failed} failed — check logs)` : ''}`;
+    await this.respond(ctx.chatId, `✅ ${summary}`);
+    return { success: true, message: summary, confidence: 'HIGH' };
   }
 
   private async indexDrive(ctx: AgentContext): Promise<AgentResponse> {
