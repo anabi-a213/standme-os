@@ -196,11 +196,17 @@ async function main() {
         return;
       }
 
+      dashboardBus.logEvent('telegram', 'Telegram Bot',
+        `📱 @${ctx.username} (${ctx.role}) → ${command}${ctx.args ? ' ' + ctx.args.substring(0, 60) : ''}`
+      );
       await agent.run(ctx);
     } else {
       // Route to Brain for natural language queries
       const brain = getAgent('/ask');
       if (brain) {
+        dashboardBus.logEvent('telegram', 'Telegram Bot',
+          `📱 @${ctx.username} (${ctx.role}) → /ask: ${text.substring(0, 80)}`
+        );
         ctx.args = text;
         ctx.command = '/ask';
         await brain.run(ctx);
