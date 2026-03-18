@@ -1246,7 +1246,15 @@ export class CampaignBuilderAgent extends BaseAgent {
 
   private async resolveOrCreateCampaign(ctx: AgentContext, showName: string): Promise<number | null> {
     const fromEnv = parseInt(process.env.WOODPECKER_CAMPAIGN_ID || '0');
-    if (fromEnv > 0) return fromEnv;
+    if (fromEnv > 0) {
+      // Validate the env campaign ID still exists before trusting it
+      try {
+        await getCampaignDetails(fromEnv);
+        return fromEnv;
+      } catch {
+        logger.warn(`[CampaignBuilder] WOODPECKER_CAMPAIGN_ID=${fromEnv} returned 404 — falling through to list/create`);
+      }
+    }
 
     let campaigns: { id: number; name: string; status: string }[] = [];
     try {
