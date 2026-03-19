@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import path from 'path';
 import express from 'express';
 import { initBot, getBot, buildContext, sendToMo, formatType2 } from './services/telegram/bot';
 import { registerAgent, getAgent, getAllAgents } from './agents/registry';
@@ -206,6 +207,10 @@ async function main() {
   // Start webhook server for external integrations (Woodpecker, etc.)
   const webhookApp = express();
   webhookApp.use(express.json());
+
+  // Serve the web dashboard (public/index.html) at the root URL.
+  // This makes the chat UI available at https://your-app.railway.app/
+  webhookApp.use(express.static(path.join(process.cwd(), 'public')));
 
   // POST /webhook/woodpecker — receives reply/open/bounce events from Woodpecker
   // Set this URL in Woodpecker: Settings → Integrations → Webhook → your Railway URL + /webhook/woodpecker
