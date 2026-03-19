@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { motion } from 'motion/react';
-import { Send, Paperclip, Maximize2, Trash2, Sparkles, GripVertical, ArrowLeft } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Send, Paperclip, Maximize2, Trash2, Sparkles, GripVertical, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { ActivityFeed } from './activity-feed';
 import { useDashboard } from '../../context/dashboard-context';
 import type { ChatMessage } from '../../context/dashboard-context';
@@ -90,9 +90,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   );
 }
 
-const MIN_PANEL_WIDTH = 260;
-const MAX_PANEL_WIDTH = 600;
-const DEFAULT_PANEL_WIDTH = 320;
+const MIN_PANEL_WIDTH = 280;
+const MAX_PANEL_WIDTH = 680;
+const DEFAULT_PANEL_WIDTH = 400;
 
 const MIN_FEED_PERCENT = 15;
 const MAX_FEED_PERCENT = 75;
@@ -110,7 +110,10 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
   const isDraggingPanel = useRef(false);
   const panelDragStart = useRef({ x: 0, width: DEFAULT_PANEL_WIDTH });
 
-  // Internal split resize state (feed percent of total height)
+  // Activity feed collapsed by default — chat gets full height
+  const [activityOpen, setActivityOpen] = useState(false);
+
+  // Internal split resize state (feed percent of total height, only used when activity is open)
   const [feedPercent, setFeedPercent] = useState(DEFAULT_FEED_PERCENT);
   const isDraggingSplit = useRef(false);
   const splitDragStart = useRef({ y: 0, percent: DEFAULT_FEED_PERCENT });
@@ -322,24 +325,53 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
       </div>
 
       <div ref={panelRef} className="flex h-full flex-col">
-        {/* Activity Feed Section */}
-        <div
-          className="overflow-hidden border-b border-[var(--border-subtle)]"
-          style={{ height: `${feedPercent}%` }}
-        >
-          <ActivityFeed />
-        </div>
+        {/* Activity Feed — collapsed to header strip by default */}
+        <div className="shrink-0 border-b border-[var(--border-subtle)]">
+          {/* Clickable header strip — always visible */}
+          <button
+            onClick={() => setActivityOpen(o => !o)}
+            className="flex w-full items-center justify-between px-4 py-2.5 hover:bg-[var(--surface-2)] transition-colors group"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Live Activity</span>
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+            </div>
+            {activityOpen
+              ? <ChevronUp className="h-3.5 w-3.5 text-[var(--text-muted)] group-hover:text-[var(--text)]" />
+              : <ChevronDown className="h-3.5 w-3.5 text-[var(--text-muted)] group-hover:text-[var(--text)]" />
+            }
+          </button>
 
-        {/* Internal split drag handle */}
-        <div
-          onMouseDown={onSplitMouseDown}
-          className="relative flex h-4 cursor-row-resize items-center justify-center group shrink-0 hover:bg-[var(--surface-2)] transition-colors"
-          title="Drag to adjust split"
-        >
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-[var(--gold)] to-transparent opacity-30 group-hover:opacity-60 transition-opacity" />
-          <div className="absolute flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="h-1 w-6 rounded-full bg-[var(--gold)]/60" />
-          </div>
+          {/* Expandable feed body */}
+          <AnimatePresence initial={false}>
+            {activityOpen && (
+              <motion.div
+                key="activity-feed"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: `${feedPercent}vh`, opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: 'easeInOut' }}
+                className="overflow-hidden"
+                style={{ minHeight: 0 }}
+              >
+                <ActivityFeed />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Resize handle — only visible when feed is open */}
+          {activityOpen && (
+            <div
+              onMouseDown={onSplitMouseDown}
+              className="relative flex h-4 cursor-row-resize items-center justify-center group hover:bg-[var(--surface-2)] transition-colors"
+              title="Drag to adjust size"
+            >
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-[var(--gold)] to-transparent opacity-30 group-hover:opacity-60 transition-opacity" />
+              <div className="absolute flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="h-1 w-6 rounded-full bg-[var(--gold)]/60" />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* AI Chat Section */}
