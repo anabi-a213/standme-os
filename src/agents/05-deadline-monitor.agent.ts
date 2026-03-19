@@ -36,6 +36,7 @@ export class DeadlineMonitorAgent extends BaseAgent {
           if (!card.due) continue;
 
           const dueDate = new Date(card.due);
+          if (isNaN(dueDate.getTime())) continue; // skip cards with invalid due date format
           const daysUntil = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
           let riskScore = 0;

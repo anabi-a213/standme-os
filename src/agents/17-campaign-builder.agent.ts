@@ -58,7 +58,7 @@ export class CampaignBuilderAgent extends BaseAgent {
   private campaignHookCache = new Map<string, string>();
 
   private async getCampaignIndustryHook(industry: string, showName: string): Promise<string> {
-    const key = `${industry}::${showName}`;
+    const key = JSON.stringify([industry.toLowerCase(), showName.toLowerCase()]);
     if (this.campaignHookCache.has(key)) return this.campaignHookCache.get(key)!;
     const hook = await generateText(
       `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at ${showName}. ` +
@@ -804,6 +804,8 @@ export class CampaignBuilderAgent extends BaseAgent {
                 lastActionDate: new Date().toISOString(),
                 leadMasterId: '',
                 notes: `Source: ${target.source}`,
+                website: target.website || '',
+                logoUrl: '',
               }));
             }
 

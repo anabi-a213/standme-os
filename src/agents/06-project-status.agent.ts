@@ -44,7 +44,7 @@ export class ProjectStatusAgent extends BaseAgent {
       if (!boardId) continue;
       try {
         const cards = await getBoardCardsWithListNames(boardId);
-        const overdue = cards.filter(c => c.due && new Date(c.due) < new Date()).length;
+        const overdue = cards.filter(c => { if (!c.due) return false; const d = new Date(c.due); return !isNaN(d.getTime()) && d < new Date(); }).length;
         sections.push({
           label: key,
           content: `  ${cards.length} cards${overdue > 0 ? ` (${overdue} overdue)` : ''}`,
@@ -60,7 +60,9 @@ export class ProjectStatusAgent extends BaseAgent {
       const imminent = deadlines.slice(1).filter(r => {
         const dates = [r[3], r[4], r[5], r[6], r[7]].filter(Boolean);
         return dates.some(d => {
-          const diff = (new Date(d).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+          const parsed = new Date(d);
+          if (isNaN(parsed.getTime())) return false; // skip invalid date strings
+          const diff = (parsed.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
           return diff >= 0 && diff <= 7;
         });
       });

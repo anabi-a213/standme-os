@@ -4,6 +4,7 @@ import { UserRole } from '../config/access';
 import { getBoardCardsWithListNames } from '../services/trello/client';
 import { generateText, detectLanguage } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
+import { logger } from '../utils/logger';
 
 export class ClientReminderAgent extends BaseAgent {
   config: AgentConfig = {
@@ -57,23 +58,29 @@ export class ClientReminderAgent extends BaseAgent {
         'Design/Brief': 'We are waiting for their feedback on a concept brief or design direction. Every day of silence costs us revision time.',
       };
 
-      const followUpDraft = await generateText(
-        `Write a follow-up email for an exhibition stand client.\n\n` +
-        `Client / Project: ${reminder.card.name}\n` +
-        `Silence: ${reminder.daysSince} days\n` +
-        `Stage: ${reminder.stage}\n` +
-        `Context: ${stageContext[reminder.stage] || 'Active project, no response for several days.'}\n\n` +
-        `The email should:\n` +
-        `- Open with something useful or specific, not a check-in\n` +
-        `- Show we are on top of it and ready to move\n` +
-        `- Make it easy for them to reply (one clear question or CTA)\n` +
-        `- Feel like it comes from a human who actually cares about their project\n` +
-        `- Max 4 lines\n` +
-        `- Sign off as: Mo / StandMe\n\n` +
-        `NEVER write: "just checking in", "I hope this finds you well", "I wanted to follow up", "as per my last email", em dashes.`,
-        'You write follow-up emails for an exhibition stand company. Your tone is warm, direct, and professional. You know the pressure clients are under before a show. You write emails that get read and replied to.',
-        300
-      );
+      let followUpDraft = '';
+      try {
+        followUpDraft = await generateText(
+          `Write a follow-up email for an exhibition stand client.\n\n` +
+          `Client / Project: ${reminder.card.name}\n` +
+          `Silence: ${reminder.daysSince} days\n` +
+          `Stage: ${reminder.stage}\n` +
+          `Context: ${stageContext[reminder.stage] || 'Active project, no response for several days.'}\n\n` +
+          `The email should:\n` +
+          `- Open with something useful or specific, not a check-in\n` +
+          `- Show we are on top of it and ready to move\n` +
+          `- Make it easy for them to reply (one clear question or CTA)\n` +
+          `- Feel like it comes from a human who actually cares about their project\n` +
+          `- Max 4 lines\n` +
+          `- Sign off as: Mo / StandMe\n\n` +
+          `NEVER write: "just checking in", "I hope this finds you well", "I wanted to follow up", "as per my last email", em dashes.`,
+          'You write follow-up emails for an exhibition stand company. Your tone is warm, direct, and professional. You know the pressure clients are under before a show. You write emails that get read and replied to.',
+          300
+        );
+      } catch (err: any) {
+        logger.warn(`[ClientReminder] AI draft failed for ${reminder.card.name}: ${err.message}`);
+        followUpDraft = `[AI draft unavailable — please draft manually for ${reminder.card.name}]`;
+      }
 
       await sendToMo(formatType1(
         `Follow Up: ${reminder.card.name}`,

@@ -54,7 +54,7 @@ export class OutreachAgent extends BaseAgent {
     // Industry hook cache — one AI call per unique industry, not per company
     const industryHooks = new Map<string, string>();
     const getHook = async (industry: string, show: string): Promise<string> => {
-      const key = `${industry}::${show}`;
+      const key = JSON.stringify([industry.toLowerCase(), show.toLowerCase()]);
       if (industryHooks.has(key)) return industryHooks.get(key)!;
       const hook = await generateText(
         `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at ${show}. ` +
