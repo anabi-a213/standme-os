@@ -411,3 +411,47 @@
   background-size: 200% 200%;
   animation: mesh-move 20s ease infinite;
 }
+
+/* ── Mobile Responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  :root {
+    --sidebar-width: 0px;
+    --right-panel-width: 0px;
+    --topbar-height: 52px;
+  }
+
+  body {
+    font-size: 14px;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+}
+
+/* Mobile overlay backdrop */
+.mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.mobile-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Safe area for notch phones */
+@supports (padding-top: env(safe-area-inset-top)) {
+  :root {
+    --safe-top: env(safe-area-inset-top);
+    --safe-bottom: env(safe-area-inset-bottom);
+  }
+}

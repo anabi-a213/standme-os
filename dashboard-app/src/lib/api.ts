@@ -88,3 +88,20 @@ export async function approveAction(approvalId: string, approved: boolean): Prom
     body: JSON.stringify({ approvalId, approved }),
   });
 }
+
+export interface TrelloCard {
+  id: string;
+  name: string;
+  listName: string;
+  due: string | null;
+  labels: { name: string; color: string }[];
+  url: string;
+}
+
+export type BoardsSnapshot = Record<string, TrelloCard[]>;
+
+export async function fetchBoards(): Promise<BoardsSnapshot> {
+  const r = await fetch(`${BASE}/boards`);
+  if (!r.ok) throw new Error(`Failed to fetch boards: ${r.status}`);
+  return r.json();
+}

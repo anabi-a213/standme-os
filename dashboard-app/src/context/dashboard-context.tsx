@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from 'react';
 import { getSocket } from '../lib/socket';
 import { getSessionId } from '../lib/session';
 import {
@@ -7,6 +7,8 @@ import {
   triggerAgent as apiTrigger, runAgent as apiRun,
   approveAction as apiApprove, RunResult,
 } from '../lib/api';
+
+const MOBILE_BREAKPOINT = 768;
 
 export interface Toast {
   id: string;
@@ -45,6 +47,14 @@ interface DashboardContextType {
   pendingApproval: PendingApproval | null;
   // Toasts
   toasts: Toast[];
+  // Mobile
+  isMobile: boolean;
+  sidebarOpen: boolean;
+  chatOpen: boolean;
+  toggleSidebar: () => void;
+  toggleChat: () => void;
+  closeSidebar: () => void;
+  closeChat: () => void;
   // Actions
   triggerAgent: (command: string, args?: string) => Promise<void>;
   runAgent: (command: string, args?: string) => Promise<RunResult>;
@@ -77,6 +87,26 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sessionId = useRef(getSessionId()).current;
   const streamingMsgId = useRef<string | null>(null);
+
+  // Mobile state
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT : false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+
+  useEffect(() => {
+    const check = () => {
+      const mobile = window.innerWidth < MOBILE_BREAKPOINT;
+      setIsMobile(mobile);
+      if (!mobile) { setSidebarOpen(false); setChatOpen(false); }
+    };
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  const toggleSidebar = useCallback(() => { setSidebarOpen(p => !p); setChatOpen(false); }, []);
+  const toggleChat = useCallback(() => { setChatOpen(p => !p); setSidebarOpen(false); }, []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const closeChat = useCallback(() => setChatOpen(false), []);
 
   const addToast = (toast: Omit<Toast, 'id'>) => {
     const t: Toast = { ...toast, id: Date.now().toString() };
@@ -328,6 +358,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       agents, agentConfigs, activityEvents, systemStats,
       messages, isTyping, sessionId,
       pendingApproval, toasts,
+      isMobile, sidebarOpen, chatOpen, toggleSidebar, toggleChat, closeSidebar, closeChat,
       triggerAgent, runAgent, sendMessage, clearChat,
       approveAction, dismissApproval,
       addToast, dismissToast,

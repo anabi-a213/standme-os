@@ -1,17 +1,41 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDashboard } from '../../../context/dashboard-context';
 import { PanelHeader } from './panel-header';
+import { getCached, setCache, getCacheAge } from '../../../lib/workspace-cache';
+import { Clock } from 'lucide-react';
+
+const CACHE_KEY = 'deadlines_data';
+const CACHE_TTL = 10 * 60 * 1000;
 
 export function DeadlinesTimeline({ onCommandClick }: { onCommandClick: (cmd: string) => void }) {
   const { runAgent } = useDashboard();
   const [deadlinesText, setDeadlinesText] = useState('');
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [cacheAgeText, setCacheAgeText] = useState<string | null>(null);
+
+  // Load from cache on mount
+  useEffect(() => {
+    const cached = getCached(CACHE_KEY, CACHE_TTL);
+    if (cached) {
+      setDeadlinesText(cached);
+      const age = getCacheAge(CACHE_KEY);
+      if (age !== null) {
+        setCacheAgeText(`cached ${Math.round(age / 60000)}m ago`);
+        setLastRefresh(new Date(Date.now() - age));
+      }
+    }
+  }, []);
 
   const refresh = async () => {
     setLoading(true);
+    setCacheAgeText(null);
     const r = await runAgent('/deadlines');
-    if (r.ok && r.result) { setDeadlinesText(r.result); setLastRefresh(new Date()); }
+    if (r.ok && r.result) {
+      setDeadlinesText(r.result);
+      setCache(CACHE_KEY, r.result);
+      setLastRefresh(new Date());
+    }
     setLoading(false);
   };
 
@@ -19,6 +43,12 @@ export function DeadlinesTimeline({ onCommandClick }: { onCommandClick: (cmd: st
     <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
       <PanelHeader title="DEADLINES TIMELINE" lastRefresh={lastRefresh} onRefresh={refresh} loading={loading} />
       <div className="flex-1 overflow-y-auto p-4">
+        {cacheAgeText && !loading && (
+          <div className="flex items-center gap-1 mb-2">
+            <Clock className="h-3 w-3 text-[var(--text-subtle)]" />
+            <span className="text-[10px] text-[var(--text-subtle)]">{cacheAgeText}</span>
+          </div>
+        )}
         {!deadlinesText && !loading && (
           <div className="flex flex-col items-center justify-center gap-3 py-6">
             <p className="text-xs text-[var(--text-muted)]">No deadline data loaded</p>
@@ -43,7 +73,6 @@ export function DeadlinesTimeline({ onCommandClick }: { onCommandClick: (cmd: st
                   isWarning ? 'border-[var(--warning)]/30 bg-[var(--warning-dim)] text-[var(--text-secondary)]' :
                   'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)]'
                 }`}>
-                  {isOverdue && <span className="font-semibold">⚠ </span>}
                   {line.replace(/^[-•*]\s*/, '')}
                 </div>
               );

@@ -12,7 +12,7 @@ import { ApprovalBanner } from '../components/approval-banner';
 import { useState, useEffect } from 'react';
 
 function Layout() {
-  const { pendingApproval, approveAction, dismissApproval, toasts, dismissToast, triggerAgent, agents, agentConfigs, systemStats } = useDashboard();
+  const { pendingApproval, approveAction, dismissApproval, toasts, dismissToast, triggerAgent, agents, agentConfigs, systemStats, isMobile, sidebarOpen, chatOpen, toggleSidebar, toggleChat, closeSidebar, closeChat } = useDashboard();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -42,14 +42,24 @@ function Layout() {
           onOpenShortcuts={() => setShortcutsOpen(true)}
           systemStats={systemStats}
           agents={agents}
+          isMobile={isMobile}
+          onToggleSidebar={toggleSidebar}
+          onToggleChat={toggleChat}
         />
         <LeftSidebar
           onCommandClick={(cmd) => triggerAgent(cmd)}
           runningCommands={runningCommands}
           agentConfigs={agentConfigs}
+          isMobile={isMobile}
+          isOpen={sidebarOpen}
+          onClose={closeSidebar}
         />
         <Outlet context={{ runningCommands, runningAgentIds }} />
-        <RightPanel />
+        <RightPanel
+          isMobile={isMobile}
+          isOpen={chatOpen}
+          onClose={closeChat}
+        />
       </div>
 
       {/* Approval banner */}

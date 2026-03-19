@@ -230,6 +230,11 @@ export class DriveIndexerAgent extends BaseAgent {
   }
 
   private async indexDrive(ctx: AgentContext, forceReindex = false): Promise<AgentResponse> {
+    const BATCH_SIZE = 25;
+    const PARALLEL_AI = 3; // concurrent AI calls per batch
+    const MAX_TOTAL_MS = 20 * 60 * 1000; // 20 minute overall timeout
+    const startTime = Date.now();
+
     await this.respond(ctx.chatId,
       forceReindex
         ? '🔄 Force re-indexing all drives (ignoring existing index)...'
@@ -278,11 +283,12 @@ export class DriveIndexerAgent extends BaseAgent {
 
       const newFiles = actualFiles.filter(f => !alreadyIndexedIds.has(f.id));
       const skipped = actualFiles.length - newFiles.length;
+      const totalBatches = Math.ceil(newFiles.length / BATCH_SIZE);
 
       await this.respond(ctx.chatId,
         `Found ${actualFiles.length} files across ${1 + sharedDrives.length} drives.\n` +
         `${skipped > 0 ? `⏭ Skipping ${skipped} already indexed. ` : ''}` +
-        `Processing ${newFiles.length} new files...`
+        `Processing ${newFiles.length} new files in ${totalBatches} batches of ${BATCH_SIZE}...`
       );
 
       if (newFiles.length === 0) {
@@ -298,29 +304,75 @@ export class DriveIndexerAgent extends BaseAgent {
       let indexed = 0;
       let withContent = 0;
       let knowledgeSaved = 0;
-      const indexRows: string[][] = []; // batch Sheets writes
+      let timedOut = false;
 
-      for (const file of newFiles) {
-        try {
-          const category = this.categorizeFile(file);
-          const linkedProject = this.matchToProject(file, companyNames);
-          // Resolve full path using pre-built folder map (no API calls per file)
-          const folderPath = resolveFullPath(file.parents?.[0], folderMap);
+      // Process in batches of BATCH_SIZE
+      for (let batchStart = 0; batchStart < newFiles.length; batchStart += BATCH_SIZE) {
+        // Check overall timeout
+        if (Date.now() - startTime > MAX_TOTAL_MS) {
+          timedOut = true;
+          await this.respond(ctx.chatId, `⏱ Time limit reached after ${indexed} files. Saving progress...`);
+          break;
+        }
 
-          // Read content for docs, sheets, PDFs
+        const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+        const batch = newFiles.slice(batchStart, batchStart + BATCH_SIZE);
+        const indexRows: string[][] = [];
+
+        await this.respond(ctx.chatId,
+          `📦 Batch ${batchNum}/${totalBatches}: processing ${batch.length} files...`
+        );
+
+        // Split batch into readable (need AI) and non-readable (metadata only)
+        const readableFiles: DriveFile[] = [];
+        const nonReadableFiles: DriveFile[] = [];
+        for (const file of batch) {
           const isReadable = [
             'application/vnd.google-apps.document',
             'application/vnd.google-apps.spreadsheet',
             'application/pdf',
           ].includes(file.mimeType);
+          if (isReadable) readableFiles.push(file);
+          else nonReadableFiles.push(file);
+        }
 
-          if (isReadable) {
+        // Process non-readable files first (fast, no API calls)
+        for (const file of nonReadableFiles) {
+          try {
+            const category = this.categorizeFile(file);
+            const linkedProject = this.matchToProject(file, companyNames);
+            const folderPath = resolveFullPath(file.parents?.[0], folderMap);
+
+            const metaKnowledge = this.extractMetadataKnowledge(file, linkedProject, folderPath, category);
+            if (metaKnowledge) {
+              await saveKnowledge(metaKnowledge);
+              knowledgeSaved++;
+            }
+
+            indexRows.push(objectToRow(SHEETS.DRIVE_INDEX, {
+              fileName: file.name, fileId: file.id, fileUrl: file.webViewLink,
+              folderPath, parentFolder: file.parents?.[0] || file.driveId || '',
+              fileType: this.friendlyType(file.mimeType), lastModified: file.modifiedTime,
+              linkedProject: linkedProject || '', category,
+            }));
+            indexed++;
+          } catch (err: any) {
+            logger.warn(`[Drive] Failed to index "${file.name}": ${err.message}`);
+          }
+        }
+
+        // Process readable files in parallel chunks of PARALLEL_AI
+        for (let i = 0; i < readableFiles.length; i += PARALLEL_AI) {
+          const chunk = readableFiles.slice(i, i + PARALLEL_AI);
+          const results = await Promise.allSettled(chunk.map(async (file) => {
+            const category = this.categorizeFile(file);
+            const linkedProject = this.matchToProject(file, companyNames);
+            const folderPath = resolveFullPath(file.parents?.[0], folderMap);
+
             try {
               const rawContent = await readFileContent(file);
               if (rawContent && rawContent.length > 50) {
                 withContent++;
-
-                // Extract and save knowledge to the knowledge base
                 const knowledge = await this.extractKnowledge(file, rawContent, linkedProject, folderPath);
                 if (knowledge) {
                   await saveKnowledge(knowledge);
@@ -328,46 +380,35 @@ export class DriveIndexerAgent extends BaseAgent {
                 }
               }
             } catch { /* content read failed, continue */ }
-          } else {
-            // Even for non-readable files (images, videos, folders, CAD files, etc.)
-            // we can still save metadata knowledge based on filename + folder context
-            const metaKnowledge = this.extractMetadataKnowledge(file, linkedProject, folderPath, category);
-            if (metaKnowledge) {
-              await saveKnowledge(metaKnowledge);
-              knowledgeSaved++;
-            }
-          }
 
-          // Collect row for batch write
-          indexRows.push(objectToRow(SHEETS.DRIVE_INDEX, {
-            fileName: file.name,
-            fileId: file.id,
-            fileUrl: file.webViewLink,
-            folderPath,
-            parentFolder: file.parents?.[0] || file.driveId || '',
-            fileType: this.friendlyType(file.mimeType),
-            lastModified: file.modifiedTime,
-            linkedProject: linkedProject || '',
-            category,
+            return objectToRow(SHEETS.DRIVE_INDEX, {
+              fileName: file.name, fileId: file.id, fileUrl: file.webViewLink,
+              folderPath, parentFolder: file.parents?.[0] || file.driveId || '',
+              fileType: this.friendlyType(file.mimeType), lastModified: file.modifiedTime,
+              linkedProject: linkedProject || '', category,
+            });
           }));
 
-          indexed++;
-
-          // Progress update every 20 files
-          if (indexed % 20 === 0) {
-            await this.respond(ctx.chatId, `⏳ Progress: ${indexed}/${newFiles.length} files processed...`);
+          for (const result of results) {
+            if (result.status === 'fulfilled') {
+              indexRows.push(result.value);
+              indexed++;
+            }
           }
-        } catch (err: any) {
-          logger.warn(`[Drive] Failed to index "${file.name}": ${err.message}`);
+        }
+
+        // Write this batch to Sheets immediately (incremental save)
+        if (indexRows.length > 0) {
+          try {
+            await appendRows(SHEETS.DRIVE_INDEX, indexRows);
+          } catch (err: any) {
+            logger.warn(`[Drive] Batch ${batchNum} sheet write failed: ${err.message}`);
+          }
         }
       }
 
-      // Single batch write to Sheets (replaces N individual appendRow calls)
-      if (indexRows.length > 0) {
-        await appendRows(SHEETS.DRIVE_INDEX, indexRows);
-      }
-
-      const summary = `✅ Indexed ${indexed} new files (${withContent} with content, ${knowledgeSaved} knowledge entries). ${skipped > 0 ? `${skipped} already indexed, skipped.` : ''} Drives: ${1 + sharedDrives.length}, folders mapped: ${folderMap.size}.`;
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const summary = `${timedOut ? '⏱' : '✅'} Indexed ${indexed}/${newFiles.length} new files (${withContent} with content, ${knowledgeSaved} knowledge entries) in ${elapsed}s. ${skipped > 0 ? `${skipped} already indexed, skipped.` : ''} Drives: ${1 + sharedDrives.length}, folders mapped: ${folderMap.size}.${timedOut ? ' Run /indexdrive again to continue where you left off.' : ''}`;
       await sendToMo(formatType2('Drive Index Complete', summary));
       await this.respond(ctx.chatId, summary);
 

@@ -6,6 +6,7 @@ import { getAllAgents, getAgent } from '../../agents/registry';
 import { UserRole } from '../../config/access';
 import { logger } from '../../utils/logger';
 import { handleApproval } from '../approvals';
+import { getAllBoardsSnapshot } from '../trello/client';
 
 const router = Router();
 
@@ -64,6 +65,17 @@ router.get('/api/agent-configs', (_req: Request, res: Response) => {
     schedule: a.config.schedule || null,
     requiredRole: a.config.requiredRole,
   })));
+});
+
+// API: All 5 Trello boards snapshot (cards with list names)
+router.get('/api/boards', async (_req: Request, res: Response) => {
+  try {
+    const snapshot = await getAllBoardsSnapshot();
+    res.json(snapshot);
+  } catch (err: any) {
+    logger.error(`[Dashboard] Boards snapshot error: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // API: Trigger an agent command from the dashboard (async — fire and forget)

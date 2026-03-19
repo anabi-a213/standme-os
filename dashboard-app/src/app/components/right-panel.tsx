@@ -1,9 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
-import { Send, Paperclip, Maximize2, Trash2, Sparkles, GripVertical } from 'lucide-react';
+import { Send, Paperclip, Maximize2, Trash2, Sparkles, GripVertical, ArrowLeft } from 'lucide-react';
 import { ActivityFeed } from './activity-feed';
 import { useDashboard } from '../../context/dashboard-context';
 import type { ChatMessage } from '../../context/dashboard-context';
+
+interface RightPanelProps {
+  isMobile?: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
+}
 
 const suggestedQuestions = [
   "What's overdue?",
@@ -80,7 +86,7 @@ const MIN_FEED_PERCENT = 15;
 const MAX_FEED_PERCENT = 75;
 const DEFAULT_FEED_PERCENT = 35;
 
-export function RightPanel() {
+export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) {
   const { messages, isTyping, sendMessage, clearChat } = useDashboard();
   const [message, setMessage] = useState('');
   const [isRTL, setIsRTL] = useState(false);
@@ -187,6 +193,94 @@ export function RightPanel() {
     textareaRef.current?.focus();
   };
 
+  // Mobile: full-screen overlay
+  if (isMobile) {
+    return (
+      <>
+        <div className={`mobile-backdrop ${isOpen ? 'open' : ''}`} onClick={onClose} />
+        <div
+          className="fixed inset-0 z-50 flex flex-col bg-[var(--bg-primary)] transition-transform duration-300 ease-out"
+          style={{ transform: isOpen ? 'translateY(0)' : 'translateY(100%)' }}
+        >
+          {/* Mobile chat header */}
+          <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 shrink-0">
+            <button onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-lg active:bg-[var(--surface-2)]">
+              <ArrowLeft className="h-5 w-5 text-[var(--text)]" />
+            </button>
+            <div className="flex items-center gap-2.5 flex-1">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)]">
+                <Sparkles className="h-4 w-4 text-black" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-[var(--text)]">STANDME AI</div>
+                <div className="text-[10px] text-[var(--text-muted)]">{isTyping ? 'Thinking...' : 'Ready'}</div>
+              </div>
+            </div>
+            <button onClick={clearChat} className="rounded-md p-2 text-[var(--text-muted)] active:bg-[var(--surface-2)]">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-4 py-4 overscroll-contain">
+            <div className="space-y-4">
+              {messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)}
+              {isTyping && (
+                <div className="flex items-center gap-2 px-4 py-2">
+                  <div className="flex gap-1">
+                    {[0, 1, 2].map((i) => (
+                      <motion.div key={i} className="h-2 w-2 rounded-full bg-[var(--gold)]"
+                        animate={{ y: [0, -8, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.2 }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+            {messages.length <= 1 && (
+              <div className="border-t border-[var(--border-subtle)] pt-4 mt-4">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Quick Actions</div>
+                <div className="flex flex-wrap gap-2">
+                  {suggestedQuestions.map((s) => (
+                    <button key={s} onClick={() => handleSuggestionClick(s)}
+                      className="rounded-lg border border-[var(--gold)]/40 px-3 py-2 text-xs text-[var(--gold)] active:bg-[var(--gold-dim)]">{s}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Mobile input */}
+          <div className="border-t border-[var(--border-subtle)] bg-[var(--surface)] p-3 shrink-0">
+            <div className="flex items-end gap-2">
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask anything..."
+                className={`flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--gold)] ${
+                  isRTL ? 'text-right' : 'text-left'
+                }`}
+                rows={1}
+                style={{ maxHeight: '120px' }}
+              />
+              <motion.button
+                onClick={handleSend}
+                disabled={!message.trim()}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--gold)] text-black disabled:opacity-40"
+                whileTap={message.trim() ? { scale: 0.95 } : {}}
+              >
+                <Send className="h-4 w-4" />
+              </motion.button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ── DESKTOP ──
   return (
     <div
       className="fixed right-0 top-[var(--topbar-height)] z-40 h-[calc(100vh-var(--topbar-height))] border-l border-[var(--border-subtle)] bg-[var(--surface)]/80 backdrop-blur-xl"

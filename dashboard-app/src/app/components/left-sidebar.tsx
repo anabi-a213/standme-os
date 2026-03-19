@@ -17,6 +17,9 @@ interface LeftSidebarProps {
   onCommandClick: (command: string) => void;
   runningCommands: string[];
   agentConfigs: AgentConfig[];
+  isMobile?: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 const COMMAND_INFO: Record<string, { what: string; when: string; output: string }> = {
@@ -120,7 +123,7 @@ function buildCommandGroups(agentConfigs: AgentConfig[]): CommandGroup[] {
   return populated;
 }
 
-export function LeftSidebar({ onCommandClick, runningCommands, agentConfigs }: LeftSidebarProps) {
+export function LeftSidebar({ onCommandClick, runningCommands, agentConfigs, isMobile, isOpen, onClose }: LeftSidebarProps) {
   const [hoveredCommand, setHoveredCommand] = useState<string | null>(null);
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
 
@@ -132,6 +135,70 @@ export function LeftSidebar({ onCommandClick, runningCommands, agentConfigs }: L
     setActiveInfo(prev => prev === commandId ? null : commandId);
   };
 
+  const handleCommandClick = (cmd: string) => {
+    setActiveInfo(null);
+    onCommandClick(cmd);
+    if (isMobile && onClose) onClose();
+  };
+
+  // Mobile: slide-in overlay
+  if (isMobile) {
+    return (
+      <>
+        <div className={`mobile-backdrop ${isOpen ? 'open' : ''}`} onClick={onClose} />
+        <div
+          className="fixed left-0 top-0 z-50 h-full w-[280px] border-r border-[var(--border-subtle)] bg-[var(--surface)] transition-transform duration-300 ease-out overflow-hidden"
+          style={{ transform: isOpen ? 'translateX(0)' : 'translateX(-100%)' }}
+        >
+          <div className="flex h-full flex-col pt-[var(--topbar-height)]">
+            {/* Command groups — scrollable */}
+            <div className="flex-1 overflow-y-auto px-3 py-4 overscroll-contain">
+              <div className="space-y-5">
+                {commandGroups.map((group) => (
+                  <div key={group.title}>
+                    <div className="mb-2 px-2">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">{group.title}</h3>
+                    </div>
+                    <div className="space-y-1">
+                      {group.commands.map((command) => {
+                        const running = isRunning(command.id);
+                        return (
+                          <button
+                            key={command.id}
+                            onClick={() => handleCommandClick(command.id)}
+                            className={`relative w-full rounded-lg px-3 py-3 text-left min-h-[44px] transition-colors ${
+                              running ? 'bg-[var(--gold-dim)] border-l-2 border-l-[var(--gold)]' : 'active:bg-[var(--surface-2)]'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={`font-mono text-sm font-medium ${running ? 'text-[var(--gold-bright)]' : 'text-[var(--gold)]'}`}>
+                                {command.id}
+                              </span>
+                              {running && <span className="h-2 w-2 rounded-full bg-[var(--gold)] animate-pulse" />}
+                            </div>
+                            <div className="mt-0.5 text-xs text-[var(--text-secondary)]">{command.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Status bar */}
+            <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-2)]/50 px-4 py-3">
+              <div className="flex items-center gap-2 rounded-md bg-[var(--surface-3)] px-2 py-1.5">
+                <div className="h-2 w-2 rounded-full bg-[var(--success)] animate-pulse" />
+                <span className="text-[11px] text-[var(--text-muted)]">System Online</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // Desktop: fixed sidebar
   return (
     <div className="fixed left-0 top-[var(--topbar-height)] z-40 h-[calc(100vh-var(--topbar-height))] w-[var(--sidebar-width)] border-r border-[var(--border-subtle)] bg-[var(--surface)]/80 backdrop-blur-xl">
       <div className="flex h-full flex-col">
