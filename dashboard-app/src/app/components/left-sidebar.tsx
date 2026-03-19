@@ -406,11 +406,7 @@ export function LeftSidebar({ onCommandClick, runningCommands, agentConfigs, isM
         {/* System status bar */}
         <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-2)]/50 px-4 py-4">
           <div className="flex items-center gap-2 rounded-md bg-[var(--surface-3)] px-2 py-1.5">
-            <motion.div
-              className="h-2 w-2 rounded-full bg-[var(--success)]"
-              animate={{ scale: [1, 1.2, 1], opacity: [1, 0.6, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            />
+            <div className="h-2 w-2 rounded-full bg-[var(--success)]" style={{ animation: 'pulse-glow 2s ease-in-out infinite' }} />
             <span className="text-[10px] text-[var(--text-muted)]">System Online</span>
           </div>
         </div>

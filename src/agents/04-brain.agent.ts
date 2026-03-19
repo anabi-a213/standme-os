@@ -489,7 +489,7 @@ export class BrainAgent extends BaseAgent {
       await this.respond(ctx.chatId, status);
       return { success: true, message: 'Sheets setup complete', confidence: 'HIGH' };
     } catch (err: any) {
-      const msg = `❌ Sheets setup failed: ${err.message}\n\nMake sure:\n1. SPREADSHEET_ID is set in Railway\n2. The sheet is shared with your service account\n3. GOOGLE_SERVICE_ACCOUNT_KEY is set in Railway`;
+      const msg = `❌ Sheets setup failed: ${err.message}\n\nMake sure:\n1. SPREADSHEET_ID is set in Railway env vars\n2. GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN are all set\n3. The spreadsheet is accessible by your Google account`;
       await this.respond(ctx.chatId, msg);
       return { success: false, message: err.message, confidence: 'HIGH' };
     }

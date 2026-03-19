@@ -65,14 +65,7 @@ export function ActivityFeed() {
           <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             Live Activity
           </h3>
-          <motion.div
-            className="h-2 w-2 rounded-full bg-[var(--gold)]"
-            animate={{
-              scale: [1, 1.3, 1],
-              opacity: [1, 0.5, 1]
-            }}
-            transition={{ duration: 2, repeat: Infinity }}
-          />
+          <div className="h-2 w-2 rounded-full bg-[var(--gold)] animate-pulse-glow" />
         </div>
 
         <div className="flex items-center gap-1">
