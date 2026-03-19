@@ -867,15 +867,22 @@ export class CampaignBuilderAgent extends BaseAgent {
 
         let replyBody = '';
         let replyDate = '';
+        let replyGmailId = '';   // Gmail internal message ID (for threadId lookup)
+        let replyMessageId = ''; // RFC Message-ID header (for In-Reply-To / References)
         try {
           // Scope search to the specific inbox this campaign sends from (from_email)
-          // so replies to other connected inboxes don't get mixed up
+          // so replies to other connected inboxes don't get mixed up.
+          // in:anywhere ensures we also catch replies in Sent/All Mail.
           const fromEmail = campaignId ? campaignFromEmailMap.get(campaignId) : undefined;
           const toFilter = fromEmail ? ` to:${fromEmail}` : '';
-          const emails = await searchEmailsByQuery(`from:${contactEmail} after:${afterDate}${toFilter}`, 5);
+          const emails = await searchEmailsByQuery(
+            `in:anywhere from:${contactEmail} after:${afterDate}${toFilter}`, 5
+          );
           if (emails.length > 0) {
             replyBody = emails[0].body;
             replyDate = emails[0].date;
+            replyGmailId = emails[0].id;
+            replyMessageId = emails[0].messageId || emails[0].id;
           }
         } catch (err: any) {
           logger.warn(`[CampaignBuilder] Gmail search failed for ${contactEmail}: ${err.message}`);
@@ -979,12 +986,15 @@ export class CampaignBuilderAgent extends BaseAgent {
 
         registerApproval(approvalId, {
           action: `Send sales reply to ${companyName}`,
-          data: { salesId, contactEmail, reply, updatedInfo, companyName, showName, index, conversationHistory, replyBody, replyDate },
+          data: { salesId, contactEmail, reply, updatedInfo, companyName, showName, index, conversationHistory, replyBody, replyDate, replyGmailId },
           timestamp: Date.now(),
           onApprove: async () => {
             try {
               const subject = `Re: Your stand at ${showName}`;
-              await sendEmail(contactEmail, subject, reply);
+              // Pass threading headers so our reply lands inside the prospect's existing thread
+              // inReplyToMessageId = Gmail internal ID (for threadId lookup)
+              // references = RFC Message-ID (for email client thread grouping)
+              await sendEmail(contactEmail, subject, reply, replyGmailId || undefined, replyMessageId || undefined);
 
               conversationHistory.push(
                 { role: 'prospect', message: replyBody, date: replyDate },
@@ -1260,11 +1270,12 @@ export class CampaignBuilderAgent extends BaseAgent {
     );
 
     // ---- 2. Build Gmail search query ----
-    // Search inbox + sent for emails to/from any of the connected inboxes
+    // in:anywhere = INBOX + Sent + All Mail (without this Gmail only searches INBOX by default)
+    // Match emails to/from any of the Woodpecker-connected inboxes
     // Exclude: newsletters, auto-replies, notifications, internal system emails
     const inboxFilters = allInboxes.map(e => `(to:${e} OR from:${e})`).join(' OR ');
-    const excludeFilter = '-from:noreply -from:no-reply -from:mailer -from:newsletter -from:notification -from:automated -from:donotreply -from:postmaster';
-    const query = `(${inboxFilters}) after:${afterDate} ${excludeFilter}`;
+    const excludeFilter = '-from:noreply -from:no-reply -from:mailer -from:newsletter -from:notification -from:automated -from:donotreply -from:postmaster -from:bounce -from:railwayapp -subject:unsubscribe';
+    const query = `in:anywhere (${inboxFilters}) after:${afterDate} ${excludeFilter}`;
 
     let allEmails: Awaited<ReturnType<typeof bulkSearchEmails>> = [];
     try {

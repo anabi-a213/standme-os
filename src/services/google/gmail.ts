@@ -20,6 +20,8 @@ export interface EmailMessage {
   body: string;
   date: string;
   labels: string[];
+  /** RFC 2822 Message-ID header — used for In-Reply-To / References threading */
+  messageId?: string;
   /** Present when message was retrieved with internalDate */
   internalDate?: string;
 }
@@ -81,6 +83,7 @@ function parseGmailMessage(full: gmail_v1.Schema$Message): EmailMessage {
     body: extractBodyFromPayload(full.payload),
     date: getHeader('Date'),
     labels: full.labelIds || [],
+    messageId: getHeader('Message-ID') || getHeader('Message-Id') || undefined,
     internalDate: full.internalDate || undefined,
   };
 }
