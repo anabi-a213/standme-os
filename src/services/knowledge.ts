@@ -39,17 +39,27 @@ export async function saveKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'lastUpda
   }
 }
 
-// ---- Search knowledge by keyword ----
+// ---- Search knowledge by keyword (multi-term scored ranking) ----
 
 export async function searchKnowledge(query: string, limit = 10): Promise<KnowledgeEntry[]> {
   try {
     const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
-    const q = query.toLowerCase();
 
-    return rows.slice(1)
-      .filter(r => r.some(cell => cell?.toLowerCase().includes(q)))
+    // Split into meaningful terms (ignore short stop words)
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    if (terms.length === 0) return [];
+
+    const scored = rows.slice(1)
+      .map(r => {
+        const rowText = r.join(' ').toLowerCase();
+        // Score = number of query terms found anywhere in the row
+        const score = terms.filter(t => rowText.includes(t)).length;
+        return { r, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score) // highest match count first
       .slice(0, limit)
-      .map(r => ({
+      .map(({ r }) => ({
         id: r[0] || '',
         source: r[1] || '',
         sourceType: r[2] || '',
@@ -58,9 +68,23 @@ export async function searchKnowledge(query: string, limit = 10): Promise<Knowle
         content: r[5] || '',
         lastUpdated: r[6] || '',
       }));
+
+    return scored;
   } catch (err: any) {
     logger.warn(`[Knowledge] Search failed: ${err.message}`);
     return [];
+  }
+}
+
+// ---- Check if a source already exists (for deduplication) ----
+
+export async function sourceExistsInKnowledge(source: string): Promise<boolean> {
+  try {
+    const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+    const s = source.toLowerCase();
+    return rows.slice(1).some(r => (r[1] || '').toLowerCase() === s);
+  } catch {
+    return false;
   }
 }
 

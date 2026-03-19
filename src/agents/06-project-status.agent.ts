@@ -6,6 +6,7 @@ import { readSheet } from '../services/google/sheets';
 import { SHEETS } from '../config/sheets';
 import { formatType3 } from '../services/telegram/bot';
 import { generateText } from '../services/ai/client';
+import { buildKnowledgeContext } from '../services/knowledge';
 
 export class ProjectStatusAgent extends BaseAgent {
   config: AgentConfig = {
@@ -77,9 +78,13 @@ export class ProjectStatusAgent extends BaseAgent {
     // AI summary
     try {
       const summaryData = sections.map(s => `${s.label}: ${s.content}`).join('\n');
+      const kbContext = await buildKnowledgeContext('project status pipeline deadline client').catch(() => '');
+      const prompt = kbContext
+        ? `Project status data:\n${summaryData}\n\nRelevant business context from documents:\n${kbContext}\n\nSummarize in 2-3 bullet points with recommended next action:`
+        : `Summarize this project status in 2-3 bullet points with recommended next action:\n${summaryData}`;
       const aiSummary = await generateText(
-        `Summarize this project status in 2-3 bullet points with recommended next action:\n${summaryData}`,
-        'You are a concise project manager.',
+        prompt,
+        'You are a concise project manager for StandMe, an exhibition stand design & build company.',
         200
       );
       sections.push({ label: 'AI SUMMARY', content: aiSummary });

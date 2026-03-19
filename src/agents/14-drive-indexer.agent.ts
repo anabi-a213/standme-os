@@ -5,7 +5,7 @@ import { SHEETS } from '../config/sheets';
 import { appendRow, appendRows, readSheet, objectToRow } from '../services/google/sheets';
 import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, listStandMeSubfolders, resolveAgentFolder, invalidateFolderCache, setupDriveFolderTree, createProjectFolderTree, createShowFolder, createContractorFolder, STANDME_ROOT, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
-import { saveKnowledge, searchKnowledge, buildKnowledgeContext } from '../services/knowledge';
+import { saveKnowledge, searchKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '../services/knowledge';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
 
@@ -301,6 +301,15 @@ export class DriveIndexerAgent extends BaseAgent {
       const leads = await readSheet(SHEETS.LEAD_MASTER);
       const companyNames = leads.slice(1).map(r => (r[2] || '').toLowerCase()).filter(Boolean);
 
+      // 6. Pre-load existing knowledge sources to avoid duplicates during reindex
+      const existingKnowledgeSources = new Set<string>();
+      try {
+        const kbRows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+        for (const row of kbRows.slice(1)) {
+          if (row[1]) existingKnowledgeSources.add(row[1].toLowerCase());
+        }
+      } catch { /* first run — empty set is fine */ }
+
       let indexed = 0;
       let withContent = 0;
       let knowledgeSaved = 0;
@@ -348,8 +357,12 @@ export class DriveIndexerAgent extends BaseAgent {
 
             const metaKnowledge = this.extractMetadataKnowledge(file, linkedProject, folderPath, category);
             if (metaKnowledge) {
-              await saveKnowledge(metaKnowledge);
-              knowledgeSaved++;
+              const src = (file.webViewLink || file.name).toLowerCase();
+              if (!existingKnowledgeSources.has(src)) {
+                await saveKnowledge(metaKnowledge);
+                existingKnowledgeSources.add(src);
+                knowledgeSaved++;
+              }
             }
 
             indexRows.push(objectToRow(SHEETS.DRIVE_INDEX, {
@@ -378,8 +391,12 @@ export class DriveIndexerAgent extends BaseAgent {
                 withContent++;
                 const knowledge = await this.extractKnowledge(file, rawContent, linkedProject, folderPath);
                 if (knowledge) {
-                  await saveKnowledge(knowledge);
-                  knowledgeSaved++;
+                  const src = (file.webViewLink || file.name).toLowerCase();
+                  if (!existingKnowledgeSources.has(src)) {
+                    await saveKnowledge(knowledge);
+                    existingKnowledgeSources.add(src);
+                    knowledgeSaved++;
+                  }
                 }
               }
             } catch { /* content read failed, continue */ }
