@@ -142,11 +142,17 @@ export class CampaignBuilderAgent extends BaseAgent {
   // =====================================================================
 
   private async discoverLeads(ctx: AgentContext): Promise<AgentResponse> {
-    const showName = ctx.args.trim();
+    // Support: /discover Arab Health  OR  /discover Arab Health campaign:12345
+    const argsRaw = ctx.args.trim();
+    const campaignOverrideMatch = argsRaw.match(/\bcampaign:(\d+)\b/i);
+    const campaignOverrideId = campaignOverrideMatch ? parseInt(campaignOverrideMatch[1]) : null;
+    const showName = argsRaw.replace(/\bcampaign:\d+\b/i, '').trim();
+
     if (!showName) {
       await this.respond(
         ctx.chatId,
-        'Usage: /discover [show name]\n\nExample: /discover Arab Health\n\n' +
+        'Usage: /discover [show name]\n\nExample: /discover Arab Health\n' +
+        'Or with explicit campaign: /discover Arab Health campaign:12345\n\n' +
         'Scans the exhibitor list from Drive, finds decision makers via Apollo, ' +
         'and builds a Woodpecker campaign automatically. No manual steps needed.'
       );
@@ -332,7 +338,7 @@ export class CampaignBuilderAgent extends BaseAgent {
 
     // ---- 6. Pull past Woodpecker campaigns for this show + create new campaign ----
 
-    const campaignResult = await this.analyzeAndCreateCampaign(ctx, showName);
+    const campaignResult = await this.analyzeAndCreateCampaign(ctx, showName, campaignOverrideId ?? undefined);
     if (!campaignResult) return { success: false, message: 'No Woodpecker campaign', confidence: 'LOW' };
     const { campaignId, pastAnalysis } = campaignResult;
 
@@ -519,21 +525,28 @@ export class CampaignBuilderAgent extends BaseAgent {
   // =====================================================================
 
   private async buildCampaign(ctx: AgentContext): Promise<AgentResponse> {
-    const showName = ctx.args.trim();
+    // Support: /newcampaign Arab Health  OR  /newcampaign Arab Health campaign:12345
+    const argsRaw = ctx.args.trim();
+    const campaignOverrideMatch = argsRaw.match(/\bcampaign:(\d+)\b/i);
+    const campaignOverrideId = campaignOverrideMatch ? parseInt(campaignOverrideMatch[1]) : undefined;
+    const showName = argsRaw.replace(/\bcampaign:\d+\b/i, '').trim();
+
     if (!showName) {
       await this.respond(ctx.chatId,
-        'Usage: /newcampaign [show name]\n\nExample: /newcampaign Arab Health\n\nTip: run /indexwoodpecker first to give the agent access to past email performance data.'
+        'Usage: /newcampaign [show name]\n\nExample: /newcampaign Arab Health\n' +
+        'Or with explicit campaign: /newcampaign Arab Health campaign:12345\n\n' +
+        'Tip: run /indexwoodpecker first to give the agent access to past email performance data.'
       );
       return { success: false, message: 'No show name provided', confidence: 'LOW' };
     }
 
     await this.respond(ctx.chatId, `Researching *${showName}* and pulling past campaign data from Woodpecker...`);
 
-    // ---- 1. Pull live Woodpecker history + create new campaign (runs in parallel with KB) ----
+    // ---- 1. Pull live Woodpecker history + pick campaign (runs in parallel with KB) ----
 
     const [showKnowledge, campaignResult] = await Promise.all([
       buildKnowledgeContext(showName),
-      this.analyzeAndCreateCampaign(ctx, showName),
+      this.analyzeAndCreateCampaign(ctx, showName, campaignOverrideId),
     ]);
 
     if (!campaignResult) return { success: false, message: 'No Woodpecker campaign', confidence: 'LOW' };
@@ -1380,12 +1393,14 @@ export class CampaignBuilderAgent extends BaseAgent {
   }
 
   /**
-   * Pull historical Woodpecker campaign data, analyse performance, always create a FRESH campaign.
-   * Returns the new campaign ID + a performance analysis string for email generation.
+   * Pull historical Woodpecker campaign data, analyse performance, select a campaign.
+   * @param campaignIdOverride — If provided, skip name-matching and use this campaign ID directly.
+   * Returns the campaign ID + a performance analysis string for email generation.
    */
   private async analyzeAndCreateCampaign(
     ctx: AgentContext,
-    showName: string
+    showName: string,
+    campaignIdOverride?: number,
   ): Promise<{ campaignId: number; pastAnalysis: string } | null> {
 
     // ---- 1. Fetch all Woodpecker campaigns ----
@@ -1393,21 +1408,50 @@ export class CampaignBuilderAgent extends BaseAgent {
     try {
       allCampaigns = await listCampaigns();
     } catch (err: any) {
-      await this.respond(ctx.chatId, `Cannot reach Woodpecker: ${err.message}`);
+      await this.respond(ctx.chatId,
+        `❌ Cannot reach Woodpecker API: ${err.message}\n\n` +
+        `Check that WOODPECKER_API_KEY is set correctly in Railway.`
+      );
       return null;
     }
 
-    // ---- 2. Find past campaigns for this show (by name match) ----
-    const pastCampaigns = allCampaigns.filter(c =>
-      c.name.toLowerCase().includes(showName.toLowerCase().split(' ')[0]) ||
-      showName.toLowerCase().split(' ').some(w => w.length > 3 && c.name.toLowerCase().includes(w))
-    );
+    // ---- 2. Select campaign ----
+    // Priority: explicit override → name-match → ask Mo to create one
 
-    // ---- 3. Pull stats + best email sequences from past campaigns ----
+    let chosen: { id: number; name: string; status: string } | null = null;
+
+    if (campaignIdOverride) {
+      chosen = allCampaigns.find(c => c.id === campaignIdOverride) || null;
+      if (!chosen) {
+        // Still valid — use the override ID even if not found in list (might be a different account segment)
+        chosen = { id: campaignIdOverride, name: `Campaign ${campaignIdOverride}`, status: 'UNKNOWN' };
+      }
+    } else {
+      // Name-match: show name keywords against campaign name
+      const showWords = showName.toLowerCase().split(/\s+/);
+      const matched = allCampaigns.filter(c => {
+        const cn = c.name.toLowerCase();
+        return showWords.some(w => w.length > 2 && cn.includes(w));
+      });
+      // Use highest ID (most recently created) among matches
+      const sorted = [...matched].sort((a, b) => b.id - a.id);
+      chosen = sorted[0] || null;
+    }
+
+    // ---- 3. Pull stats + best email sequences from matched campaigns ----
+    // Pull performance from ALL name-matched campaigns for learning, not just chosen
+    const learnFromCampaigns = campaignIdOverride
+      ? allCampaigns.filter(c => {
+          const cn = c.name.toLowerCase();
+          const showWords = showName.toLowerCase().split(/\s+/);
+          return showWords.some(w => w.length > 2 && cn.includes(w));
+        })
+      : (chosen ? [chosen] : []);
+
     const performanceLines: string[] = [];
     const bestEmailExamples: string[] = [];
 
-    for (const past of pastCampaigns) {
+    for (const past of learnFromCampaigns) {
       try {
         const [stats, details] = await Promise.all([
           getCampaignStats(past.id),
@@ -1423,7 +1467,6 @@ export class CampaignBuilderAgent extends BaseAgent {
             `Campaign "${past.name}": ${stats.sent} sent | ${openRate}% open | ${replyRate}% reply | ${stats.interested} interested [${grade}]`
           );
 
-          // Save best-performing email sequences as examples
           if (replyRate >= 5 && details.emails?.length) {
             for (const email of details.emails.slice(0, 2)) {
               if (email.subject && email.body) {
@@ -1442,57 +1485,47 @@ export class CampaignBuilderAgent extends BaseAgent {
     }
 
     const pastAnalysis = [
-      pastCampaigns.length > 0
-        ? `PAST WOODPECKER CAMPAIGNS FOR THIS SHOW (${pastCampaigns.length} found):\n${performanceLines.join('\n')}`
+      learnFromCampaigns.length > 0
+        ? `PAST WOODPECKER CAMPAIGNS FOR THIS SHOW (${learnFromCampaigns.length} found):\n${performanceLines.join('\n')}`
         : `No past Woodpecker campaigns found for ${showName} — this is the first one.`,
       bestEmailExamples.length > 0
         ? `\nBEST-PERFORMING EMAIL SEQUENCES (use these as style reference):\n\n${bestEmailExamples.join('\n\n---\n\n')}`
         : '',
     ].filter(Boolean).join('\n');
 
-    if (pastCampaigns.length > 0) {
+    if (performanceLines.length > 0) {
       await this.respond(
         ctx.chatId,
-        `Analysed *${pastCampaigns.length}* past Woodpecker campaign(s) for ${showName}.\n` +
+        `Analysed *${learnFromCampaigns.length}* past Woodpecker campaign(s) for ${showName}.\n` +
         performanceLines.map(l => `  • ${l}`).join('\n') +
-        `\n\nCreating fresh campaign and building improved emails...`
+        `\n\nBuilding improved emails...`
       );
     }
-
-    // ---- 4. Select campaign to use ----
-    // Woodpecker Classic API does not support creating campaigns programmatically.
-    // Use the most recent matching campaign, or guide Mo to create one.
-
-    // Sort past campaigns so the most recently created (highest ID) is first
-    const sorted = [...pastCampaigns].sort((a, b) => b.id - a.id);
-    const chosen = sorted[0] || null;
 
     if (chosen) {
       await this.respond(
         ctx.chatId,
-        `Using Woodpecker campaign: *${chosen.name}* (ID: ${chosen.id}, status: ${chosen.status})\n\n` +
-        `To run this as a fresh campaign, pause it and duplicate it in Woodpecker UI, then re-run.`
+        `Using Woodpecker campaign: *${chosen.name}* (ID: \`${chosen.id}\`, status: ${chosen.status})\n\n` +
+        (chosen.status === 'PAUSED' ? `⚠️ Campaign is PAUSED in Woodpecker — make sure to activate it after prospects are added.\n\n` : '') +
+        `To run as a completely fresh campaign: duplicate it in Woodpecker UI then re-run with campaign:NEW_ID.`
       );
       return { campaignId: chosen.id, pastAnalysis };
     }
 
-    // No matching campaign — list all available ones and ask Mo to create/pick one
-    const campaignList = allCampaigns
-      .slice(0, 10)
-      .map(c => `  • ${c.name} (ID: ${c.id}, ${c.status})`)
-      .join('\n');
+    // ---- No matching campaign — show all available campaigns and ask Mo to create/pick one ----
+    const campaignList = allCampaigns.length > 0
+      ? allCampaigns.slice(0, 15).map(c => `  • *${c.name}* (ID: \`${c.id}\`, ${c.status})`).join('\n')
+      : '  (no campaigns found — check WOODPECKER_API_KEY)';
 
-    await sendToMo(formatType2(
-      `No Woodpecker campaign for ${showName}`,
-      `No campaign matching "${showName}" found.\n\nAvailable campaigns:\n${campaignList || '  (none)'}\n\n` +
-      `Create a new campaign in Woodpecker UI named "${showName}" then run /discover ${showName} again.`
-    ));
-    await this.respond(
-      ctx.chatId,
-      `No Woodpecker campaign found for *${showName}*.\n\n` +
-      `Available campaigns:\n${campaignList || '  (none)'}\n\n` +
-      `Create one in Woodpecker UI, then run /discover ${showName} again.`
-    );
+    const noMatchMsg =
+      `❌ No Woodpecker campaign found matching *${showName}*.\n\n` +
+      `*Your campaigns:*\n${campaignList}\n\n` +
+      `*Options:*\n` +
+      `1. Create a campaign in Woodpecker UI named "${showName}", then re-run\n` +
+      `2. Use an existing campaign by ID: \`/discover ${showName} campaign:12345\``;
+
+    await sendToMo(formatType2(`No Woodpecker campaign for ${showName}`, noMatchMsg));
+    await this.respond(ctx.chatId, noMatchMsg);
     return null;
   }
 }

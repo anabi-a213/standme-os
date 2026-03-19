@@ -141,10 +141,13 @@ export async function createCampaign(_name: string, _fromName: string, _fromEmai
 
 export async function addProspectToCampaign(campaignId: number, prospect: WoodpeckerProspect): Promise<number | null> {
   return retry(async () => {
+    // Woodpecker Classic API v1: campaign key is "id", NOT "campaign_id"
     const resp = await getWoodpeckerClient().post('/add_prospects_campaign', {
-      campaign: { campaign_id: campaignId },
-      update: true,
+      campaign: { id: campaignId },
       prospects: [prospect],
+    }).catch((err: any) => {
+      const detail = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+      throw new Error(`Woodpecker API error (${err.response?.status ?? '?'}): ${detail}`);
     });
     // Woodpecker returns { status: 'OK', prospects: [{id, ...}] }
     const created = resp.data?.prospects?.[0];
@@ -165,10 +168,13 @@ export async function addProspectsToCampaign(
   for (let i = 0; i < prospects.length; i += batchSize) {
     const batch = prospects.slice(i, i + batchSize);
     const resp = await retry(async () => {
+      // Woodpecker Classic API v1: campaign key is "id", NOT "campaign_id"
       return getWoodpeckerClient().post('/add_prospects_campaign', {
-        campaign: { campaign_id: campaignId },
-        update: true,
+        campaign: { id: campaignId },
         prospects: batch,
+      }).catch((err: any) => {
+        const detail = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+        throw new Error(`Woodpecker API error (${err.response?.status ?? '?'}): ${detail}`);
       });
     }, `addProspectsBatch[${i}]`);
     const returned: any[] = resp.data?.prospects ?? [];
