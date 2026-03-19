@@ -104,13 +104,17 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
   const splitDragStart = useRef({ y: 0, percent: DEFAULT_FEED_PERCENT });
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Sync panel width to CSS variable so main content adjusts
+  // Sync panel width to CSS variable so main content adjusts.
+  // On mobile the panel is a full-screen overlay — never consume layout space.
   useEffect(() => {
-    document.documentElement.style.setProperty('--right-panel-width', `${panelWidth}px`);
+    document.documentElement.style.setProperty(
+      '--right-panel-width',
+      isMobile ? '0px' : `${panelWidth}px`
+    );
     return () => {
       document.documentElement.style.removeProperty('--right-panel-width');
     };
-  }, [panelWidth]);
+  }, [panelWidth, isMobile]);
 
   // Panel width drag handlers
   const onPanelMouseDown = useCallback((e: React.MouseEvent) => {
