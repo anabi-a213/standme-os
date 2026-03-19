@@ -4,6 +4,7 @@ import { UserRole } from '../config/access';
 import { getBoardCardsWithListNames } from '../services/trello/client';
 import { generateText, detectLanguage } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
+import { buildKnowledgeContext } from '../services/knowledge';
 import { logger } from '../utils/logger';
 
 export class ClientReminderAgent extends BaseAgent {
@@ -60,13 +61,16 @@ export class ClientReminderAgent extends BaseAgent {
 
       let followUpDraft = '';
       try {
+        const clientKnowledge = await buildKnowledgeContext(reminder.card.name).catch(() => '');
         followUpDraft = await generateText(
           `Write a follow-up email for an exhibition stand client.\n\n` +
           `Client / Project: ${reminder.card.name}\n` +
           `Silence: ${reminder.daysSince} days\n` +
           `Stage: ${reminder.stage}\n` +
-          `Context: ${stageContext[reminder.stage] || 'Active project, no response for several days.'}\n\n` +
-          `The email should:\n` +
+          `Context: ${stageContext[reminder.stage] || 'Active project, no response for several days.'}\n` +
+          (clientKnowledge ? `\nWhat we know about this client from our records:\n${clientKnowledge}\n` : '') +
+          `\nThe email should:\n` +
+          `- Reference something specific about their project (show, stand size, design direction) if known\n` +
           `- Open with something useful or specific, not a check-in\n` +
           `- Show we are on top of it and ready to move\n` +
           `- Make it easy for them to reply (one clear question or CTA)\n` +

@@ -5,6 +5,7 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, appendRow, findRowByValue, objectToRow, sheetUrl } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
+import { buildKnowledgeContext, saveKnowledge } from '../services/knowledge';
 
 export class ContractorCoordAgent extends BaseAgent {
   config: AgentConfig = {
@@ -53,6 +54,15 @@ export class ContractorCoordAgent extends BaseAgent {
       notes: '',
     }));
 
+    // Save to knowledge base so Brain and other agents can reference this contractor
+    await saveKnowledge({
+      source: `Contractor DB — ${name}`,
+      sourceType: 'manual',
+      topic: company || name,
+      tags: `contractor, ${specialty || ''}, ${region || ''}, supplier`.replace(/, ,/g, ','),
+      content: `Contractor: ${name} (${company}). Specialty: ${specialty || 'unknown'}. Region: ${region || 'unknown'}. Contact: ${email || phone || 'see Contractor DB'}.`,
+    }).catch(() => {});
+
     const contractorSheetLink = sheetUrl(SHEETS.CONTRACTOR_DB);
     await this.respond(ctx.chatId, `✅ Contractor added: ${name} (${company}) — ${specialty}${contractorSheetLink ? `\n📊 [View Contractor DB](${contractorSheetLink})` : ''}`);
     return { success: true, message: `Contractor ${name} added`, confidence: 'HIGH' };
@@ -76,12 +86,16 @@ export class ContractorCoordAgent extends BaseAgent {
       return { success: false, message: 'Contractor not found', confidence: 'HIGH' };
     }
 
+    // Pull any relevant project/contractor history from knowledge base
+    const kbContext = await buildKnowledgeContext(`${contractorName} ${project} contractor`).catch(() => '');
+
     // Draft booking message (no budget revealed)
     const bookingDraft = await generateText(
       `Draft a professional booking message for contractor "${contractor.data[1]}" ` +
       `(company: ${contractor.data[2]}, specialty: ${contractor.data[3]}) ` +
-      `for project "${project}", dates: ${dates || 'TBD'}. ` +
-      `IMPORTANT: Do NOT mention any budget or rates. Keep it professional and direct.`,
+      `for project "${project}", dates: ${dates || 'TBD'}.\n` +
+      (kbContext ? `\nRelevant context from our records:\n${kbContext}\n` : '') +
+      `\nIMPORTANT: Do NOT mention any budget or rates. Keep it professional and direct.`,
       'You draft contractor booking messages. Professional, never reveal budget or rates.',
       300
     );
