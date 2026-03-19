@@ -129,6 +129,7 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /newcampaign [show name] — generate personalised emails for existing pipeline leads and launch Woodpecker campaign
 - /salesreplies — process Woodpecker replies and advance deals
 - /campaignstatus [show name] — full Woodpecker + pipeline view for a show
+- /indexgmail [days] — scan all Woodpecker-connected inboxes + save email intelligence to Knowledge Base (improves email writing + reply handling). Default: last 90 days.
 - /contractors — list available contractors
 - /addcontractor — add new contractor to database
 - /bookcontractor — book a contractor for a project

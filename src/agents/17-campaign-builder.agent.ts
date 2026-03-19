@@ -25,6 +25,7 @@ import { createCard, findListByName } from '../services/trello/client';
 import {
   listCampaigns, getCampaignDetails, getCampaignStats,
   getProspectsByCampaign, addProspectToCampaign, addProspectsToCampaign, WoodpeckerProspect,
+  listSendingInboxes,
 } from '../services/woodpecker/client';
 import {
   analyzeShow, generateCampaignEmail, generateSalesReply, extractCompaniesFromText, generateText,
@@ -33,7 +34,7 @@ import { searchKnowledge, buildKnowledgeContext, saveKnowledge, getKnowledgeByTo
 import { searchFiles, readFileContent } from '../services/google/drive';
 import { findExhibitorFile, findExhibitorFiles, listExhibitorFiles, parseExhibitorFile, ExhibitorRecord } from '../services/drive-exhibitor';
 import { findDecisionMaker } from '../services/apollo';
-import { searchEmailsByQuery, sendEmail } from '../services/google/gmail';
+import { searchEmailsByQuery, sendEmail, bulkSearchEmails } from '../services/google/gmail';
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
@@ -47,7 +48,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     name: 'Campaign Builder',
     id: 'agent-17',
     description: 'Build and run full show email campaigns with professional sales loop via Woodpecker',
-    commands: ['/newcampaign', '/discover', '/salesreplies', '/campaignstatus', '/indexwoodpecker', '/testlead'],
+    commands: ['/newcampaign', '/discover', '/salesreplies', '/campaignstatus', '/indexwoodpecker', '/indexgmail', '/testlead'],
     schedule: '0 */2 * * *', // every 2 hours for reply monitoring
     requiredRole: UserRole.ADMIN,
   };
@@ -57,6 +58,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     if (ctx.command === '/discover') return this.discoverLeads(ctx);
     if (ctx.command === '/campaignstatus') return this.showCampaignStatus(ctx);
     if (ctx.command === '/indexwoodpecker') return this.indexWoodpeckerEmails(ctx);
+    if (ctx.command === '/indexgmail') return this.indexGmailInboxes(ctx);
     if (ctx.command === '/testlead') return this.createTestLead(ctx);
     return this.buildCampaign(ctx);
   }
@@ -861,7 +863,7 @@ export class CampaignBuilderAgent extends BaseAgent {
         // Find the reply in Gmail
         const afterDate = lastReplyDate
           ? new Date(lastReplyDate).toISOString().split('T')[0].replace(/-/g, '/')
-          : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0].replace(/-/g, '/');
+          : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0].replace(/-/g, '/');
 
         let replyBody = '';
         let replyDate = '';
@@ -1216,6 +1218,198 @@ export class CampaignBuilderAgent extends BaseAgent {
 
     await this.respond(ctx.chatId, instructions);
     return { success: true, message: `Test record ${testId} created`, confidence: 'HIGH' };
+  }
+
+  // =====================================================================
+  // /indexgmail — Scan all Woodpecker-connected inboxes → Knowledge Base
+  // =====================================================================
+
+  /**
+   * /indexgmail [days]
+   *
+   * Reads all Gmail inboxes that Woodpecker campaigns send FROM (plus
+   * the main connected account). For every real business email found:
+   *  - Classifies it: inquiry / reply / objection / close / other
+   *  - Extracts show name, company, intent signals, requirements, pricing
+   *  - Saves structured insight to the Knowledge Base
+   *
+   * This trains the AI to write better emails, handle objections smarter,
+   * and understand your business patterns from real conversations.
+   */
+  private async indexGmailInboxes(ctx: AgentContext): Promise<AgentResponse> {
+    const daysBack = Math.min(parseInt(ctx.args.trim() || '90', 10) || 90, 365);
+    const afterDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000)
+      .toISOString().split('T')[0].replace(/-/g, '/');
+
+    await this.respond(ctx.chatId, `📬 Scanning all Woodpecker-connected inboxes (last ${daysBack} days)...\n\nThis may take a few minutes for large inboxes.`);
+
+    // ---- 1. Discover all sending inboxes from Woodpecker ----
+    let sendingInboxes: string[] = [];
+    try {
+      sendingInboxes = await listSendingInboxes();
+    } catch (err: any) {
+      logger.warn(`[IndexGmail] Could not fetch Woodpecker inboxes: ${err.message}`);
+    }
+
+    const mainEmail = process.env.SEND_FROM_EMAIL || 'info@standme.de';
+    const allInboxes = [...new Set([mainEmail, ...sendingInboxes])];
+
+    await this.respond(
+      ctx.chatId,
+      `Found *${allInboxes.length}* connected inbox(es):\n${allInboxes.map(e => `  • ${e}`).join('\n')}\n\nFetching emails...`
+    );
+
+    // ---- 2. Build Gmail search query ----
+    // Search inbox + sent for emails to/from any of the connected inboxes
+    // Exclude: newsletters, auto-replies, notifications, internal system emails
+    const inboxFilters = allInboxes.map(e => `(to:${e} OR from:${e})`).join(' OR ');
+    const excludeFilter = '-from:noreply -from:no-reply -from:mailer -from:newsletter -from:notification -from:automated -from:donotreply -from:postmaster';
+    const query = `(${inboxFilters}) after:${afterDate} ${excludeFilter}`;
+
+    let allEmails: Awaited<ReturnType<typeof bulkSearchEmails>> = [];
+    try {
+      allEmails = await bulkSearchEmails(query, 300);
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `❌ Gmail scan failed: ${err.message}\n\nCheck that GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN are set correctly.`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    if (allEmails.length === 0) {
+      await this.respond(ctx.chatId, `No business emails found in the last ${daysBack} days for: ${allInboxes.join(', ')}`);
+      return { success: true, message: 'No emails found', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `Found *${allEmails.length}* emails. Analysing for business intelligence...`);
+
+    // ---- 3. Filter out internal/system emails ----
+    const autoSenderPatterns = /noreply|no-reply|newsletter|mailer|notification|automated|donotreply|postmaster|bounce|alert|digest|woodpecker|railwayapp|github|google|microsoft/i;
+    const businessEmails = allEmails.filter(e => {
+      if (autoSenderPatterns.test(e.from)) return false;
+      if (e.body.length < 40) return false; // skip empty/very short messages
+      return true;
+    });
+
+    await this.respond(ctx.chatId, `*${businessEmails.length}* business emails after filtering. Extracting insights in batches...`);
+
+    // ---- 4. Extract intelligence in batches of 8 emails ----
+    const BATCH_SIZE = 8;
+    let savedCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < businessEmails.length; i += BATCH_SIZE) {
+      const batch = businessEmails.slice(i, i + BATCH_SIZE);
+
+      // Build batch prompt — compact representation of each email
+      const emailsText = batch.map((e, idx) =>
+        `[EMAIL ${idx + 1}]\nFrom: ${e.from}\nTo: ${e.to}\nSubject: ${e.subject}\nDate: ${e.date}\nBody (first 600 chars): ${e.body.slice(0, 600)}`
+      ).join('\n\n---\n\n');
+
+      const extractionPrompt = `You are analysing sales emails for StandMe, an exhibition stand design & build company (Germany + MENA).
+
+Extract business intelligence from these ${batch.length} emails. For each email that contains useful business info, output a JSON array item:
+
+{
+  "emailIndex": 1,
+  "type": "inquiry|prospect_reply|objection|successful_close|supplier|industry_info|skip",
+  "companyName": "...",
+  "showName": "...",
+  "standSize": "...",
+  "budget": "...",
+  "industry": "...",
+  "keyInsight": "One sentence: what is the most useful thing this email reveals about the prospect, objection, requirement, or business pattern?",
+  "emailPatterns": "What worked or didn't work in this email exchange? (tone, subject line, angle, timing)",
+  "objection": "If type=objection: exact objection phrased as they said it",
+  "tags": "comma-separated tags for KB search"
+}
+
+Rules:
+- Skip type="skip" for: newsletters, notifications, internal admin, auto-replies, anything with no sales insight
+- Be concise — keyInsight max 100 words
+- Only include fields you have real data for (leave empty string if unknown)
+- Output ONLY the JSON array, nothing else
+
+EMAILS TO ANALYSE:
+${emailsText}`;
+
+      try {
+        const raw = await generateText(extractionPrompt,
+          'You extract business sales intelligence from emails. Output only valid JSON arrays.',
+          600
+        );
+
+        // Parse Claude's JSON output
+        const jsonMatch = raw.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) continue;
+        const items: any[] = JSON.parse(jsonMatch[0]);
+
+        for (const item of items) {
+          if (!item || item.type === 'skip' || !item.keyInsight) continue;
+
+          const email = batch[item.emailIndex - 1];
+          if (!email) continue;
+
+          const topic = [
+            item.type === 'inquiry' ? 'prospect-inquiry' : item.type,
+            item.showName || '',
+            item.companyName || '',
+          ].filter(Boolean).join('-');
+
+          const content = [
+            item.companyName ? `Company: ${item.companyName}` : '',
+            item.showName ? `Show: ${item.showName}` : '',
+            item.standSize ? `Stand size: ${item.standSize}` : '',
+            item.budget ? `Budget: ${item.budget}` : '',
+            item.industry ? `Industry: ${item.industry}` : '',
+            `Type: ${item.type}`,
+            `Insight: ${item.keyInsight}`,
+            item.emailPatterns ? `Email patterns: ${item.emailPatterns}` : '',
+            item.objection ? `Objection: ${item.objection}` : '',
+            `From email: ${email.from} | Subject: ${email.subject} | Date: ${email.date}`,
+          ].filter(Boolean).join('\n');
+
+          const tags = [
+            'gmail-index',
+            item.type,
+            item.showName ? item.showName.toLowerCase().replace(/\s+/g, '-') : '',
+            item.industry ? item.industry.toLowerCase() : '',
+            item.tags || '',
+          ].filter(Boolean).join(',');
+
+          await saveKnowledge({
+            source: `gmail-${email.id}`,
+            sourceType: 'manual',
+            topic,
+            tags,
+            content,
+          });
+          savedCount++;
+        }
+      } catch (err: any) {
+        logger.warn(`[IndexGmail] Batch ${i}-${i + BATCH_SIZE} extraction failed: ${err.message}`);
+        errorCount++;
+      }
+
+      // Progress update every 5 batches
+      if (i > 0 && (i / BATCH_SIZE) % 5 === 0) {
+        await this.respond(ctx.chatId, `Progress: ${Math.min(i + BATCH_SIZE, businessEmails.length)}/${businessEmails.length} emails processed — ${savedCount} insights saved so far...`);
+      }
+    }
+
+    const summary =
+      `*Gmail Inbox Index Complete*\n\n` +
+      `📬 Inboxes scanned: ${allInboxes.join(', ')}\n` +
+      `📧 Emails fetched: ${allEmails.length}\n` +
+      `✅ Business emails analysed: ${businessEmails.length}\n` +
+      `💡 Insights saved to KB: ${savedCount}\n` +
+      (errorCount > 0 ? `⚠️ Batch errors: ${errorCount}\n` : '') +
+      `\nThe AI will now use these patterns to:\n` +
+      `  • Write more personalised cold emails\n` +
+      `  • Handle objections better in replies\n` +
+      `  • Understand your clients' language and requirements\n\n` +
+      `Run /indexgmail again anytime to update with newer emails.`;
+
+    await this.respond(ctx.chatId, summary);
+    return { success: true, message: summary, confidence: 'HIGH' };
   }
 
   // =====================================================================

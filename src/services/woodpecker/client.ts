@@ -223,6 +223,29 @@ export async function getProspectActivity(email: string): Promise<{
   }
 }
 
+/**
+ * Collect all unique sending email addresses across all Woodpecker campaigns.
+ * These are the inboxes replies arrive in — used by /indexgmail to know which
+ * Gmail addresses to search for business conversations.
+ */
+export async function listSendingInboxes(): Promise<string[]> {
+  const campaigns = await listCampaigns();
+  const emails = new Set<string>();
+
+  // Fetch campaign details in parallel (max 10 at a time)
+  for (let i = 0; i < campaigns.length; i += 10) {
+    const batch = campaigns.slice(i, i + 10);
+    const details = await Promise.allSettled(batch.map(c => getCampaignDetails(c.id)));
+    for (const d of details) {
+      if (d.status === 'fulfilled' && d.value.from_email) {
+        emails.add(d.value.from_email.toLowerCase().trim());
+      }
+    }
+  }
+
+  return Array.from(emails);
+}
+
 export async function stopProspect(prospectId: number): Promise<void> {
   await retry(async () => {
     await getWoodpeckerClient().put(`/prospects/${prospectId}`, {
