@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { appendRow, readSheet, objectToRow } from '../services/google/sheets';
+import { appendRow, appendRows, readSheet, objectToRow } from '../services/google/sheets';
 import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, listStandMeSubfolders, resolveAgentFolder, invalidateFolderCache, setupDriveFolderTree, createProjectFolderTree, createShowFolder, createContractorFolder, STANDME_ROOT, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { saveKnowledge, searchKnowledge, buildKnowledgeContext } from '../services/knowledge';
