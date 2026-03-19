@@ -4,7 +4,7 @@ import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
 import { addProspectToCampaign, getCampaignStats, listCampaigns, WoodpeckerProspect } from '../services/woodpecker/client';
-import { generateOutreachEmail } from '../services/ai/client';
+import { generateOutreachEmail, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
@@ -40,16 +40,52 @@ export class OutreachAgent extends BaseAgent {
     const campaignId = await this.resolveCampaignId(ctx, ctx.args);
     if (!campaignId) return { success: false, message: 'No campaign resolved', confidence: 'LOW' };
 
+    // Read LEAD_MASTER once to get dmTitle and notes (website/country) for each lead
+    // Snippet schema: snippet1 = industry hook, snippet2 = DM job title, snippet3 = website/country
+    const masterRows = await readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]);
+    const masterById = new Map<string, string[]>();
+    for (const row of masterRows.slice(1)) {
+      if (row[0]) masterById.set(row[0], row);
+    }
+
+    // Industry hook cache — one AI call per unique industry, not per company
+    const industryHooks = new Map<string, string>();
+    const getHook = async (industry: string, show: string): Promise<string> => {
+      const key = `${industry}::${show}`;
+      if (industryHooks.has(key)) return industryHooks.get(key)!;
+      const hook = await generateText(
+        `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at ${show}. ` +
+        `Be specific about what this industry cares about. No em dashes. No filler.`,
+        'Return only the sentence, nothing else.', 60,
+      ).catch(() => '');
+      industryHooks.set(key, hook.trim());
+      return hook.trim();
+    };
+
     let drafted = 0;
 
     for (const lead of ready.slice(0, 5)) {
-      const leadId   = lead[0] || '';
-      const company  = lead[2] || '';
-      const dmName   = lead[3] || '';
-      const dmEmail  = lead[4] || '';
-      const showName = lead[5] || '';
+      const leadId    = lead[0] || '';
+      const masterRef = lead[1] || '';  // LEAD_MASTER id
+      const company   = lead[2] || '';
+      const dmName    = lead[3] || '';
+      const dmEmail   = lead[4] || '';
+      const showName  = lead[5] || '';
 
       if (!dmEmail) continue;
+
+      // Enrich snippet data from LEAD_MASTER row
+      const masterRow  = masterById.get(masterRef) || [];
+      const dmTitle    = masterRow[19] || masterRow[5] || '';  // dmTitle (T) or contactTitle (F)
+      const industry   = masterRow[10] || '';
+      const notes      = masterRow[24] || '';
+      const websiteM   = notes.match(/Website:\s*([^|]+)/i);
+      const countryM   = notes.match(/Country:\s*([^|]+)/i);
+      const website    = websiteM ? websiteM[1].trim() : '';
+      const country    = countryM ? countryM[1].trim() : '';
+      const snippet3   = website || country || '';
+      const snippet1   = industry ? await getHook(industry, showName) : '';
+      const snippet2   = dmTitle;
 
       // Pull context from Knowledge Base — company history, show intel, past email patterns
       const companyContext = await buildKnowledgeContext(`${company} ${showName} outreach email`);
@@ -90,9 +126,12 @@ export class OutreachAgent extends BaseAgent {
         first_name: nameParts[0] || dmName,
         last_name: nameParts.slice(1).join(' ') || '',
         company,
-        snippet1: showName,
-        snippet2: email.subject,
-        snippet3: email.body.slice(0, 255),
+        industry,
+        // ── Consistent snippet schema ────────────────────────────────────────
+        snippet1: snippet1 || industry,   // cold email opener (industry hook)
+        snippet2: snippet2,               // DM job title
+        snippet3: snippet3,               // company website or country
+        // ────────────────────────────────────────────────────────────────────
         tags: `standme-outreach,${showName.toLowerCase().replace(/\s+/g, '-')}`,
       };
 

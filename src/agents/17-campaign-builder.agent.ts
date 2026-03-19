@@ -611,8 +611,20 @@ export class CampaignBuilderAgent extends BaseAgent {
       companyName: string;
       contactName: string;
       contactEmail: string;
+      contactTitle: string;  // DM job title → snippet2
+      country: string;       // extracted from notes → snippet3 fallback
+      website: string;       // extracted from notes → snippet3 primary
       industry: string;
       source: string;
+      industryHook: string;  // computed during email gen loop → snippet1
+    }
+
+    // One helper to extract website / country from the notes column
+    // Notes format: "Source: x | Country: x | Website: x | Booth: x | Email status: x"
+    function parseNotes(notes: string): { website: string; country: string } {
+      const w = notes.match(/Website:\s*([^|]+)/i);
+      const c = notes.match(/Country:\s*([^|]+)/i);
+      return { website: w ? w[1].trim() : '', country: c ? c[1].trim() : '' };
     }
 
     const targets: Target[] = [];
@@ -622,12 +634,17 @@ export class CampaignBuilderAgent extends BaseAgent {
       const email = (row[21] || '').trim();
       if (!email || seen.has(email.toLowerCase())) continue;
       seen.add(email.toLowerCase());
+      const { website, country } = parseNotes(row[24] || '');
       targets.push({
         companyName: row[2] || '',
         contactName: row[18] || row[3] || '',
         contactEmail: email,
+        contactTitle: row[19] || row[5] || '',   // dmTitle (col T) or contactTitle (col F)
+        country,
+        website,
         industry: row[10] || showAnalysis.industries[0] || '',
         source: 'lead_master',
+        industryHook: '',    // filled below in email gen loop
       });
     }
 
@@ -659,6 +676,20 @@ export class CampaignBuilderAgent extends BaseAgent {
 
     // ---- 5. Generate expert emails ----
 
+    // Industry hook cache — one Claude call per unique industry (same logic as /discover)
+    const campaignHookCache = new Map<string, string>();
+    async function getCampaignIndustryHook(industry: string): Promise<string> {
+      if (campaignHookCache.has(industry)) return campaignHookCache.get(industry)!;
+      const hook = await generateText(
+        `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at ${showName}. ` +
+        `Be specific about what this industry cares about on the show floor. No em dashes. No filler.`,
+        'You write cold email opening lines. Return only the sentence, nothing else.',
+        60,
+      ).catch(() => '');
+      campaignHookCache.set(industry, hook.trim());
+      return hook.trim();
+    }
+
     interface EmailDraft { target: Target; subject: string; body: string; }
     const emailDrafts: EmailDraft[] = [];
 
@@ -666,6 +697,9 @@ export class CampaignBuilderAgent extends BaseAgent {
       try {
         const companyKnowledge = await getKnowledgeByTopic(target.companyName, 3);
         const companyContext = companyKnowledge.map(k => k.content).join(' ');
+
+        // Compute industry hook before email gen so it's in the approval closure
+        target.industryHook = await getCampaignIndustryHook(target.industry);
 
         const email = await generateCampaignEmail({
           companyName: target.companyName,
@@ -722,9 +756,11 @@ export class CampaignBuilderAgent extends BaseAgent {
               last_name: nameParts.slice(1).join(' ') || '',
               company: draft.target.companyName,
               industry: draft.target.industry,
-              snippet1: showName,
-              snippet2: draft.subject,
-              snippet3: draft.body.slice(0, 255),
+              // ── Consistent snippet schema across all campaign paths ──────────
+              snippet1: draft.target.industryHook || draft.target.industry,  // cold email opener
+              snippet2: draft.target.contactTitle,                            // DM job title
+              snippet3: draft.target.website || draft.target.country || '',  // website or country
+              // ────────────────────────────────────────────────────────────────
               tags: `standme,${showName.toLowerCase().replace(/\s+/g, '-')}`,
             };
 
