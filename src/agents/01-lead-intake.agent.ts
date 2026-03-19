@@ -114,7 +114,7 @@ export class LeadIntakeAgent extends BaseAgent {
     let trelloCardId = '';
     if (scoreResult.status === 'HOT' || scoreResult.status === 'WARM') {
       const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
-      const listName = '01 New Inquiry';
+      const listName = '01 — New Inquiry';
       const list = await findListByName(boardId, listName);
 
       if (list) {

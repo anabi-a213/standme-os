@@ -9,7 +9,8 @@ let _bot: TelegramBot | null = null;
 export function getBot(): TelegramBot {
   if (!_bot) {
     // polling: false — agents use getBot() only to SEND messages, never to start polling.
-    // Polling is started exclusively by initBot() after the error handler is attached.
+    // Polling is started exclusively by initBot() after the error handler is attached,
+    // preventing 409 race conditions during Railway rolling deploys.
     _bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN || '', { polling: false });
   }
   return _bot;
@@ -18,8 +19,8 @@ export function getBot(): TelegramBot {
 export function initBot(): TelegramBot {
   const bot = getBot();
 
-  // Attach error handler FIRST — before startPolling() — so the 409 recovery
-  // handler is in place before any polling error can fire.
+  // Attach error handler BEFORE starting polling so the 409 handler is always
+  // in place when two instances briefly overlap (Railway rolling deploy).
   bot.on('polling_error', (error: any) => {
     logger.error(`Telegram polling error: ${error.message}`);
     // 409 = another instance is still polling (happens during Railway rolling deploy).

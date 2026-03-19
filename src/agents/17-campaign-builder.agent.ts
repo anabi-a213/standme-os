@@ -47,7 +47,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     name: 'Campaign Builder',
     id: 'agent-17',
     description: 'Build and run full show email campaigns with professional sales loop via Woodpecker',
-    commands: ['/newcampaign', '/discover', '/salesreplies', '/campaignstatus', '/indexwoodpecker'],
+    commands: ['/newcampaign', '/discover', '/salesreplies', '/campaignstatus', '/indexwoodpecker', '/testlead'],
     schedule: '0 */2 * * *', // every 2 hours for reply monitoring
     requiredRole: UserRole.ADMIN,
   };
@@ -57,6 +57,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     if (ctx.command === '/discover') return this.discoverLeads(ctx);
     if (ctx.command === '/campaignstatus') return this.showCampaignStatus(ctx);
     if (ctx.command === '/indexwoodpecker') return this.indexWoodpeckerEmails(ctx);
+    if (ctx.command === '/testlead') return this.createTestLead(ctx);
     return this.buildCampaign(ctx);
   }
 
@@ -792,15 +793,27 @@ export class CampaignBuilderAgent extends BaseAgent {
         return { success: true, message: 'No active records', confidence: 'HIGH' };
       }
 
-      // Batch fetch Woodpecker status
+      // Batch fetch Woodpecker status + sending inbox per campaign
       const campaignIds = [...new Set(activeRecords.map(({ row }) => row[1]).filter(Boolean))];
       const prospectStatusMap = new Map<string, string>();
+      const campaignFromEmailMap = new Map<string, string>(); // campaignId → from_email
 
       for (const cid of campaignIds) {
         try {
-          const prospects = await getProspectsByCampaign(Number(cid));
-          for (const p of prospects) {
-            if (p.email && p.status) prospectStatusMap.set(p.email.toLowerCase(), p.status);
+          const [prospects, details] = await Promise.allSettled([
+            getProspectsByCampaign(Number(cid)),
+            getCampaignDetails(Number(cid)),
+          ]);
+          if (prospects.status === 'fulfilled') {
+            for (const p of prospects.value) {
+              if (p.email && p.status) prospectStatusMap.set(p.email.toLowerCase(), p.status);
+            }
+          } else {
+            logger.warn(`[CampaignBuilder] Woodpecker fetch failed for campaign ${cid}: ${prospects.reason?.message}`);
+          }
+          if (details.status === 'fulfilled' && details.value.from_email) {
+            campaignFromEmailMap.set(cid, details.value.from_email);
+            logger.info(`[CampaignBuilder] Campaign ${cid} sends from: ${details.value.from_email}`);
           }
         } catch (err: any) {
           logger.warn(`[CampaignBuilder] Woodpecker fetch failed for campaign ${cid}: ${err.message}`);
@@ -840,7 +853,11 @@ export class CampaignBuilderAgent extends BaseAgent {
         let replyBody = '';
         let replyDate = '';
         try {
-          const emails = await searchEmailsByQuery(`from:${contactEmail} after:${afterDate}`, 5);
+          // Scope search to the specific inbox this campaign sends from (from_email)
+          // so replies to other connected inboxes don't get mixed up
+          const fromEmail = campaignId ? campaignFromEmailMap.get(campaignId) : undefined;
+          const toFilter = fromEmail ? ` to:${fromEmail}` : '';
+          const emails = await searchEmailsByQuery(`from:${contactEmail} after:${afterDate}${toFilter}`, 5);
           if (emails.length > 0) {
             replyBody = emails[0].body;
             replyDate = emails[0].date;
@@ -1091,17 +1108,24 @@ export class CampaignBuilderAgent extends BaseAgent {
       });
     }
 
-    // Live Woodpecker stats
+    // Live Woodpecker stats + show which inbox each campaign sends from
     const campaignIds = [...new Set(records.map(r => r[1]).filter(Boolean))];
     for (const cid of campaignIds.slice(0, 3)) {
       try {
-        const stats = await getCampaignStats(Number(cid));
-        const openRate = stats.sent > 0 ? Math.round((stats.opened / stats.sent) * 100) : 0;
-        const replyRate = stats.sent > 0 ? Math.round((stats.replied / stats.sent) * 100) : 0;
-        sections.push({
-          label: `Woodpecker #${cid}`,
-          content: `Sent: ${stats.sent} | Opens: ${openRate}% | Replies: ${replyRate}% | Interested: ${stats.interested}`,
-        });
+        const [stats, details] = await Promise.allSettled([
+          getCampaignStats(Number(cid)),
+          getCampaignDetails(Number(cid)),
+        ]);
+        if (stats.status === 'fulfilled') {
+          const s = stats.value;
+          const openRate = s.sent > 0 ? Math.round((s.opened / s.sent) * 100) : 0;
+          const replyRate = s.sent > 0 ? Math.round((s.replied / s.sent) * 100) : 0;
+          const fromEmail = details.status === 'fulfilled' ? details.value.from_email : '';
+          sections.push({
+            label: `Woodpecker #${cid}${fromEmail ? ` (${fromEmail})` : ''}`,
+            content: `Sent: ${s.sent} | Opens: ${openRate}% | Replies: ${replyRate}% | Interested: ${s.interested}`,
+          });
+        }
       } catch { /* skip */ }
     }
 
@@ -1110,6 +1134,75 @@ export class CampaignBuilderAgent extends BaseAgent {
       sections
     ));
     return { success: true, message: `Status shown`, confidence: 'HIGH' };
+  }
+
+  // =====================================================================
+  // /testlead — Insert a synthetic test record to verify the sales loop
+  // =====================================================================
+
+  /**
+   * Usage: /testlead [contact@email.com]
+   *
+   * Inserts a row into CAMPAIGN_SALES with status REPLIED so you can:
+   *   1. Send a real email from [contact@email.com] to info@standme.de saying
+   *      "We're interested in a stand for Arab Health — 18sqm, budget €25k"
+   *   2. Run /salesreplies to verify the full AI reply loop fires correctly
+   *
+   * Deletes the test row after 24h automatically (it's marked TEST_[timestamp]).
+   */
+  private async createTestLead(ctx: AgentContext): Promise<AgentResponse> {
+    if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+      await this.respond(ctx.chatId, 'SHEET_CAMPAIGN_SALES not configured. Set that env var first.');
+      return { success: false, message: 'SHEET_CAMPAIGN_SALES not set', confidence: 'LOW' };
+    }
+
+    const contactEmail = ctx.args.trim() || 'test@example.com';
+    const testId = `TEST-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    // Col order: A(id) B(campaignId) C(show) D(company) E(contact) F(email) G(wpId) H(status)
+    const testRow = [
+      testId,                  // A — id
+      '',                      // B — campaignId (none — no real Woodpecker record)
+      'Arab Health',           // C — showName
+      'Test Company Ltd',      // D — companyName
+      'Test Contact',          // E — contactName
+      contactEmail,            // F — contactEmail
+      '',                      // G — woodpeckerId
+      'REPLIED',               // H — status (so /salesreplies picks it up)
+      '',                      // I — classification
+      '18sqm',                 // J — standSize
+      '€25,000',               // K — budget
+      'Jan 2026',              // L — showDates
+      '',                      // M — phone
+      'Custom stand, meeting area, branding walls', // N — requirements
+      '[]',                    // O — conversationLog
+      '',                      // P — lastReplyDate
+      now,                     // Q — lastActionDate
+      '',                      // R — leadMasterId
+      `TEST RECORD — created ${now}. Delete manually after testing.`, // S — notes
+      'https://testcompany.com', // T — website
+    ];
+
+    await appendRow(SHEETS.CAMPAIGN_SALES, testRow);
+
+    const instructions = [
+      `✅ *Test record created* (ID: \`${testId}\`)`,
+      '',
+      '*To test the full sales loop:*',
+      `1. Send an email *from* \`${contactEmail}\` *to* \`info@standme.de\``,
+      '   Subject: "Stand for Arab Health"',
+      '   Body: "Hi, we\'re interested in a custom stand for Arab Health 2026. Looking at 18sqm, budget around €25k. Can you help?"',
+      '',
+      '2. Wait 1-2 minutes, then run /salesreplies',
+      '',
+      '3. If it works: you\'ll get Mo\'s AI-generated reply draft to approve',
+      '',
+      `*Delete the test row* from CAMPAIGN_SALES (row ID: \`${testId}\`) after testing.`,
+    ].join('\n');
+
+    await this.respond(ctx.chatId, instructions);
+    return { success: true, message: `Test record ${testId} created`, confidence: 'HIGH' };
   }
 
   // =====================================================================
@@ -1247,7 +1340,7 @@ export class CampaignBuilderAgent extends BaseAgent {
       const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
       if (boardId) {
         try {
-          const list = await findListByName(boardId, '02 Qualifying');
+          const list = await findListByName(boardId, '02 — Qualifying');
           if (list) {
             const card = await createCard(
               list.id,

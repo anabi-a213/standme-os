@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { appendRow, readSheet, objectToRow } from '../services/google/sheets';
+import { appendRow, appendRows, readSheet, objectToRow } from '../services/google/sheets';
 import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, listStandMeSubfolders, resolveAgentFolder, invalidateFolderCache, setupDriveFolderTree, createProjectFolderTree, createShowFolder, createContractorFolder, STANDME_ROOT, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
 import { saveKnowledge, searchKnowledge, buildKnowledgeContext } from '../services/knowledge';
@@ -14,12 +14,13 @@ export class DriveIndexerAgent extends BaseAgent {
     name: 'Drive Indexer',
     id: 'agent-14',
     description: 'Index all Google Drive files (personal + shared) with content understanding and growing knowledge base',
-    commands: ['/indexdrive', '/findfile', '/readfile', '/knowledge', '/shareallfiles', '/foldertree', '/setupdrive', '/newprojectfolder', '/newshowfolder', '/newcontractorfolder'],
+    commands: ['/indexdrive', '/reindexdrive', '/findfile', '/readfile', '/knowledge', '/shareallfiles', '/foldertree', '/setupdrive', '/newprojectfolder', '/newshowfolder', '/newcontractorfolder'],
     schedule: '0 8 * * 1',
     requiredRole: UserRole.OPS_LEAD,
   };
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
+    if (ctx.command === '/reindexdrive') return this.indexDrive(ctx, true);
     if (ctx.command === '/findfile') return this.findFile(ctx);
     if (ctx.command === '/readfile') return this.readFile(ctx);
     if (ctx.command === '/knowledge') return this.queryKnowledge(ctx);
@@ -228,8 +229,12 @@ export class DriveIndexerAgent extends BaseAgent {
     return { success: true, message: summary, confidence: 'HIGH' };
   }
 
-  private async indexDrive(ctx: AgentContext): Promise<AgentResponse> {
-    await this.respond(ctx.chatId, '🔍 Building full folder tree and indexing all drives (personal + shared)...');
+  private async indexDrive(ctx: AgentContext, forceReindex = false): Promise<AgentResponse> {
+    await this.respond(ctx.chatId,
+      forceReindex
+        ? '🔄 Force re-indexing all drives (ignoring existing index)...'
+        : '🔍 Building full folder tree and indexing all drives (personal + shared)...'
+    );
 
     try {
       // 1. Build complete folder map first (one pass, used for all path resolution)
@@ -259,17 +264,43 @@ export class DriveIndexerAgent extends BaseAgent {
       // Skip folders — only index actual files
       const actualFiles = allFiles.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
 
-      await this.respond(ctx.chatId, `Found ${actualFiles.length} files across ${1 + sharedDrives.length} drives. Reading and learning...`);
+      // 4. Read existing index to skip already-indexed files (incremental mode)
+      let alreadyIndexedIds = new Set<string>();
+      if (!forceReindex) {
+        try {
+          const existingIndex = await readSheet(SHEETS.DRIVE_INDEX);
+          // fileId is column B (index 1)
+          for (const row of existingIndex.slice(1)) {
+            if (row[1]) alreadyIndexedIds.add(row[1]);
+          }
+        } catch { /* first run — no existing index */ }
+      }
 
-      // 4. Read existing leads for project matching
+      const newFiles = actualFiles.filter(f => !alreadyIndexedIds.has(f.id));
+      const skipped = actualFiles.length - newFiles.length;
+
+      await this.respond(ctx.chatId,
+        `Found ${actualFiles.length} files across ${1 + sharedDrives.length} drives.\n` +
+        `${skipped > 0 ? `⏭ Skipping ${skipped} already indexed. ` : ''}` +
+        `Processing ${newFiles.length} new files...`
+      );
+
+      if (newFiles.length === 0) {
+        const summary = `✅ Drive index up to date — all ${actualFiles.length} files already indexed.`;
+        await this.respond(ctx.chatId, summary);
+        return { success: true, message: summary, confidence: 'HIGH' };
+      }
+
+      // 5. Read existing leads for project matching
       const leads = await readSheet(SHEETS.LEAD_MASTER);
       const companyNames = leads.slice(1).map(r => (r[2] || '').toLowerCase()).filter(Boolean);
 
       let indexed = 0;
       let withContent = 0;
       let knowledgeSaved = 0;
+      const indexRows: string[][] = []; // batch Sheets writes
 
-      for (const file of actualFiles) {
+      for (const file of newFiles) {
         try {
           const category = this.categorizeFile(file);
           const linkedProject = this.matchToProject(file, companyNames);
@@ -277,7 +308,6 @@ export class DriveIndexerAgent extends BaseAgent {
           const folderPath = resolveFullPath(file.parents?.[0], folderMap);
 
           // Read content for docs, sheets, PDFs
-          let contentSummary = '';
           const isReadable = [
             'application/vnd.google-apps.document',
             'application/vnd.google-apps.spreadsheet',
@@ -288,12 +318,6 @@ export class DriveIndexerAgent extends BaseAgent {
             try {
               const rawContent = await readFileContent(file);
               if (rawContent && rawContent.length > 50) {
-                // Generate summary for index
-                contentSummary = await generateText(
-                  `Summarize this file content in 1-2 sentences for a business context index. File: "${file.name}"\n\nContent:\n${rawContent.slice(0, 3000)}`,
-                  'You summarize documents for a business index. Be extremely concise — max 150 characters.',
-                  80
-                );
                 withContent++;
 
                 // Extract and save knowledge to the knowledge base
@@ -314,7 +338,8 @@ export class DriveIndexerAgent extends BaseAgent {
             }
           }
 
-          await appendRow(SHEETS.DRIVE_INDEX, objectToRow(SHEETS.DRIVE_INDEX, {
+          // Collect row for batch write
+          indexRows.push(objectToRow(SHEETS.DRIVE_INDEX, {
             fileName: file.name,
             fileId: file.id,
             fileUrl: file.webViewLink,
@@ -327,12 +352,22 @@ export class DriveIndexerAgent extends BaseAgent {
           }));
 
           indexed++;
+
+          // Progress update every 20 files
+          if (indexed % 20 === 0) {
+            await this.respond(ctx.chatId, `⏳ Progress: ${indexed}/${newFiles.length} files processed...`);
+          }
         } catch (err: any) {
           logger.warn(`[Drive] Failed to index "${file.name}": ${err.message}`);
         }
       }
 
-      const summary = `✅ Indexed ${indexed}/${actualFiles.length} files (${withContent} with content, ${knowledgeSaved} knowledge entries) across ${1 + sharedDrives.length} drives. Folder tree: ${folderMap.size} folders mapped.`;
+      // Single batch write to Sheets (replaces N individual appendRow calls)
+      if (indexRows.length > 0) {
+        await appendRows(SHEETS.DRIVE_INDEX, indexRows);
+      }
+
+      const summary = `✅ Indexed ${indexed} new files (${withContent} with content, ${knowledgeSaved} knowledge entries). ${skipped > 0 ? `${skipped} already indexed, skipped.` : ''} Drives: ${1 + sharedDrives.length}, folders mapped: ${folderMap.size}.`;
       await sendToMo(formatType2('Drive Index Complete', summary));
       await this.respond(ctx.chatId, summary);
 
