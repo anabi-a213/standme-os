@@ -59,7 +59,7 @@ export const SHEETS: Record<string, SheetConfig> = {
 
   OUTREACH_LOG: {
     envKey: 'SHEET_OUTREACH_LOG',
-    tabName: 'Log',
+    tabName: 'OutreachLog',
     columns: {
       id: 'A',
       leadId: 'B',
@@ -171,7 +171,7 @@ export const SHEETS: Record<string, SheetConfig> = {
 
   SYSTEM_LOG: {
     envKey: 'SHEET_SYSTEM_LOG',
-    tabName: 'Log',
+    tabName: 'SystemLog',
     columns: {
       timestamp: 'A',
       agent: 'B',

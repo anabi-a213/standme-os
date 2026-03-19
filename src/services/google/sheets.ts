@@ -13,7 +13,11 @@ function getSheetsClient(): sheets_v4.Sheets {
 }
 
 function getSheetId(config: SheetConfig): string {
-  return process.env[config.envKey] || '';
+  // Check sheet-specific env var first, then fall back to master SPREADSHEET_ID.
+  // This means you only need ONE env var (SPREADSHEET_ID) pointing to a single
+  // Google Spreadsheet — all 11 sheet tabs will live in that one file.
+  // Individual SHEET_* vars can optionally override to separate spreadsheets.
+  return process.env[config.envKey] || process.env.SPREADSHEET_ID || '';
 }
 
 export async function readSheet(config: SheetConfig, range?: string): Promise<string[][]> {

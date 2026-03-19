@@ -5,6 +5,20 @@ import { UserRole } from '../../config/access';
 import { logger } from '../../utils/logger';
 import { searchKnowledge } from '../knowledge';
 
+/** Fast env-var check — no API calls, no latency */
+function getConnectionStatus(): string {
+  const checks = [
+    { name: 'Google Sheets', ok: !!(process.env.SPREADSHEET_ID || Object.keys(process.env).some(k => k.startsWith('SHEET_'))) },
+    { name: 'Trello', ok: !!(process.env.TRELLO_API_KEY && process.env.TRELLO_TOKEN) },
+    { name: 'Claude AI', ok: !!process.env.ANTHROPIC_API_KEY },
+    { name: 'Telegram Bot', ok: !!process.env.TELEGRAM_BOT_TOKEN },
+    { name: 'Google Auth', ok: !!(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS) },
+    { name: 'Woodpecker', ok: !!process.env.WOODPECKER_API_KEY },
+    { name: 'Google Drive', ok: !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.GOOGLE_SERVICE_ACCOUNT_KEY) },
+  ];
+  return checks.map(c => `  ${c.ok ? '✅' : '❌'} ${c.name}${c.ok ? '' : ' — NOT CONFIGURED'}`).join('\n');
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -72,6 +86,11 @@ You speak Arabic and English with equal fluency. Respond in the exact same langu
 - Total errors: ${stats.totalErrors}
 - System uptime: since ${stats.uptimeSince}
 
+## LIVE CONNECTION STATUS (checked right now)
+${getConnectionStatus()}
+
+⚠️ If a connection shows ❌ NOT CONFIGURED, be HONEST — tell the user that specific integration isn't set up yet, explain what env var they need to set in Railway, and suggest running /healthcheck for details. Do NOT simulate or pretend — real data only.
+
 ## YOUR 17 AGENTS — TRIGGER ANY BY INCLUDING [TRIGGER: /command args]
 ${agentList}
 
@@ -137,7 +156,13 @@ PIPELINE STAGES: Qualifying → Proposal → Approved → Design → Production 
 - After agent results arrive, ALWAYS interpret them — don't just paste data
 
 ## CRITICAL RULE
-Never say "I cannot access" or "I don't have the ability to" — you HAVE the ability, just trigger the right agent. If you're unsure what an agent will return, trigger it and find out.`;
+You have real capabilities via agents — use them. BUT be honest about what's connected:
+- If a connection shows ✅ → trigger the agent and get real data
+- If a connection shows ❌ NOT CONFIGURED → tell the user exactly which env var is missing (e.g. "SPREADSHEET_ID isn't set in Railway — run /healthcheck or go to Railway → Variables")
+- NEVER simulate data or pretend something worked when it didn't
+- NEVER say "I apologize, I was simulating" — that's a sign past responses were wrong. Instead, report the current state clearly
+- If the issue is that Sheets isn't configured → say "Google Sheets isn't set up yet. Set SPREADSHEET_ID in your Railway env vars. Once set, all agents will work automatically."`;
+
 }
 
 export type OnChunk = (text: string) => void;
@@ -164,10 +189,24 @@ export async function processChat(
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+  // Pull relevant knowledge base entries (non-blocking — skip if Sheets not set up)
+  let kbContext = '';
+  try {
+    kbContext = await searchKnowledge(userMessage, 3);
+  } catch { /* silent — KB is optional context */ }
+
   // Build message history for Claude (keep last MAX_HISTORY)
-  const messages = session.history
-    .slice(-MAX_HISTORY)
-    .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+  // Append knowledge base context to the current user message if found
+  const enrichedUserMessage = kbContext
+    ? `${userMessage}\n\n--- KNOWLEDGE BASE ---\n${kbContext}`
+    : userMessage;
+
+  const rawHistory = session.history.slice(-MAX_HISTORY);
+  const messages = rawHistory.map((m, i) => ({
+    role: m.role as 'user' | 'assistant',
+    // Replace last user message with enriched version
+    content: (m.role === 'user' && i === rawHistory.length - 1) ? enrichedUserMessage : m.content,
+  }));
 
   // Stream response from Claude
   let fullResponse = '';

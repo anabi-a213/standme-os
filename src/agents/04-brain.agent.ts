@@ -139,6 +139,8 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /movecard [client] | [stage] — move pipeline card (e.g. /movecard Pharma Corp | 04 Proposal Sent)
 - /crossboard — cross-board health check across all Trello boards
 - /post /caption /campaign /casestudy /portfolio /insight /contentplan — marketing content
+- /healthcheck — test all connected services (Trello, Sheets, Claude, Telegram)
+- /sheetssetup — check Google Sheets status + auto-create any missing tabs
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PROACTIVE INTELLIGENCE (pre-think)
@@ -184,7 +186,7 @@ export class BrainAgent extends BaseAgent {
     name: 'StandMe Brain',
     id: 'agent-04',
     description: 'Central intelligence — answers any question, connects all agents',
-    commands: ['/brain', '/ask', '/seedknowledge', '/healthcheck'],
+    commands: ['/brain', '/ask', '/seedknowledge', '/healthcheck', '/sheetssetup'],
     schedule: '0 8 * * *',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -202,6 +204,11 @@ export class BrainAgent extends BaseAgent {
     // Health check: test all connected services and report status
     if (ctx.command === '/healthcheck') {
       return this.runHealthCheck(ctx);
+    }
+
+    // Sheets setup: show Google Sheets status + auto-create missing tabs
+    if (ctx.command === '/sheetssetup') {
+      return this.runSheetsSetup(ctx);
     }
 
     const message = ctx.args || ctx.command;
@@ -443,12 +450,24 @@ export class BrainAgent extends BaseAgent {
     }
 
     // Key env vars
-    const requiredEnvs = ['TELEGRAM_BOT_TOKEN', 'ANTHROPIC_API_KEY', 'TRELLO_API_KEY', 'TRELLO_TOKEN'];
+    const requiredEnvs = [
+      'TELEGRAM_BOT_TOKEN', 'ANTHROPIC_API_KEY',
+      'TRELLO_API_KEY', 'TRELLO_TOKEN',
+      'SPREADSHEET_ID',
+    ];
     const missingEnvs = requiredEnvs.filter(k => !process.env[k]);
     checks.push({
       name: 'Env vars',
       ok: missingEnvs.length === 0,
       detail: missingEnvs.length === 0 ? 'all set' : `MISSING: ${missingEnvs.join(', ')}`,
+    });
+
+    // Google Auth
+    const hasAuth = !!(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    checks.push({
+      name: 'Google Auth',
+      ok: hasAuth,
+      detail: hasAuth ? 'service account configured' : 'MISSING: GOOGLE_SERVICE_ACCOUNT_KEY',
     });
 
     const allOk = checks.every(c => c.ok);
@@ -457,6 +476,23 @@ export class BrainAgent extends BaseAgent {
 
     await this.respond(ctx.chatId, `${summary}\n\n${lines.join('\n')}`);
     return { success: true, message: 'Health check complete', confidence: 'HIGH' };
+  }
+
+  private async runSheetsSetup(ctx: AgentContext): Promise<AgentResponse> {
+    await this.respond(ctx.chatId, '📊 Checking Google Sheets setup...');
+    try {
+      const { initSheets, getSheetsStatus } = await import('../services/google/sheets-init');
+      // Re-run init to create any missing tabs
+      await initSheets();
+      // Then return the status
+      const status = await getSheetsStatus();
+      await this.respond(ctx.chatId, status);
+      return { success: true, message: 'Sheets setup complete', confidence: 'HIGH' };
+    } catch (err: any) {
+      const msg = `❌ Sheets setup failed: ${err.message}\n\nMake sure:\n1. SPREADSHEET_ID is set in Railway\n2. The sheet is shared with your service account\n3. GOOGLE_SERVICE_ACCOUNT_KEY is set in Railway`;
+      await this.respond(ctx.chatId, msg);
+      return { success: false, message: err.message, confidence: 'HIGH' };
+    }
   }
 
   private async morningBriefing(ctx: AgentContext): Promise<AgentResponse> {
