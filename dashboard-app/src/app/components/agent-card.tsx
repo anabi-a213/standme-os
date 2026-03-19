@@ -21,7 +21,7 @@ interface Agent {
 interface AgentCardProps {
   agent: Agent;
   isRunning: boolean;
-  onCommandClick: (command: string) => void;
+  onCommandClick: (command: string, args?: string) => void;
   index: number;
 }
 
@@ -263,7 +263,7 @@ export function AgentCard({ agent, isRunning, onCommandClick, index }: AgentCard
                         value={args}
                         onChange={e => setArgs(e.target.value)}
                         onKeyDown={e => {
-                          if (e.key === 'Enter') { onCommandClick(cmd); setShowConfirm(null); setArgs(''); }
+                          if (e.key === 'Enter') { onCommandClick(cmd, args || undefined); setShowConfirm(null); setArgs(''); }
                           if (e.key === 'Escape') setShowConfirm(null);
                         }}
                         autoFocus
@@ -271,7 +271,7 @@ export function AgentCard({ agent, isRunning, onCommandClick, index }: AgentCard
                       />
                       <div className="flex gap-1.5">
                         <button
-                          onClick={() => { onCommandClick(cmd); setShowConfirm(null); setArgs(''); }}
+                          onClick={() => { onCommandClick(cmd, args || undefined); setShowConfirm(null); setArgs(''); }}
                           className="flex flex-1 items-center justify-center gap-1 rounded bg-[var(--gold)] py-1.5 text-xs font-bold text-black hover:bg-[var(--gold-bright)] transition-colors"
                         >
                           <Play className="h-3 w-3" /> Run

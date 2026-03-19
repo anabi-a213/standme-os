@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Paperclip, Maximize2, Minimize2, Trash2, Sparkles, GripVertical, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, Maximize2, Minimize2, Trash2, Sparkles, GripVertical, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { ActivityFeed } from './activity-feed';
 import { useDashboard } from '../../context/dashboard-context';
 import type { ChatMessage } from '../../context/dashboard-context';
@@ -485,11 +485,6 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
               />
 
               <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-3 py-2">
-                <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--text)]">
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span>Attach args</span>
-                </button>
-
                 <div className="text-[10px] text-[var(--text-muted)]">
                   <kbd className="rounded bg-[var(--surface-3)] px-1 py-0.5">Shift+Enter</kbd> new line
                 </div>

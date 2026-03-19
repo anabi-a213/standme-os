@@ -25,8 +25,10 @@ export function ActivityFeed() {
   const { activityEvents } = useDashboard();
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [clearedAt, setClearedAt] = useState<Date | null>(null);
 
   const displayEvents: DisplayEvent[] = [...activityEvents]
+    .filter(e => !clearedAt || new Date(e.timestamp) > clearedAt)
     .reverse()
     .slice(0, 100)
     .map(e => ({
@@ -99,7 +101,11 @@ export function ActivityFeed() {
             </AnimatePresence>
           </div>
 
-          <button className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]">
+          <button
+            onClick={() => setClearedAt(new Date())}
+            className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+            title="Clear activity log"
+          >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>

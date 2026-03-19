@@ -46,30 +46,35 @@ export interface RunResult {
 
 export async function fetchAgents(): Promise<AgentStatus[]> {
   const r = await fetch(`${BASE}/agents`);
+  if (!r.ok) throw new Error(`fetchAgents failed: ${r.status}`);
   return r.json();
 }
 
 export async function fetchLogs(): Promise<AgentEvent[]> {
   const r = await fetch(`${BASE}/logs`);
+  if (!r.ok) throw new Error(`fetchLogs failed: ${r.status}`);
   return r.json();
 }
 
 export async function fetchStats(): Promise<SystemStats> {
   const r = await fetch(`${BASE}/stats`);
+  if (!r.ok) throw new Error(`fetchStats failed: ${r.status}`);
   return r.json();
 }
 
 export async function fetchAgentConfigs(): Promise<AgentConfig[]> {
   const r = await fetch(`${BASE}/agent-configs`);
+  if (!r.ok) throw new Error(`fetchAgentConfigs failed: ${r.status}`);
   return r.json();
 }
 
 export async function triggerAgent(command: string, args?: string): Promise<void> {
-  await fetch(`${BASE}/trigger`, {
+  const r = await fetch(`${BASE}/trigger`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command, args: args || '' }),
   });
+  if (!r.ok) throw new Error(`triggerAgent failed: ${r.status}`);
 }
 
 export async function runAgent(command: string, args?: string): Promise<RunResult> {
@@ -78,15 +83,17 @@ export async function runAgent(command: string, args?: string): Promise<RunResul
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command, args: args || '' }),
   });
+  if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
   return r.json();
 }
 
 export async function approveAction(approvalId: string, approved: boolean): Promise<void> {
-  await fetch(`${BASE}/approve`, {
+  const r = await fetch(`${BASE}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ approvalId, approved }),
   });
+  if (!r.ok) throw new Error(`approveAction failed: ${r.status}`);
 }
 
 export interface TrelloCard {

@@ -26,7 +26,8 @@ export function ApprovalBanner({
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed right-0 top-[var(--topbar-height)] z-50 w-[var(--right-panel-width)] border-b-2 border-[var(--warning)] bg-gradient-to-r from-[#2a2100] to-[#1a1600]"
+        className="fixed right-0 top-[var(--topbar-height)] z-50 border-b-2 border-[var(--warning)] bg-gradient-to-r from-[#2a2100] to-[#1a1600]"
+        style={{ width: 'max(var(--right-panel-width), 320px)' }}
         initial={{ y: -100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: -100, opacity: 0 }}

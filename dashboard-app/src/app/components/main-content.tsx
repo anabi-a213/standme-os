@@ -130,7 +130,7 @@ export function MainContent({ runningCommands, runningAgentIds }: MainContentPro
               key={agent.id}
               agent={agent}
               isRunning={runningAgentIds.includes(agent.id)}
-              onCommandClick={(cmd) => triggerAgent(cmd)}
+              onCommandClick={(cmd, args) => triggerAgent(cmd, args)}
               index={index}
             />
           ))}

@@ -47,7 +47,7 @@ function Layout() {
           onToggleChat={toggleChat}
         />
         <LeftSidebar
-          onCommandClick={(cmd) => triggerAgent(cmd)}
+          onCommandClick={(cmd, args) => triggerAgent(cmd, args)}
           runningCommands={runningCommands}
           agentConfigs={agentConfigs}
           isMobile={isMobile}
