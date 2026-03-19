@@ -11,7 +11,7 @@ export class ClientReminderAgent extends BaseAgent {
     id: 'agent-07',
     description: 'Ensure no client goes uncontacted too long',
     commands: ['/reminders'],
-    schedule: '0 9,17 * * *', // 9am + 5pm daily
+    schedule: '5 9,17 * * *', // 9:05am + 5:05pm daily (staggered 5 min from deadline monitor)
     requiredRole: UserRole.OPS_LEAD,
   };
 

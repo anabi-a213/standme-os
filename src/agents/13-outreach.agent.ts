@@ -29,7 +29,10 @@ export class OutreachAgent extends BaseAgent {
 
   private async runOutreach(ctx: AgentContext): Promise<AgentResponse> {
     const queue = await readSheet(SHEETS.OUTREACH_QUEUE);
-    const ready = queue.slice(1).filter(r => r[7] === 'READY' && parseInt(r[6] || '0') >= 7);
+    // Preserve sheet row indices (1-based, +2 = skip header row) so we can mark as SENT after push
+    const ready = queue.slice(1)
+      .map((r, i) => ({ row: r, sheetRowIndex: i + 2 }))
+      .filter(({ row: r }) => r[7] === 'READY' && parseInt(r[6] || '0') >= 7);
 
     if (ready.length === 0) {
       await this.respond(ctx.chatId, 'No leads ready for outreach (score 7+ and status READY).');
@@ -64,7 +67,7 @@ export class OutreachAgent extends BaseAgent {
 
     let drafted = 0;
 
-    for (const lead of ready.slice(0, 5)) {
+    for (const { row: lead, sheetRowIndex } of ready.slice(0, 5)) {
       const leadId    = lead[0] || '';
       const masterRef = lead[1] || '';  // LEAD_MASTER id
       const company   = lead[2] || '';
@@ -153,8 +156,10 @@ export class OutreachAgent extends BaseAgent {
         onApprove: async () => {
           try {
             const wpId = await addProspectToCampaign(campaignId, prospect);
-            // Update log row status
+            // Update outreach log
             await this.updateLogStatus(logId, 'SENT', wpId?.toString() || '');
+            // Mark OUTREACH_QUEUE row as SENT so /outreach won't draft this lead again
+            await updateCell(SHEETS.OUTREACH_QUEUE, sheetRowIndex, 'H', 'SENT').catch(() => {});
             return `✅ Sent to Woodpecker: *${company}* (${dmEmail})\nCampaign: ${campaignId} | Woodpecker ID: ${wpId || 'N/A'}`;
           } catch (err: any) {
             await this.updateLogStatus(logId, 'ERROR', '');

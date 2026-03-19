@@ -12,7 +12,7 @@ export class TechnicalDeadlineAgent extends BaseAgent {
     id: 'agent-09',
     description: 'Extract and track all show organiser deadlines',
     commands: ['/techdeadlines'],
-    schedule: '0 9 * * *', // 9am daily
+    schedule: '10 9 * * *', // 9:10am daily (staggered 10 min from deadline monitor)
     requiredRole: UserRole.OPS_LEAD,
   };
 

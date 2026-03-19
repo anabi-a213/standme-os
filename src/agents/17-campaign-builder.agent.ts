@@ -53,6 +53,23 @@ export class CampaignBuilderAgent extends BaseAgent {
     requiredRole: UserRole.ADMIN,
   };
 
+  // Instance-level industry hook cache — persists across command executions so
+  // approval callbacks (which fire hours after /newcampaign) can still resolve hooks.
+  private campaignHookCache = new Map<string, string>();
+
+  private async getCampaignIndustryHook(industry: string, showName: string): Promise<string> {
+    const key = `${industry}::${showName}`;
+    if (this.campaignHookCache.has(key)) return this.campaignHookCache.get(key)!;
+    const hook = await generateText(
+      `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at ${showName}. ` +
+      `Be specific about what this industry cares about on the show floor. No em dashes. No filler.`,
+      'You write cold email opening lines. Return only the sentence, nothing else.',
+      60,
+    ).catch(() => '');
+    this.campaignHookCache.set(key, hook.trim());
+    return hook.trim();
+  }
+
   async execute(ctx: AgentContext): Promise<AgentResponse> {
     if (ctx.command === '/salesreplies' || ctx.command === 'scheduled') return this.handleSalesReplies(ctx);
     if (ctx.command === '/discover') return this.discoverLeads(ctx);
@@ -676,19 +693,7 @@ export class CampaignBuilderAgent extends BaseAgent {
 
     // ---- 5. Generate expert emails ----
 
-    // Industry hook cache — one Claude call per unique industry (same logic as /discover)
-    const campaignHookCache = new Map<string, string>();
-    async function getCampaignIndustryHook(industry: string): Promise<string> {
-      if (campaignHookCache.has(industry)) return campaignHookCache.get(industry)!;
-      const hook = await generateText(
-        `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at ${showName}. ` +
-        `Be specific about what this industry cares about on the show floor. No em dashes. No filler.`,
-        'You write cold email opening lines. Return only the sentence, nothing else.',
-        60,
-      ).catch(() => '');
-      campaignHookCache.set(industry, hook.trim());
-      return hook.trim();
-    }
+    // Industry hook cache — use instance-level cache so approval callbacks (fired hours later) still work
 
     interface EmailDraft { target: Target; subject: string; body: string; }
     const emailDrafts: EmailDraft[] = [];
@@ -699,7 +704,7 @@ export class CampaignBuilderAgent extends BaseAgent {
         const companyContext = companyKnowledge.map(k => k.content).join(' ');
 
         // Compute industry hook before email gen so it's in the approval closure
-        target.industryHook = await getCampaignIndustryHook(target.industry);
+        target.industryHook = await this.getCampaignIndustryHook(target.industry, showName);
 
         const email = await generateCampaignEmail({
           companyName: target.companyName,
@@ -760,7 +765,7 @@ export class CampaignBuilderAgent extends BaseAgent {
           try {
             // Ensure industry hook is computed (cached from preview or fresh for new industries)
             if (!target.industryHook) {
-              target.industryHook = await getCampaignIndustryHook(target.industry);
+              target.industryHook = await this.getCampaignIndustryHook(target.industry, showName);
             }
 
             const nameParts = target.contactName.trim().split(/\s+/);

@@ -2,10 +2,11 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, updateCell, appendRow, objectToRow, sheetUrl } from '../services/google/sheets';
+import { readSheet, updateCell, appendRow, objectToRow, sheetUrl, findRowByValue } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
+import { logger } from '../utils/logger';
 
 export class LeadEnrichmentAgent extends BaseAgent {
   config: AgentConfig = {
@@ -92,20 +93,25 @@ export class LeadEnrichmentAgent extends BaseAgent {
           content: `DM research for ${companyName} (${industry || 'unknown'}): ${enrichmentResult.slice(0, 400)}`,
         });
 
-        // If readiness 5+, add to outreach queue (base 3 + title 2 = 5 minimum to qualify)
+        // If readiness 5+, add to outreach queue — but only if not already queued
         if (readiness >= 5) {
-          await appendRow(SHEETS.OUTREACH_QUEUE, objectToRow(SHEETS.OUTREACH_QUEUE, {
-            id: `OQ-${Date.now()}`,
-            leadId: lead.data[0],
-            companyName: companyName,
-            dmName: dmName,
-            dmEmail: dmEmail,
-            showName: lead.data[6],
-            readinessScore: readiness.toString(),
-            sequenceStatus: 'READY',
-            addedDate: new Date().toISOString(),
-            lastAction: '',
-          }));
+          const alreadyQueued = await findRowByValue(SHEETS.OUTREACH_QUEUE, 'B', lead.data[0]).catch(() => null);
+          if (alreadyQueued) {
+            logger.info(`[Enrichment] Lead ${lead.data[0]} already in OUTREACH_QUEUE — skipping duplicate`);
+          } else {
+            await appendRow(SHEETS.OUTREACH_QUEUE, objectToRow(SHEETS.OUTREACH_QUEUE, {
+              id: `OQ-${Date.now()}`,
+              leadId: lead.data[0],
+              companyName: companyName,
+              dmName: dmName,
+              dmEmail: dmEmail,
+              showName: lead.data[6],
+              readinessScore: readiness.toString(),
+              sequenceStatus: 'READY',
+              addedDate: new Date().toISOString(),
+              lastAction: '',
+            }));
+          }
         }
 
         enriched++;
