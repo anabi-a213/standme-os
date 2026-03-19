@@ -10,8 +10,14 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
   io = new SocketServer(httpServer, {
     cors: { origin: '*' },
     path: '/ws',
-    pingInterval: 10000,  // ping every 10s — keeps WS alive during long agent runs
-    pingTimeout: 5000,
+    // pingInterval must stay well under Railway's 75s proxy idle timeout.
+    // pingTimeout is generous so throttled background tabs don't get false-disconnected.
+    // upgradeTimeout gives slow mobile connections time to upgrade WS.
+    pingInterval: 25000,
+    pingTimeout: 20000,
+    upgradeTimeout: 30000,
+    // Allow both transports; client tries WS first, falls back to long-polling
+    transports: ['websocket', 'polling'],
   });
 
   // Give event-bus a direct reference to io so broadcastToChat() emits without EventEmitter relay
@@ -33,7 +39,8 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
       socket.emit('chat:broadcast_history', recentBroadcasts);
     }
 
-    // Send welcome message from AI
+    // Send welcome message — getWelcomeMessage() caches the result in memory for 6h
+    // so reconnects don't trigger a fresh AI call every time
     try {
       const welcome = await getWelcomeMessage();
       socket.emit('chat:welcome', { text: welcome, timestamp: new Date().toISOString() });

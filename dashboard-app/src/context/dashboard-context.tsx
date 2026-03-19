@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from 'react';
-import { getSocket } from '../lib/socket';
+import { getSocket, forceReconnect } from '../lib/socket';
 import { getSessionId } from '../lib/session';
 import {
   AgentStatus, AgentEvent, AgentConfig, SystemStats,
@@ -177,18 +177,36 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const socket = getSocket();
 
+    let disconnectToastId: string | null = null;
+
     socket.on('connect', () => {
-      addToast({ type: 'success', message: 'Connected to StandMe OS' });
-      // Request chat history
+      // Dismiss any "connection lost" toast when we're back
+      if (disconnectToastId) {
+        setToasts(p => p.filter(t => t.id !== disconnectToastId));
+        disconnectToastId = null;
+        addToast({ type: 'success', message: '✅ Reconnected to StandMe OS' });
+      }
+      // Request fresh chat history on every (re)connect so nothing is missed
       socket.emit('chat:history', { sessionId });
     });
 
-    socket.on('disconnect', () => {
-      addToast({ type: 'error', message: 'Connection lost — reconnecting...', autoDismiss: false });
+    socket.on('disconnect', (reason) => {
+      const msg = reason === 'io server disconnect'
+        ? 'Server restarted — reconnecting...'
+        : 'Connection lost — reconnecting...';
+      const t: Toast = { id: `disconnect-${Date.now()}`, type: 'error', message: msg, autoDismiss: false };
+      disconnectToastId = t.id;
+      setToasts(p => [...p.slice(-4), t]);
     });
 
+    // Only show connect_error once — don't spam during reconnect backoff
+    let connectErrorShown = false;
     socket.on('connect_error', () => {
-      addToast({ type: 'error', message: 'Cannot connect to server', autoDismiss: false });
+      if (!connectErrorShown) {
+        connectErrorShown = true;
+        addToast({ type: 'error', message: 'Cannot reach server — retrying...', autoDismiss: false });
+        setTimeout(() => { connectErrorShown = false; }, 10000);
+      }
     });
 
     // Initial state from server

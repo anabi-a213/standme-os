@@ -27,9 +27,9 @@ export interface WoodpeckerProspect {
   company: string;
   industry?: string;
   tags?: string;
-  snippet1?: string; // show name
-  snippet2?: string; // stand size
-  snippet3?: string; // custom hook
+  snippet1?: string; // industry-specific cold email opening hook
+  snippet2?: string; // DM job title
+  snippet3?: string; // company website or country
   status?: string;
 }
 

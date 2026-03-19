@@ -283,6 +283,14 @@ async function main() {
   // Start scheduler
   startScheduler();
 
+  // ── Railway keep-alive ─────────────────────────────────────────────────────
+  // Ping our own /health endpoint every 4 minutes so Railway never marks the
+  // service as idle and cuts WebSocket connections due to inactivity.
+  const keepAliveUrl = `http://localhost:${PORT}/health`;
+  setInterval(() => {
+    fetch(keepAliveUrl).catch(() => { /* ignore — server is shutting down */ });
+  }, 4 * 60 * 1000);
+
   // Log startup
   await writeSystemLog({
     agent: 'System',
