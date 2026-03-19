@@ -102,12 +102,7 @@ export function TopBar({ onOpenCommandPalette, systemStats, agents, isMobile, on
       <div className="flex h-full items-center justify-between px-6">
         {/* Left: Logo */}
         <div className="flex items-center gap-4">
-          <motion.div
-            className="flex items-center gap-3"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5 }}
-          >
+          <div className="flex items-center gap-3">
             <div className="flex items-center gap-2.5">
               <img
                 src="/dashboard/standme-logo.png"
@@ -127,7 +122,7 @@ export function TopBar({ onOpenCommandPalette, systemStats, agents, isMobile, on
                 <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Intelligence Platform</span>
               </div>
             </div>
-          </motion.div>
+          </div>
 
           <div className="ml-6 flex items-center gap-1">
             <Link
@@ -156,41 +151,28 @@ export function TopBar({ onOpenCommandPalette, systemStats, agents, isMobile, on
         </div>
 
         {/* Center: Global search */}
-        <motion.button
+        <button
           onClick={onOpenCommandPalette}
           className="group relative flex h-9 w-[400px] items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)]/50 px-4 transition-all duration-200 hover:border-[var(--gold)]/30 hover:bg-[var(--surface-2)]"
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
         >
           <Search className="h-4 w-4 text-[var(--text-muted)] transition-colors group-hover:text-[var(--gold)]" />
           <span className="flex-1 text-left text-sm text-[var(--text-muted)]">Search commands, agents...</span>
           <kbd className="rounded bg-[var(--surface-3)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">⌘K</kbd>
-        </motion.button>
+        </button>
 
         {/* Right: System health & stats */}
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
-            {healthIndicators.map((indicator, index) => (
-              <motion.div
+            {healthIndicators.map((indicator) => (
+              <div
                 key={indicator.service}
                 className="group relative flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-[var(--surface-2)]"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
               >
                 <div className="relative">
-                  <div className={`h-2 w-2 rounded-full ${getStatusColor(indicator.status)}`}>
-                    {indicator.status === 'ok' && (
-                      <motion.div
-                        className={`absolute inset-0 rounded-full ${getStatusColor(indicator.status)}`}
-                        animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                      />
-                    )}
-                  </div>
+                  <div className={`h-2 w-2 rounded-full ${getStatusColor(indicator.status)}`} />
                 </div>
                 <span className="text-xs text-[var(--text-muted)] transition-colors group-hover:text-[var(--text-secondary)]">{indicator.service}</span>
-              </motion.div>
+              </div>
             ))}
           </div>
           <div className="h-6 w-px bg-[var(--border)]" />

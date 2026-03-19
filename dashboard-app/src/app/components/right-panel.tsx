@@ -161,9 +161,14 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
   }, [feedPercent]);
 
   // Auto-scroll to bottom when new messages arrive
+  // Use 'instant' to avoid janky mobile smooth scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const el = messagesEndRef.current;
+    if (!el) return;
+    // Small timeout to let the DOM update before scrolling
+    const t = setTimeout(() => el.scrollIntoView({ behavior: 'instant' }), 50);
+    return () => clearTimeout(t);
+  }, [messages, isTyping]);
 
   // Detect Arabic text for RTL
   useEffect(() => {
@@ -203,8 +208,11 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
       <>
         <div className={`mobile-backdrop ${isOpen ? 'open' : ''}`} onClick={onClose} />
         <div
-          className="fixed inset-0 z-50 flex flex-col bg-[var(--bg-primary)] transition-transform duration-300 ease-out"
-          style={{ transform: isOpen ? 'translateY(0)' : 'translateY(100%)' }}
+          className="fixed inset-x-0 bottom-0 z-50 flex flex-col bg-[var(--bg-primary)] transition-transform duration-300 ease-out"
+          style={{
+            top: 'env(safe-area-inset-top, 0px)',
+            transform: isOpen ? 'translateY(0)' : 'translateY(100%)',
+          }}
         >
           {/* Mobile chat header */}
           <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 shrink-0">
@@ -226,15 +234,15 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 overscroll-contain">
+          <div className="flex-1 overflow-y-auto px-4 py-4 overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }}>
             <div className="space-y-4">
               {messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)}
               {isTyping && (
                 <div className="flex items-center gap-2 px-4 py-2">
                   <div className="flex gap-1">
                     {[0, 1, 2].map((i) => (
-                      <motion.div key={i} className="h-2 w-2 rounded-full bg-[var(--gold)]"
-                        animate={{ y: [0, -8, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.2 }} />
+                      <div key={i} className="h-2 w-2 rounded-full bg-[var(--gold)]"
+                        style={{ animation: `typingBounce 0.6s ease-in-out ${i * 0.2}s infinite` }} />
                     ))}
                   </div>
                 </div>
@@ -255,7 +263,7 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
           </div>
 
           {/* Mobile input */}
-          <div className="border-t border-[var(--border-subtle)] bg-[var(--surface)] p-3 shrink-0">
+          <div className="border-t border-[var(--border-subtle)] bg-[var(--surface)] p-3 shrink-0 mobile-safe-bottom">
             <div className="flex items-end gap-2">
               <textarea
                 ref={textareaRef}
@@ -328,19 +336,9 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
           <div className="border-b border-[var(--border-subtle)] px-5 py-4 shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <motion.div
-                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)] shadow-[var(--shadow-gold)]"
-                  animate={{
-                    boxShadow: [
-                      '0 0 20px rgba(201, 168, 76, 0.3)',
-                      '0 0 30px rgba(201, 168, 76, 0.5)',
-                      '0 0 20px rgba(201, 168, 76, 0.3)',
-                    ]
-                  }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                >
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)] shadow-[var(--shadow-gold)]">
                   <Sparkles className="h-5 w-5 text-black" />
-                </motion.div>
+                </div>
 
                 <div>
                   <div className="text-sm font-semibold text-[var(--text)]">STANDME AI</div>
@@ -380,12 +378,8 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
                 >
                   <div className="flex gap-1">
                     {[0, 1, 2].map((i) => (
-                      <motion.div
-                        key={i}
-                        className="h-2 w-2 rounded-full bg-[var(--gold)]"
-                        animate={{ y: [0, -8, 0] }}
-                        transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.2 }}
-                      />
+                      <div key={i} className="h-2 w-2 rounded-full bg-[var(--gold)]"
+                        style={{ animation: `typingBounce 0.6s ease-in-out ${i * 0.2}s infinite` }} />
                     ))}
                   </div>
                 </motion.div>

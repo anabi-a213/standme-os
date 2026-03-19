@@ -24,27 +24,12 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const isRTL = /[\u0600-\u06FF]/.test(message.content);
 
   return (
-    <motion.div
-      className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* Avatar */}
       {!isUser && (
-        <motion.div 
-          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)]"
-          animate={{ 
-            boxShadow: [
-              '0 0 10px rgba(201, 168, 76, 0.2)',
-              '0 0 20px rgba(201, 168, 76, 0.4)',
-              '0 0 10px rgba(201, 168, 76, 0.2)',
-            ]
-          }}
-          transition={{ duration: 2, repeat: Infinity }}
-        >
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)] shadow-[var(--shadow-gold)]">
           <Sparkles className="h-4 w-4 text-black" />
-        </motion.div>
+        </div>
       )}
 
       {isUser && (
@@ -55,15 +40,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
       {/* Message bubble */}
       <div className={`flex-1 ${isUser ? 'flex justify-end' : ''}`}>
-        <motion.div
-          className={`max-w-[85%] rounded-xl px-4 py-3 ${
+        <div className={`max-w-[85%] rounded-xl px-4 py-3 ${
             isUser
               ? 'bg-[var(--surface-warm)] border border-[var(--gold)]/20'
               : 'bg-[var(--surface-2)] border border-[var(--border)]'
-          }`}
-          initial={{ scale: 0.95 }}
-          animate={{ scale: 1 }}
-        >
+          }`}>
           {/* Message content */}
           <div className={`text-sm leading-relaxed ${isUser ? 'text-[var(--text)]' : 'text-[var(--text-secondary)]'} ${isRTL ? 'text-right' : 'text-left'}`}>
             {message.content}
@@ -114,11 +95,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
               {/* Progress bar for running state */}
               {message.agentTrigger.state === 'running' && (
                 <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--surface-3)]">
-                  <motion.div
-                    className="h-full bg-[var(--gold)]"
-                    animate={{ width: ['0%', '70%', '85%'] }}
-                    transition={{ duration: 3, repeat: Infinity }}
-                  />
+                  <div className="h-full bg-[var(--gold)] w-4/5" style={{ animation: 'progressPulse 2s ease-in-out infinite' }} />
                 </div>
               )}
 
@@ -138,8 +115,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
           <div className={`mt-2 text-[10px] text-[var(--text-subtle)] ${isRTL ? 'text-right' : 'text-left'}`}>
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
-        </motion.div>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

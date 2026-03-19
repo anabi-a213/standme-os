@@ -448,6 +448,16 @@
   pointer-events: auto;
 }
 
+@keyframes typingBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes progressPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* Safe area for notch phones (iPhone X+, Android cutouts) */
 @supports (padding-top: env(safe-area-inset-top)) {
   :root {

@@ -106,7 +106,7 @@ export function AgentCard({ agent, isRunning, onCommandClick, index }: AgentCard
       className="group relative"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.04 }}
+      transition={{ delay: Math.min(index * 0.02, 0.3) }}
     >
       <div className={`relative overflow-hidden rounded-xl border bg-[var(--surface-2)] transition-all duration-300 ${
         effectiveRunning

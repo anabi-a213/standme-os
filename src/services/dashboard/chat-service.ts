@@ -61,7 +61,63 @@ function detectLanguage(text: string): 'ar' | 'en' {
   return /[\u0600-\u06FF]/.test(text) ? 'ar' : 'en';
 }
 
-function buildSystemPrompt(): string {
+/** Pull live Trello + Sheets data — same context Brain agent injects */
+async function buildLiveDataContext(): Promise<string> {
+  const lines: string[] = [];
+
+  // Trello pipeline snapshot
+  try {
+    const { getBoardCardsWithListNames } = await import('../../services/trello/client');
+    const salesBoardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+    if (salesBoardId) {
+      const cards = await getBoardCardsWithListNames(salesBoardId);
+      const byStage = new Map<string, number>();
+      const now = new Date();
+      const overdue: string[] = [];
+      for (const card of cards) {
+        const stage = card.listName || 'Unknown';
+        byStage.set(stage, (byStage.get(stage) || 0) + 1);
+        if (card.due && new Date(card.due) < now) overdue.push(`${card.name} (${stage})`);
+      }
+      lines.push(`SALES PIPELINE (${cards.length} cards):`);
+      for (const [stage, count] of byStage) lines.push(`  ${stage}: ${count}`);
+      if (overdue.length > 0) lines.push(`  ⚠️ OVERDUE: ${overdue.join(', ')}`);
+    }
+  } catch (err: any) {
+    lines.push(`Trello: ${err.message}`);
+  }
+
+  // Recent leads from Sheets
+  try {
+    const { readSheet } = await import('../../services/google/sheets');
+    const { SHEETS } = await import('../../config/sheets');
+    const leads = await readSheet(SHEETS.LEAD_MASTER);
+    const dataRows = leads.slice(1).filter((r: string[]) => r[2]);
+    if (dataRows.length > 0) {
+      lines.push(`\nRECENT LEADS (${dataRows.length} total):`);
+      dataRows.slice(-5).forEach((r: string[]) => {
+        lines.push(`  ${r[2] || '?'} | ${r[6] || 'no show'} | Score:${r[12] || '?'} | ${r[15] || '?'}`);
+      });
+    }
+  } catch { /* silent */ }
+
+  // Upcoming deadlines
+  try {
+    const { readSheet } = await import('../../services/google/sheets');
+    const { SHEETS } = await import('../../config/sheets');
+    const deadlines = await readSheet(SHEETS.TECHNICAL_DEADLINES);
+    const now = new Date();
+    const upcoming = deadlines.slice(1).filter((r: string[]) => {
+      const dates = [r[3], r[4], r[5], r[6], r[7], r[8], r[9]].filter(Boolean);
+      return dates.some(d => { const diff = (new Date(d).getTime() - now.getTime()) / 86400000; return diff >= 0 && diff <= 21; });
+    });
+    if (upcoming.length > 0) lines.push(`\nDEADLINES NEXT 21 DAYS: ${upcoming.map((r: string[]) => r[1]).join(', ')}`);
+  } catch { /* silent */ }
+
+  return lines.length > 0 ? lines.join('\n') : '';
+}
+
+function buildSystemPrompt(liveData = ''): string {
   const agents = getAllAgents();
   const agentList = agents.map(a =>
     `  • ${a.config.name} → ${a.config.commands.join(', ')}: ${a.config.description}`
@@ -96,6 +152,9 @@ You speak Arabic and English with equal fluency. Respond in the exact same langu
 ${getConnectionStatus()}
 
 ⚠️ If a connection shows ❌ NOT CONFIGURED, be HONEST — tell the user that specific integration isn't set up yet, explain what env var they need to set in Railway, and suggest running /healthcheck for details. Do NOT simulate or pretend — real data only.
+
+## LIVE DATA (fetched right now)
+${liveData || 'No live data — Sheets/Trello may not be configured yet.'}
 
 ## YOUR 17 AGENTS — TRIGGER ANY BY INCLUDING [TRIGGER: /command args]
 ${agentList}
@@ -204,6 +263,15 @@ export async function processChat(
     }
   } catch { /* silent — KB is optional context */ }
 
+  // Fetch live data with 6s timeout (same as Brain agent approach)
+  let liveData = '';
+  try {
+    liveData = await Promise.race([
+      buildLiveDataContext(),
+      new Promise<string>(resolve => setTimeout(() => resolve(''), 6000)),
+    ]);
+  } catch { /* silent */ }
+
   // Build message history for Claude (keep last MAX_HISTORY)
   // Append knowledge base context to the current user message if found
   const enrichedUserMessage = kbContext
@@ -224,7 +292,7 @@ export async function processChat(
     const stream = client.messages.stream({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2500,
-      system: buildSystemPrompt(),
+      system: buildSystemPrompt(liveData),
       messages,
     });
 
