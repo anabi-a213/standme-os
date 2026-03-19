@@ -99,6 +99,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setIsMobile(mobile);
       if (!mobile) { setSidebarOpen(false); setChatOpen(false); }
     };
+    check(); // run once on mount to catch initial size
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);

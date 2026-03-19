@@ -19,10 +19,11 @@ export function OutreachPanel({ onCommandClick }: { onCommandClick: (cmd: string
     const cached = getCached(CACHE_KEY, CACHE_TTL);
     if (cached) {
       setOutreachText(cached);
-      const age = getCacheAge(CACHE_KEY);
+      const age = getCacheAge(CACHE_KEY); // age is in seconds
       if (age !== null) {
-        setCacheAgeText(`cached ${Math.round(age / 60000)}m ago`);
-        setLastRefresh(new Date(Date.now() - age));
+        const mins = Math.round(age / 60);
+        setCacheAgeText(mins < 1 ? 'cached just now' : `cached ${mins}m ago`);
+        setLastRefresh(new Date(Date.now() - age * 1000));
       }
     }
   }, []);

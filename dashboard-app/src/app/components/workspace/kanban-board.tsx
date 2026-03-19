@@ -7,6 +7,14 @@ import { fetchBoards, TrelloCard } from '../../../lib/api';
 import { getCachedJSON, setCacheJSON, getCacheAge } from '../../../lib/workspace-cache';
 
 const BOARDS = ['Sales Pipeline', 'Sales', 'Design', 'Operation', 'Production'];
+// Maps display names → API response keys from getAllBoardsSnapshot()
+const BOARD_KEY_MAP: Record<string, string> = {
+  'Sales Pipeline': 'salesPipeline',
+  'Sales': 'sales',
+  'Design': 'design',
+  'Operation': 'operation',
+  'Production': 'production',
+};
 const CACHE_KEY = 'boards_snapshot';
 const CACHE_TTL = 10 * 60 * 1000; // 10 min
 
@@ -23,10 +31,11 @@ export function KanbanBoard({ onCommandClick }: { onCommandClick: (cmd: string) 
     const cached = getCachedJSON<Record<string, TrelloCard[]>>(CACHE_KEY, CACHE_TTL);
     if (cached) {
       setBoards(cached);
-      const age = getCacheAge(CACHE_KEY);
+      const age = getCacheAge(CACHE_KEY); // age is in seconds
       if (age !== null) {
-        setCacheAgeText(`cached ${Math.round(age / 60000)}m ago`);
-        setLastRefresh(new Date(Date.now() - age));
+        const mins = Math.round(age / 60);
+        setCacheAgeText(mins < 1 ? 'cached just now' : `cached ${mins}m ago`);
+        setLastRefresh(new Date(Date.now() - age * 1000));
       }
     }
   }, []);
@@ -45,8 +54,8 @@ export function KanbanBoard({ onCommandClick }: { onCommandClick: (cmd: string) 
     setLoading(false);
   };
 
-  // Group cards by list name for active board
-  const activeCards = boards?.[activeBoard] || [];
+  // Group cards by list name for active board — use camelCase key from API response
+  const activeCards = boards?.[BOARD_KEY_MAP[activeBoard]] || [];
   const listMap = new Map<string, TrelloCard[]>();
   for (const card of activeCards) {
     const list = card.listName || 'Unknown';
@@ -77,7 +86,7 @@ export function KanbanBoard({ onCommandClick }: { onCommandClick: (cmd: string) 
       {/* Board tabs */}
       <div className={`flex border-b border-[var(--border)] ${isMobile ? 'overflow-x-auto' : ''}`}>
         {BOARDS.map(board => {
-          const count = boards?.[board]?.length || 0;
+          const count = boards?.[BOARD_KEY_MAP[board]]?.length || 0;
           return (
             <button
               key={board}
