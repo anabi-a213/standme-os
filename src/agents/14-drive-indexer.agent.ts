@@ -319,9 +319,12 @@ export class DriveIndexerAgent extends BaseAgent {
         const batch = newFiles.slice(batchStart, batchStart + BATCH_SIZE);
         const indexRows: string[][] = [];
 
-        await this.respond(ctx.chatId,
-          `📦 Batch ${batchNum}/${totalBatches}: processing ${batch.length} files...`
-        );
+        // Report progress every 10 batches to avoid Telegram spam
+        if (batchNum === 1 || batchNum % 10 === 0) {
+          await this.respond(ctx.chatId,
+            `📦 Batch ${batchNum}/${totalBatches}: ${indexed} files indexed so far...`
+          );
+        }
 
         // Split batch into readable (need AI) and non-readable (metadata only)
         const readableFiles: DriveFile[] = [];
