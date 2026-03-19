@@ -81,12 +81,31 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([]);
   const [activityEvents, setActivityEvents] = useState<AgentEvent[]>([]);
   const [systemStats, setSystemStats] = useState<SystemStats>(DEFAULT_STATS);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const sessionId = useRef(getSessionId()).current;
+  const streamingMsgId = useRef<string | null>(null);
+  const chatStorageKey = `standme_chat_${sessionId}`;
+
+  // ── Load chat history from localStorage on startup (survives server restarts) ──
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const saved = localStorage.getItem(`standme_chat_${getSessionId()}`);
+      if (saved) {
+        const parsed: { id?: string; role: string; content: string; timestamp: string; streaming?: boolean; agentTriggers?: unknown[] }[] = JSON.parse(saved);
+        return parsed.map((m, i) => ({
+          id: m.id || `restored-${i}`,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          timestamp: new Date(m.timestamp),
+          agentTriggers: (m.agentTriggers || []) as ChatMessage['agentTriggers'],
+        }));
+      }
+    } catch { /* quota or parse error — start fresh */ }
+    return [];
+  });
+
   const [isTyping, setIsTyping] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const sessionId = useRef(getSessionId()).current;
-  const streamingMsgId = useRef<string | null>(null);
 
   // Mobile state
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT : false);
@@ -106,6 +125,19 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const toggleSidebar = useCallback(() => { setSidebarOpen(p => !p); setChatOpen(false); }, []);
   const toggleChat = useCallback(() => { setChatOpen(p => !p); setSidebarOpen(false); }, []);
+
+  // ── Persist chat messages to localStorage so they survive server restarts ──
+  useEffect(() => {
+    if (messages.length === 0) return;
+    try {
+      const toSave = messages.slice(-40).map(m => ({
+        ...m,
+        streaming: undefined, // don't save streaming state
+        timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : String(m.timestamp),
+      }));
+      localStorage.setItem(chatStorageKey, JSON.stringify(toSave));
+    } catch { /* storage quota — ignore */ }
+  }, [messages, chatStorageKey]);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const closeChat = useCallback(() => setChatOpen(false), []);
 
@@ -181,12 +213,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
     // ── CHAT EVENTS ──
     socket.on('chat:welcome', (data: { text: string; timestamp: string }) => {
-      setMessages([{
-        id: 'welcome',
-        role: 'assistant',
-        content: data.text,
-        timestamp: new Date(data.timestamp),
-      }]);
+      // Only show welcome if there's no existing history (first visit, or cleared).
+      // On reconnect after server restart, localStorage already restored messages — skip welcome.
+      setMessages(prev => {
+        if (prev.length > 0) return prev;
+        return [{ id: 'welcome', role: 'assistant', content: data.text, timestamp: new Date(data.timestamp) }];
+      });
     });
 
     socket.on('chat:history', (data: { history: { role: string; content: string; timestamp: string }[]; sessionId: string }) => {
@@ -288,6 +320,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
     socket.on('chat:cleared', (data: { sessionId: string }) => {
       if (data.sessionId !== sessionId) return;
+      localStorage.removeItem(chatStorageKey); // wipe stored history too
       setMessages([]);
     });
 
