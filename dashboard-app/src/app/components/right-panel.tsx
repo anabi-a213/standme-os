@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, Paperclip, Maximize2, Trash2, Sparkles, GripVertical, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, Paperclip, Maximize2, Minimize2, Trash2, Sparkles, GripVertical, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { ActivityFeed } from './activity-feed';
 import { useDashboard } from '../../context/dashboard-context';
 import type { ChatMessage } from '../../context/dashboard-context';
@@ -92,7 +92,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
 const MIN_PANEL_WIDTH = 280;
 const MAX_PANEL_WIDTH = 680;
-const DEFAULT_PANEL_WIDTH = 400;
+const DEFAULT_PANEL_WIDTH = 460;
 
 const MIN_FEED_PERCENT = 15;
 const MAX_FEED_PERCENT = 75;
@@ -102,6 +102,7 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
   const { messages, isTyping, sendMessage, clearChat } = useDashboard();
   const [message, setMessage] = useState('');
   const [isRTL, setIsRTL] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -120,16 +121,16 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Sync panel width to CSS variable so main content adjusts.
-  // On mobile the panel is a full-screen overlay — never consume layout space.
+  // On mobile or when maximized the panel is a full-screen overlay — never consume layout space.
   useEffect(() => {
     document.documentElement.style.setProperty(
       '--right-panel-width',
-      isMobile ? '0px' : `${panelWidth}px`
+      (isMobile || maximized) ? '0px' : `${panelWidth}px`
     );
     return () => {
       document.documentElement.style.removeProperty('--right-panel-width');
     };
-  }, [panelWidth, isMobile]);
+  }, [panelWidth, isMobile, maximized]);
 
   // Panel width drag handlers
   const onPanelMouseDown = useCallback((e: React.MouseEvent) => {
@@ -310,8 +311,11 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
   // ── DESKTOP ──
   return (
     <div
-      className="fixed right-0 top-[var(--topbar-height)] z-40 h-[calc(100vh-var(--topbar-height))] border-l border-[var(--border-subtle)] bg-[var(--surface)]/80 backdrop-blur-xl"
-      style={{ width: panelWidth }}
+      className={maximized
+        ? 'fixed inset-0 top-[var(--topbar-height)] z-50 bg-[var(--bg-primary)] border-l border-[var(--border-subtle)]'
+        : 'fixed right-0 top-[var(--topbar-height)] z-40 h-[calc(100vh-var(--topbar-height))] border-l border-[var(--border-subtle)] bg-[var(--surface)]/80 backdrop-blur-xl'
+      }
+      style={maximized ? {} : { width: panelWidth }}
     >
       {/* Left edge drag handle — resize panel width */}
       <div
@@ -400,8 +404,12 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
-                <button className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]">
-                  <Maximize2 className="h-4 w-4" />
+                <button
+                  onClick={() => setMaximized(m => !m)}
+                  className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--gold)]"
+                  title={maximized ? 'Collapse chat' : 'Full-screen chat'}
+                >
+                  {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                 </button>
               </div>
             </div>
