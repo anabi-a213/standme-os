@@ -10,6 +10,8 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
   io = new SocketServer(httpServer, {
     cors: { origin: '*' },
     path: '/ws',
+    pingInterval: 10000,  // ping every 10s — keeps WS alive during long agent runs
+    pingTimeout: 5000,
   });
 
   io.on('connection', async (socket: Socket) => {
