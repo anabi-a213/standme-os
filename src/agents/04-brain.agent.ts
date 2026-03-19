@@ -462,12 +462,12 @@ export class BrainAgent extends BaseAgent {
       detail: missingEnvs.length === 0 ? 'all set' : `MISSING: ${missingEnvs.join(', ')}`,
     });
 
-    // Google Auth
-    const hasAuth = !!(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    // Google Auth — system uses OAuth2 (CLIENT_ID + CLIENT_SECRET + REFRESH_TOKEN)
+    const hasOAuth = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
     checks.push({
-      name: 'Google Auth',
-      ok: hasAuth,
-      detail: hasAuth ? 'service account configured' : 'MISSING: GOOGLE_SERVICE_ACCOUNT_KEY',
+      name: 'Google Auth (OAuth2)',
+      ok: hasOAuth,
+      detail: hasOAuth ? 'OAuth2 configured ✓' : 'MISSING: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN',
     });
 
     const allOk = checks.every(c => c.ok);
