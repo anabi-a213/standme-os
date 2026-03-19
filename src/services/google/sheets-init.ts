@@ -311,35 +311,49 @@ export async function getSheetsStatus(): Promise<string> {
 
   const masterId = process.env.SPREADSHEET_ID || '';
   if (!masterId) {
-    return '❌ No SPREADSHEET_ID set. Run /setupsheets to auto-create.';
+    return '❌ No SPREADSHEET_ID set. Run /sheetssetup to auto-create.';
+  }
+
+  // Cache of spreadsheetId → existing tab names (avoid re-fetching same sheet)
+  const tabCache = new Map<string, string[]>();
+
+  async function getTabsForSheet(sheetId: string): Promise<string[]> {
+    if (tabCache.has(sheetId)) return tabCache.get(sheetId)!;
+    try {
+      const meta = await sheetsApi.spreadsheets.get({ spreadsheetId: sheetId });
+      const tabs = (meta.data.sheets || []).map(s => s.properties?.title || '');
+      tabCache.set(sheetId, tabs);
+      return tabs;
+    } catch {
+      tabCache.set(sheetId, []);
+      return [];
+    }
+  }
+
+  // Check each tab in its ACTUAL spreadsheet (not just the master)
+  const tabStatusLines: string[] = [];
+  let missingCount = 0;
+
+  for (const t of REQUIRED_TABS) {
+    const sheetId = process.env[t.envKey] || masterId;
+    const isSeparate = sheetId !== masterId;
+    const tabs = await getTabsForSheet(sheetId);
+    const exists = tabs.includes(t.tabName);
+    if (!exists) missingCount++;
+    const label = isSeparate ? ` (separate sheet)` : '';
+    tabStatusLines.push(`${exists ? '✅' : '❌'} ${t.tabName}${label}`);
   }
 
   const url = `https://docs.google.com/spreadsheets/d/${masterId}/edit`;
-  let tabNames: string[] = [];
-
-  try {
-    const meta = await sheetsApi.spreadsheets.get({ spreadsheetId: masterId });
-    tabNames = (meta.data.sheets || []).map(s => s.properties?.title || '');
-  } catch (err: any) {
-    return `❌ Cannot access spreadsheet ${masterId}: ${err.message}\nMake sure the service account has Editor access.`;
-  }
-
-  const tabStatus = REQUIRED_TABS.map(t => {
-    const exists = tabNames.includes(t.tabName);
-    const override = process.env[t.envKey] && process.env[t.envKey] !== masterId;
-    return `${exists ? '✅' : '❌'} ${t.tabName}${override ? ' (separate sheet)' : ''}`;
-  });
-
-  const missing = REQUIRED_TABS.filter(t => !tabNames.includes(t.tabName)).length;
 
   return [
     `📊 *Google Sheets Status*`,
-    `Spreadsheet: ${url}`,
+    `Master: ${url}`,
     ``,
-    tabStatus.join('\n'),
+    tabStatusLines.join('\n'),
     ``,
-    missing > 0
-      ? `⚠️ ${missing} tab(s) missing — run /setupsheets to create them.`
+    missingCount > 0
+      ? `⚠️ ${missingCount} tab(s) missing — run /sheetssetup to create them.`
       : `✅ All 11 tabs present and accounted for.`,
   ].join('\n');
 }
