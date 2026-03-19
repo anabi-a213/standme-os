@@ -307,10 +307,11 @@ export async function processChat(
       }
     }
   } catch (err: any) {
-    logger.error(`[DashboardChat] Claude error: ${err.message}`);
+    const detail = err?.status ? `HTTP ${err.status}: ${err?.error?.error?.message || err.message}` : err.message;
+    logger.error(`[DashboardChat] Claude error: ${detail}`);
     const errMsg = lang === 'ar'
-      ? 'عذراً، حدث خطأ. حاول مرة ثانية.'
-      : 'Sorry, something went wrong. Please try again.';
+      ? `عذراً، حدث خطأ: ${detail}`
+      : `⚠️ Chat error: ${detail}`;
     onChunk(errMsg);
     fullResponse = errMsg;
   }
