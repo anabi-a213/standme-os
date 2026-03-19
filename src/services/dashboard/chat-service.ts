@@ -200,9 +200,7 @@ export async function processChat(
   }
 
   // Parse and execute agent triggers from the full response
-  const triggerPattern = /\[TRIGGER:\s*([^\]]+)\]/g;
   let processedResponse = fullResponse;
-  let match;
 
   // Collect all triggers first (regex exec is stateful)
   const triggers: { full: string; command: string; args: string }[] = [];
