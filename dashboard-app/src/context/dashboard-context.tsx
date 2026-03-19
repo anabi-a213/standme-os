@@ -31,6 +31,9 @@ export interface ChatMessage {
   timestamp: Date;
   streaming?: boolean;
   agentTriggers?: { command: string; state: 'running' | 'done' | 'error'; result?: string }[];
+  // Set when message originates from a Telegram agent response (mirrored to dashboard)
+  source?: 'agent';
+  agentName?: string;
 }
 
 interface DashboardContextType {
@@ -324,6 +327,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setMessages([]);
     });
 
+    // ── AGENT RESPONSES mirrored from Telegram ────────────────────────────
+    socket.on('chat:broadcast', (data: { agentName: string; message: string; timestamp: string }) => {
+      setMessages(prev => [...prev, {
+        id: `agent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'assistant',
+        content: data.message,
+        timestamp: new Date(data.timestamp),
+        source: 'agent',
+        agentName: data.agentName,
+      }]);
+    });
+
     return () => {
       socket.off('connect');
       socket.off('disconnect');
@@ -341,6 +356,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       socket.off('chat:done');
       socket.off('chat:error');
       socket.off('chat:cleared');
+      socket.off('chat:broadcast');
     };
   }, [sessionId]);
 

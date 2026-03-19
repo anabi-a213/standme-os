@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Sparkles, User, CheckCircle, Loader } from 'lucide-react';
+import { Sparkles, User, CheckCircle, Loader, Bot } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -13,6 +13,9 @@ interface Message {
     result?: string;
     duration?: string;
   };
+  // Mirrored from Telegram agent response
+  source?: 'agent';
+  agentName?: string;
 }
 
 interface ChatMessageProps {
@@ -21,14 +24,21 @@ interface ChatMessageProps {
 
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const isAgent = message.source === 'agent';
   const isRTL = /[\u0600-\u06FF]/.test(message.content);
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* Avatar */}
-      {!isUser && (
+      {!isUser && !isAgent && (
         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gold)] to-[var(--gold-bright)] shadow-[var(--shadow-gold)]">
           <Sparkles className="h-4 w-4 text-black" />
+        </div>
+      )}
+
+      {!isUser && isAgent && (
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--surface-3)] border border-[var(--border)]">
+          <Bot className="h-4 w-4 text-[var(--text-muted)]" />
         </div>
       )}
 
@@ -40,9 +50,20 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
       {/* Message bubble */}
       <div className={`flex-1 ${isUser ? 'flex justify-end' : ''}`}>
+        {/* Agent name header for mirrored messages */}
+        {isAgent && message.agentName && (
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              📡 {message.agentName}
+            </span>
+            <span className="text-[9px] text-[var(--text-subtle)]">via Telegram</span>
+          </div>
+        )}
         <div className={`max-w-[85%] rounded-xl px-4 py-3 ${
             isUser
               ? 'bg-[var(--surface-warm)] border border-[var(--gold)]/20'
+              : isAgent
+              ? 'bg-[var(--surface-2)] border border-[var(--border)] border-l-2 border-l-[var(--text-muted)]'
               : 'bg-[var(--surface-2)] border border-[var(--border)]'
           }`}>
           {/* Message content */}

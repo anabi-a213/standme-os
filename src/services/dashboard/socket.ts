@@ -96,6 +96,13 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
     }
   });
 
+  // ── AGENT RESPONSES → mirror to dashboard live chat ──────────────────────
+  dashboardBus.on('chat:broadcast', (data: { agentName: string; message: string; timestamp: string }) => {
+    if (io) {
+      io.emit('chat:broadcast', data);
+    }
+  });
+
   logger.info('[Dashboard] Socket.IO initialized');
   return io;
 }

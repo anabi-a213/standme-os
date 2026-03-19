@@ -87,7 +87,7 @@ export abstract class BaseAgent {
     return this.run(context);
   }
 
-  // Send message to chat
+  // Send message to chat (Telegram + dashboard live chat)
   async respond(chatId: number, message: string): Promise<void> {
     try {
       await getBot().sendMessage(chatId, message, { parse_mode: 'Markdown' });
@@ -99,6 +99,8 @@ export abstract class BaseAgent {
         logger.error(`Failed to send message: ${err2.message}`);
       }
     }
+    // Mirror to dashboard live chat so Mo sees responses without opening Telegram
+    dashboardBus.broadcastToChat(this.config.name, message);
   }
 
   // Send TYPE 1 action message

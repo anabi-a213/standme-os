@@ -99,6 +99,15 @@ class DashboardEventBus extends EventEmitter {
     this.emit('event', event);
   }
 
+  // Broadcast a full agent response message to the dashboard live chat
+  broadcastToChat(agentName: string, message: string): void {
+    this.emit('chat:broadcast', {
+      agentName,
+      message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   getStatuses(): AgentStatus[] {
     return Array.from(this.agentStatuses.values());
   }
