@@ -192,7 +192,10 @@ export async function processChat(
   // Pull relevant knowledge base entries (non-blocking — skip if Sheets not set up)
   let kbContext = '';
   try {
-    kbContext = await searchKnowledge(userMessage, 3);
+    const kbEntries = await searchKnowledge(userMessage, 3);
+    if (kbEntries.length > 0) {
+      kbContext = kbEntries.map(e => `[${e.topic}] ${e.content}`).join('\n');
+    }
   } catch { /* silent — KB is optional context */ }
 
   // Build message history for Claude (keep last MAX_HISTORY)
