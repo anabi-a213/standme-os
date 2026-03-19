@@ -8,8 +8,7 @@ import { createGoogleDoc } from '../services/google/drive';
 import { getFolderIdForCategory } from '../config/drive-folders';
 import { generateBrief, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
-import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
-import { sendToTeam } from '../services/telegram/bot';
+import { sendToMo, formatType1, formatType2, sendToTeam } from '../services/telegram/bot';
 
 export class ConceptBriefAgent extends BaseAgent {
   config: AgentConfig = {

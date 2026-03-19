@@ -26,7 +26,7 @@ export class ContractorCoordAgent extends BaseAgent {
       return this.listContractors(ctx);
     }
 
-    await this.respond(ctx.chatId, 'Commands: /addcontractor [name|company|specialty|region|phone|email]\n/bookcontractor [name] [project] [dates]\n/contractors');
+    await this.respond(ctx.chatId, 'Commands: /addcontractor name | company | specialty | region | phone | email\n/bookcontractor name | project | dates\n/contractors');
     return { success: true, message: 'Help shown', confidence: 'HIGH' };
   }
 
@@ -59,9 +59,9 @@ export class ContractorCoordAgent extends BaseAgent {
   }
 
   private async bookContractor(ctx: AgentContext): Promise<AgentResponse> {
-    const parts = ctx.args.split(/\s+/);
+    const parts = ctx.args.split('|').map(s => s.trim());
     if (parts.length < 2) {
-      await this.respond(ctx.chatId, 'Usage: /bookcontractor [name] [project] [dates]');
+      await this.respond(ctx.chatId, 'Usage: /bookcontractor name | project | dates');
       return { success: false, message: 'Insufficient data', confidence: 'LOW' };
     }
 

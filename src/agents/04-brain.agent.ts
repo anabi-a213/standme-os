@@ -561,7 +561,7 @@ export class BrainAgent extends BaseAgent {
       // Pending outreach in queue
       try {
         const queue = await readSheet(SHEETS.OUTREACH_QUEUE);
-        const pending = queue.slice(1).filter(r => (r[7] || '').toUpperCase() === 'PENDING');
+        const pending = queue.slice(1).filter(r => (r[7] || '').toUpperCase() === 'READY');
         if (pending.length > 0) {
           sections.push({
             label: 'OUTREACH PENDING',

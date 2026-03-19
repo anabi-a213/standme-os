@@ -61,15 +61,25 @@ export class LeadEnrichmentAgent extends BaseAgent {
           400
         );
 
+        // Extract decision-maker title from AI response (line starting with "1.")
+        let dmTitle = '';
+        const titleMatch = enrichmentResult.match(/1[.)]\s*([^\n]+)/);
+        if (titleMatch) {
+          // Strip common prefixes like "Most likely decision-maker title: "
+          dmTitle = titleMatch[1].replace(/^(most likely decision[- ]maker title[:\s]+|title[:\s]+)/i, '').trim().slice(0, 80);
+        }
+
         // Calculate outreach readiness
         const dmName = lead.data[18] || ''; // column S
         const dmEmail = lead.data[21] || ''; // column V
         let readiness = 3; // base
         if (dmName) readiness += 3;
+        if (dmTitle) readiness += 2; // we found a likely title via AI
         if (dmEmail) readiness += 4;
 
-        // Update lead with enrichment notes
+        // Update lead with enrichment notes + extracted title
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'ENRICHED');
+        if (dmTitle) await updateCell(SHEETS.LEAD_MASTER, lead.row, 'T', dmTitle); // col T = dmTitle
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'W', readiness.toString());
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'Y', `AI Enrichment: ${enrichmentResult.substring(0, 200)}`);
 
@@ -82,8 +92,8 @@ export class LeadEnrichmentAgent extends BaseAgent {
           content: `DM research for ${companyName} (${industry || 'unknown'}): ${enrichmentResult.slice(0, 400)}`,
         });
 
-        // If readiness 7+, add to outreach queue
-        if (readiness >= 7) {
+        // If readiness 5+, add to outreach queue (base 3 + title 2 = 5 minimum to qualify)
+        if (readiness >= 5) {
           await appendRow(SHEETS.OUTREACH_QUEUE, objectToRow(SHEETS.OUTREACH_QUEUE, {
             id: `OQ-${Date.now()}`,
             leadId: lead.data[0],

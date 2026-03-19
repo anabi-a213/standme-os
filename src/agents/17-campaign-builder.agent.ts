@@ -20,7 +20,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, appendRow, appendRows, updateCell, objectToRow, sheetUrl } from '../services/google/sheets';
+import { readSheet, appendRow, appendRows, updateCell, objectToRow, sheetUrl, hasSheet } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import {
   listCampaigns, getCampaignDetails, getCampaignStats,
@@ -226,7 +226,7 @@ export class CampaignBuilderAgent extends BaseAgent {
 
     const [existingLeads, existingSalesRaw] = await Promise.all([
       readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]),
-      process.env[SHEETS.CAMPAIGN_SALES.envKey]
+      hasSheet(SHEETS.CAMPAIGN_SALES)
         ? readSheet(SHEETS.CAMPAIGN_SALES).catch(() => [] as string[][])
         : Promise.resolve([] as string[][]),
     ]);
@@ -460,7 +460,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     }
 
     // Write CAMPAIGN_SALES rows — single bulk API call
-    if (process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+    if (hasSheet(SHEETS.CAMPAIGN_SALES)) {
       const salesRows = entries.map(({ exhibitor, contact, leadId }, i) => {
         const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${i}`;
         const wpId = wpIds[i] ?? null;
@@ -767,7 +767,7 @@ export class CampaignBuilderAgent extends BaseAgent {
             const wpId = await addProspectToCampaign(campaignId, prospect);
             const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-            if (process.env[SHEETS.CAMPAIGN_SALES.envKey]) await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
+            if (hasSheet(SHEETS.CAMPAIGN_SALES)) await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
               id: salesId,
               campaignId: String(campaignId),
               showName,
@@ -827,7 +827,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     let escalations = 0;
 
     try {
-      if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+      if (!hasSheet(SHEETS.CAMPAIGN_SALES)) {
         if (!isScheduled) await this.respond(ctx.chatId, 'SHEET_CAMPAIGN_SALES not configured — set this env var to enable reply tracking.');
         return { success: false, message: 'SHEET_CAMPAIGN_SALES not set', confidence: 'LOW' };
       }
@@ -1120,7 +1120,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     const showFilter = ctx.args.trim().toLowerCase();
     await this.respond(ctx.chatId, 'Fetching campaign status...');
 
-    if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+    if (!hasSheet(SHEETS.CAMPAIGN_SALES)) {
       await this.respond(ctx.chatId, 'SHEET_CAMPAIGN_SALES not configured — set this env var to enable campaign status tracking.');
       return { success: false, message: 'SHEET_CAMPAIGN_SALES not set', confidence: 'LOW' };
     }
@@ -1212,7 +1212,7 @@ export class CampaignBuilderAgent extends BaseAgent {
    * Deletes the test row after 24h automatically (it's marked TEST_[timestamp]).
    */
   private async createTestLead(ctx: AgentContext): Promise<AgentResponse> {
-    if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) {
+    if (!hasSheet(SHEETS.CAMPAIGN_SALES)) {
       await this.respond(ctx.chatId, 'SHEET_CAMPAIGN_SALES not configured. Set that env var first.');
       return { success: false, message: 'SHEET_CAMPAIGN_SALES not set', confidence: 'LOW' };
     }
@@ -1469,7 +1469,7 @@ ${emailsText}`;
    */
   public async handleWebhookEvent(eventType: string, prospectEmail: string): Promise<void> {
     if (!prospectEmail) return;
-    if (!process.env[SHEETS.CAMPAIGN_SALES.envKey]) return;
+    if (!hasSheet(SHEETS.CAMPAIGN_SALES)) return;
 
     try {
       const salesRows = await readSheet(SHEETS.CAMPAIGN_SALES);

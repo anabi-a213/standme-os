@@ -27,16 +27,32 @@ export class DealAnalyserAgent extends BaseAgent {
       return { success: true, message: 'Insufficient data', confidence: 'HIGH' };
     }
 
-    // Analyze by shows
-    const showCounts = new Map<string, { won: number; lost: number; total: number }>();
+    // Analyze by shows — won/lost from LESSONS_LEARNED (col E = outcome: WON/LOST)
+    // Pipeline status from LEAD_MASTER (col P = status: HOT/WARM/COLD/DISQUALIFIED)
+    const showCounts = new Map<string, { won: number; lost: number; total: number; hot: number }>();
+
+    // Pull won/lost from lessons sheet (col B = showName, col E = outcome)
+    for (const row of lessons.slice(1)) {
+      const show = row[1] || 'Unknown'; // col B = showName
+      const outcome = (row[4] || '').toUpperCase(); // col E = outcome
+      const entry = showCounts.get(show) || { won: 0, lost: 0, total: 0, hot: 0 };
+      entry.total++;
+      if (outcome === 'WON') entry.won++;
+      if (outcome === 'LOST') entry.lost++;
+      showCounts.set(show, entry);
+    }
+
+    // Count hot/active leads from lead master (col G = showName, col P = status)
+    let hotLeads = 0;
     for (const row of leads.slice(1)) {
       const show = row[6] || 'Unknown';
-      const status = row[15] || '';
-      const entry = showCounts.get(show) || { won: 0, lost: 0, total: 0 };
-      entry.total++;
-      if (status === 'WON') entry.won++;
-      if (status === 'LOST') entry.lost++;
-      showCounts.set(show, entry);
+      const status = (row[15] || '').toUpperCase();
+      if (status === 'HOT') {
+        hotLeads++;
+        const entry = showCounts.get(show) || { won: 0, lost: 0, total: 0, hot: 0 };
+        entry.hot++;
+        showCounts.set(show, entry);
+      }
     }
 
     // Analyze by industry
@@ -59,22 +75,24 @@ export class DealAnalyserAgent extends BaseAgent {
     const topSource = [...sourceCounts.entries()].sort((a, b) => b[1] - a[1])[0];
 
     const sections = [
-      { label: 'TOP SHOW', content: topShow ? `  ${topShow[0]}: ${topShow[1].total} leads (${topShow[1].won} won)` : '  No data' },
+      { label: 'TOP SHOW', content: topShow ? `  ${topShow[0]}: ${topShow[1].total} closed (${topShow[1].won} won, ${topShow[1].hot} hot active)` : '  No data' },
       { label: 'TOP INDUSTRY', content: topIndustry ? `  ${topIndustry[0]}: ${topIndustry[1]} leads` : '  No data' },
       { label: 'TOP SOURCE', content: topSource ? `  ${topSource[0]}: ${topSource[1]} leads` : '  No data' },
+      { label: 'HOT LEADS', content: `  ${hotLeads} active hot leads in pipeline` },
       { label: 'OUTREACH', content: `  ${outreach.length - 1} emails tracked` },
     ];
 
     // AI insight
     const wonDeals = [...showCounts.values()].reduce((sum, v) => sum + v.won, 0);
     const lostDeals = [...showCounts.values()].reduce((sum, v) => sum + v.lost, 0);
+    const totalHot = hotLeads;
 
     const insight = await generateText(
       `StandMe pipeline data for this week:\n\n` +
       `Shows breakdown: ${JSON.stringify(Object.fromEntries(showCounts))}\n` +
       `Industries: ${JSON.stringify(Object.fromEntries(industryCounts))}\n` +
       `Lead sources: ${JSON.stringify(Object.fromEntries(sourceCounts))}\n` +
-      `Won: ${wonDeals} | Lost: ${lostDeals} | Lessons logged: ${lessons.length - 1}\n\n` +
+      `Won: ${wonDeals} | Lost: ${lostDeals} | Hot active: ${totalHot} | Lessons logged: ${lessons.length - 1}\n\n` +
       `Write ONE sharp insight that Mo should act on this week. Not a summary of the data. An actual recommendation based on what the numbers suggest. Where should the team focus? What pattern is emerging? What is being left on the table?\n\n` +
       `2-3 sentences max. Direct. No em dashes. No filler.`,
       'You are a sharp sales strategist who knows the exhibition industry. You read data and tell people what it actually means for the business, not what the numbers say on the surface.',
@@ -88,7 +106,7 @@ export class DealAnalyserAgent extends BaseAgent {
       sourceType: 'sheet',
       topic: 'deal-analysis',
       tags: `analytics,weekly,pipeline,strategy,${new Date().toISOString().split('T')[0]}`,
-      content: `Weekly insight (${new Date().toISOString().split('T')[0]}): ${insight} | Top show: ${topShow?.[0] || 'unknown'}. Top industry: ${topIndustry?.[0] || 'unknown'}. Won: ${wonDeals}, Lost: ${lostDeals}.`,
+      content: `Weekly insight (${new Date().toISOString().split('T')[0]}): ${insight} | Top show: ${topShow?.[0] || 'unknown'}. Top industry: ${topIndustry?.[0] || 'unknown'}. Won: ${wonDeals}, Lost: ${lostDeals}, Hot active: ${totalHot}.`,
     });
 
     // Save per-show performance so campaign builder can use it
@@ -99,7 +117,7 @@ export class DealAnalyserAgent extends BaseAgent {
           sourceType: 'sheet',
           topic: show,
           tags: `show-performance,analytics,${show.toLowerCase().replace(/\s+/g, '-')}`,
-          content: `${show} performance: ${data.total} leads, ${data.won} won, ${data.lost} lost. Win rate: ${data.total > 0 ? Math.round((data.won / data.total) * 100) : 0}%.`,
+          content: `${show} performance: ${data.total} closed, ${data.won} won, ${data.lost} lost, ${data.hot} hot active. Win rate: ${data.total > 0 ? Math.round((data.won / data.total) * 100) : 0}%.`,
         }).catch(() => { /* non-blocking */ });
       }
     }

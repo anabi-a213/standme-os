@@ -120,8 +120,15 @@ export function objectToRow(config: SheetConfig, obj: Record<string, string>): s
   return row;
 }
 
-// Returns a clickable Google Sheets URL for the given sheet config
+// Returns a clickable Google Sheets URL for the given sheet config.
+// Works for both single-spreadsheet setups (SPREADSHEET_ID only) and
+// multi-spreadsheet setups (individual SHEET_* env vars set).
 export function sheetUrl(config: SheetConfig): string {
-  const id = process.env[config.envKey] || '';
+  const id = process.env[config.envKey] || process.env.SPREADSHEET_ID || '';
   return id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : '';
+}
+
+/** True if the sheet is reachable — works for both SHEET_* and SPREADSHEET_ID setups */
+export function hasSheet(config: SheetConfig): boolean {
+  return !!(process.env[config.envKey] || process.env.SPREADSHEET_ID);
 }

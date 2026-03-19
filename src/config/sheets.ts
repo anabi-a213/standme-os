@@ -226,6 +226,8 @@ export const SHEETS: Record<string, SheetConfig> = {
       website: 'T',          // prospect website — needed for concept brief
       logoUrl: 'U',          // logo/brand asset URL — needed for design
     },
+    // NOTE: every field listed above MUST be present for objectToRow() to include it.
+    // Any field missing from this mapping is silently dropped on appendRow calls.
     headerRow: 1,
   },
 };
