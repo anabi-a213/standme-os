@@ -7,16 +7,22 @@ import { searchKnowledge } from '../knowledge';
 
 /** Fast env-var check — no API calls, no latency */
 function getConnectionStatus(): string {
+  // Google auth uses OAuth2 (not service account) — needs CLIENT_ID + CLIENT_SECRET + REFRESH_TOKEN
+  const googleOAuthOk = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
+  // Sheets: can use SPREADSHEET_ID master OR any SHEET_* var
+  const sheetsOk = !!(process.env.SPREADSHEET_ID || Object.keys(process.env).some(k => k.startsWith('SHEET_')));
+
   const checks = [
-    { name: 'Google Sheets', ok: !!(process.env.SPREADSHEET_ID || Object.keys(process.env).some(k => k.startsWith('SHEET_'))) },
-    { name: 'Trello', ok: !!(process.env.TRELLO_API_KEY && process.env.TRELLO_TOKEN) },
-    { name: 'Claude AI', ok: !!process.env.ANTHROPIC_API_KEY },
-    { name: 'Telegram Bot', ok: !!process.env.TELEGRAM_BOT_TOKEN },
-    { name: 'Google Auth', ok: !!(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS) },
-    { name: 'Woodpecker', ok: !!process.env.WOODPECKER_API_KEY },
-    { name: 'Google Drive', ok: !!(process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.GOOGLE_SERVICE_ACCOUNT_KEY) },
+    { name: 'Google Auth (OAuth2)', ok: googleOAuthOk, missing: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN' },
+    { name: 'Google Sheets', ok: sheetsOk && googleOAuthOk, missing: 'SPREADSHEET_ID (or SHEET_* vars)' },
+    { name: 'Google Drive', ok: googleOAuthOk, missing: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN' },
+    { name: 'Trello', ok: !!(process.env.TRELLO_API_KEY && process.env.TRELLO_TOKEN), missing: 'TRELLO_API_KEY, TRELLO_TOKEN' },
+    { name: 'Claude AI', ok: !!process.env.ANTHROPIC_API_KEY, missing: 'ANTHROPIC_API_KEY' },
+    { name: 'Telegram Bot', ok: !!process.env.TELEGRAM_BOT_TOKEN, missing: 'TELEGRAM_BOT_TOKEN' },
+    { name: 'Woodpecker', ok: !!process.env.WOODPECKER_API_KEY, missing: 'WOODPECKER_API_KEY' },
   ];
-  return checks.map(c => `  ${c.ok ? '✅' : '❌'} ${c.name}${c.ok ? '' : ' — NOT CONFIGURED'}`).join('\n');
+  return checks.map(c => `  ${c.ok ? '✅' : `❌ ${c.name} — add ${c.missing} to Railway`}`
+    .replace('✅', `✅ ${c.name}`)).join('\n');
 }
 
 export interface ChatMessage {
