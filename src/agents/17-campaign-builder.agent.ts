@@ -727,6 +727,8 @@ export class CampaignBuilderAgent extends BaseAgent {
     }
 
     // ---- 7. Send batch for approval ----
+    // NOTE: emailDrafts = 10 preview samples for Mo to review quality.
+    // On approval, ALL targets (up to 1500+) are pushed to Woodpecker, not just the 10.
 
     const approvalId = `campaign_${showName.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}`;
     const preview = emailDrafts.slice(0, 5).map((d, i) =>
@@ -736,83 +738,121 @@ export class CampaignBuilderAgent extends BaseAgent {
     const summaryMsg =
       `*Campaign: ${showName}*\n` +
       `Woodpecker Campaign ID: ${campaignId}\n` +
-      `${emailDrafts.length} personalised emails\n\n` +
+      `*Total prospects to push: ${targets.length}*\n` +
+      `(10 email samples shown for quality review)\n\n` +
       `*Show angle:* ${showAnalysis.standMeAngle}\n\n` +
       `*Buying triggers:* ${showAnalysis.buyingTriggers}\n\n` +
       `---\n\n${preview}`;
 
     registerApproval(approvalId, {
-      action: `Launch ${showName} campaign (${emailDrafts.length} emails)`,
-      data: { campaignId, showName, emailDrafts },
+      action: `Launch ${showName} campaign (${targets.length} total prospects)`,
+      data: { campaignId, showName, targets: targets.length },
       timestamp: Date.now(),
       onApprove: async () => {
         let pushed = 0;
-        for (const draft of emailDrafts) {
+        let failed = 0;
+        const salesRows: string[][] = [];
+        const BATCH_NOTIFY = 100; // send progress every N prospects
+        const RATE_LIMIT_DELAY = 1000; // 1s pause every 50 WP API calls
+
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
           try {
-            const nameParts = draft.target.contactName.trim().split(' ');
+            // Ensure industry hook is computed (cached from preview or fresh for new industries)
+            if (!target.industryHook) {
+              target.industryHook = await getCampaignIndustryHook(target.industry);
+            }
+
+            const nameParts = target.contactName.trim().split(/\s+/);
             const prospect: WoodpeckerProspect = {
-              email: draft.target.contactEmail,
-              first_name: nameParts[0] || draft.target.contactName,
+              email: target.contactEmail,
+              first_name: nameParts[0] || target.contactName,
               last_name: nameParts.slice(1).join(' ') || '',
-              company: draft.target.companyName,
-              industry: draft.target.industry,
+              company: target.companyName,
+              industry: target.industry,
               // ── Consistent snippet schema across all campaign paths ──────────
-              snippet1: draft.target.industryHook || draft.target.industry,  // cold email opener
-              snippet2: draft.target.contactTitle,                            // DM job title
-              snippet3: draft.target.website || draft.target.country || '',  // website or country
+              snippet1: target.industryHook || target.industry,  // cold email opener
+              snippet2: target.contactTitle,                      // DM job title
+              snippet3: target.website || target.country || '',   // website or country
               // ────────────────────────────────────────────────────────────────
               tags: `standme,${showName.toLowerCase().replace(/\s+/g, '-')}`,
             };
 
             const wpId = await addProspectToCampaign(campaignId, prospect);
-            const salesId = `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-            if (hasSheet(SHEETS.CAMPAIGN_SALES)) await appendRow(SHEETS.CAMPAIGN_SALES, objectToRow(SHEETS.CAMPAIGN_SALES, {
-              id: salesId,
-              campaignId: String(campaignId),
-              showName,
-              companyName: draft.target.companyName,
-              contactName: draft.target.contactName,
-              contactEmail: draft.target.contactEmail,
-              woodpeckerId: String(wpId || ''),
-              status: 'SENT',
-              classification: '',
-              standSize: '', budget: '', showDates: '', phone: '', requirements: '',
-              conversationLog: JSON.stringify([{
-                role: 'agent',
-                message: `Subject: ${draft.subject}\n\n${draft.body}`,
-                date: new Date().toISOString(),
-              }]),
-              lastReplyDate: '',
-              lastActionDate: new Date().toISOString(),
-              leadMasterId: '',
-              notes: `Source: ${draft.target.source}`,
-            }));
             pushed++;
+
+            // Batch CAMPAIGN_SALES rows — write in bulk later
+            if (hasSheet(SHEETS.CAMPAIGN_SALES)) {
+              salesRows.push(objectToRow(SHEETS.CAMPAIGN_SALES, {
+                id: `CS-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                campaignId: String(campaignId),
+                showName,
+                companyName: target.companyName,
+                contactName: target.contactName,
+                contactEmail: target.contactEmail,
+                woodpeckerId: String(wpId || ''),
+                status: 'SENT',
+                classification: '',
+                standSize: '', budget: '', showDates: '', phone: '', requirements: '',
+                conversationLog: '',
+                lastReplyDate: '',
+                lastActionDate: new Date().toISOString(),
+                leadMasterId: '',
+                notes: `Source: ${target.source}`,
+              }));
+            }
+
+            // Rate-limit: brief pause every 50 Woodpecker API calls
+            if (i > 0 && i % 50 === 0) {
+              await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY));
+            }
+
+            // Progress notification to Telegram every BATCH_NOTIFY
+            if (i > 0 && i % BATCH_NOTIFY === 0) {
+              await sendToMo(`⏳ *Campaign ${showName}* — ${pushed}/${targets.length} prospects added to Woodpecker...`);
+            }
+
           } catch (err: any) {
-            logger.warn(`[CampaignBuilder] Push failed for ${draft.target.companyName}: ${err.message}`);
+            failed++;
+            logger.warn(`[CampaignBuilder] Push failed for ${target.companyName}: ${err.message}`);
           }
         }
+
+        // Bulk-write CAMPAIGN_SALES in one shot (avoid 1500 individual API calls)
+        if (salesRows.length > 0 && hasSheet(SHEETS.CAMPAIGN_SALES)) {
+          try {
+            await appendRows(SHEETS.CAMPAIGN_SALES, salesRows);
+          } catch (err: any) {
+            logger.warn(`[CampaignBuilder] CAMPAIGN_SALES batch write failed: ${err.message}`);
+          }
+        }
+
         const salesSheetLink = sheetUrl(SHEETS.CAMPAIGN_SALES);
-        return `Campaign *${showName}* launched. ${pushed}/${emailDrafts.length} prospects in Woodpecker campaign ${campaignId}. Reply monitoring active every 2h.${salesSheetLink ? `\n📊 [View Campaign Sales](${salesSheetLink})` : ''}`;
+        return `✅ Campaign *${showName}* launched.\n\n` +
+          `📬 *${pushed}/${targets.length}* prospects added to Woodpecker campaign ${campaignId}.\n` +
+          (failed > 0 ? `⚠️ ${failed} failed (duplicate emails or API errors)\n` : '') +
+          `Reply monitoring active every 2h.` +
+          (salesSheetLink ? `\n📊 [View Campaign Sales](${salesSheetLink})` : '');
       },
       onReject: async () => `Campaign *${showName}* cancelled.`,
     });
 
     await sendToMo(formatType1(
       `Launch Campaign: ${showName}`,
-      `${emailDrafts.length} expert emails | Campaign ${campaignId}`,
+      `${targets.length} total prospects | ${emailDrafts.length} email samples | Campaign ${campaignId}`,
       summaryMsg,
       approvalId
     ));
 
     await this.respond(ctx.chatId,
-      `${emailDrafts.length} email drafts sent to Mo for approval.\n\n` +
-      `Campaign: *${showName}* (Woodpecker ID: ${campaignId})\n\n` +
+      `*${emailDrafts.length} email samples* sent to Mo for quality review.\n\n` +
+      `Campaign: *${showName}* (Woodpecker ID: ${campaignId})\n` +
+      `*Total prospects ready to push: ${targets.length}*\n\n` +
+      `Mo reviews quality → approves → all ${targets.length} pushed to Woodpecker automatically.\n\n` +
       `/approve\\_${approvalId} or /reject\\_${approvalId}`
     );
 
-    return { success: true, message: `${emailDrafts.length} emails drafted for ${showName}`, confidence: 'HIGH' };
+    return { success: true, message: `${targets.length} prospects ready for ${showName} campaign — awaiting Mo approval`, confidence: 'HIGH' };
   }
 
   // =====================================================================
