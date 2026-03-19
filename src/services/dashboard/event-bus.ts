@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import type { Server as SocketServer } from 'socket.io';
 
 export interface AgentEvent {
   type: 'agent:start' | 'agent:end' | 'agent:error' | 'log' | 'approval';
@@ -6,6 +7,12 @@ export interface AgentEvent {
   agentName: string;
   timestamp: string;
   data: Record<string, unknown>;
+}
+
+export interface BroadcastMessage {
+  agentName: string;
+  message: string;
+  timestamp: string;
 }
 
 export interface AgentStatus {
@@ -24,6 +31,22 @@ class DashboardEventBus extends EventEmitter {
   private agentStatuses = new Map<string, AgentStatus>();
   private recentLogs: AgentEvent[] = [];
   private readonly MAX_LOGS = 200;
+
+  // Direct reference to the Socket.IO server — set once from socket.ts after io is created.
+  // This avoids any EventEmitter relay and guarantees delivery.
+  private _io: SocketServer | null = null;
+  private recentBroadcasts: BroadcastMessage[] = [];
+  private readonly MAX_BROADCASTS = 50;
+
+  /** Called once from socket.ts after the SocketServer is created */
+  setIO(server: SocketServer): void {
+    this._io = server;
+  }
+
+  /** Returns recent broadcasts so new clients can catch up on connect */
+  getRecentBroadcasts(): BroadcastMessage[] {
+    return this.recentBroadcasts;
+  }
 
   registerAgent(id: string, name: string): void {
     if (!this.agentStatuses.has(id)) {
@@ -99,13 +122,26 @@ class DashboardEventBus extends EventEmitter {
     this.emit('event', event);
   }
 
-  // Broadcast a full agent response message to the dashboard live chat
+  /**
+   * Mirror a full agent response to the dashboard live chat.
+   * Stores the message in a ring buffer (so late-connecting clients see recent history)
+   * then emits directly via Socket.IO — no EventEmitter relay, no drop risk.
+   */
   broadcastToChat(agentName: string, message: string): void {
-    this.emit('chat:broadcast', {
+    const payload: BroadcastMessage = {
       agentName,
       message,
       timestamp: new Date().toISOString(),
-    });
+    };
+    // Buffer for late-connecting clients
+    this.recentBroadcasts.push(payload);
+    if (this.recentBroadcasts.length > this.MAX_BROADCASTS) {
+      this.recentBroadcasts = this.recentBroadcasts.slice(-this.MAX_BROADCASTS);
+    }
+    // Emit directly — no EventEmitter hop
+    if (this._io) {
+      this._io.emit('chat:broadcast', payload);
+    }
   }
 
   getStatuses(): AgentStatus[] {

@@ -14,6 +14,9 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
     pingTimeout: 5000,
   });
 
+  // Give event-bus a direct reference to io so broadcastToChat() emits without EventEmitter relay
+  dashboardBus.setIO(io);
+
   io.on('connection', async (socket: Socket) => {
     logger.info(`[Dashboard] Client connected: ${socket.id}`);
 
@@ -23,6 +26,12 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
       logs: dashboardBus.getRecentLogs(),
       stats: dashboardBus.getSystemStats(),
     });
+
+    // Replay recent Telegram agent broadcasts so clients that connect late still see them
+    const recentBroadcasts = dashboardBus.getRecentBroadcasts();
+    if (recentBroadcasts.length > 0) {
+      socket.emit('chat:broadcast_history', recentBroadcasts);
+    }
 
     // Send welcome message from AI
     try {
@@ -93,13 +102,6 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
       io.emit('event', event);
       io.emit('stats', dashboardBus.getSystemStats());
       io.emit('agents', dashboardBus.getStatuses());
-    }
-  });
-
-  // ── AGENT RESPONSES → mirror to dashboard live chat ──────────────────────
-  dashboardBus.on('chat:broadcast', (data: { agentName: string; message: string; timestamp: string }) => {
-    if (io) {
-      io.emit('chat:broadcast', data);
     }
   });
 

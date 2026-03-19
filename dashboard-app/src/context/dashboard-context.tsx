@@ -327,16 +327,44 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setMessages([]);
     });
 
-    // ── AGENT RESPONSES mirrored from Telegram ────────────────────────────
+    // ── AGENT RESPONSES mirrored from Telegram (real-time) ───────────────
     socket.on('chat:broadcast', (data: { agentName: string; message: string; timestamp: string }) => {
-      setMessages(prev => [...prev, {
-        id: `agent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        role: 'assistant',
-        content: data.message,
-        timestamp: new Date(data.timestamp),
-        source: 'agent',
-        agentName: data.agentName,
-      }]);
+      const newId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setMessages(prev => {
+        // Deduplicate: skip if same agent + same timestamp already exists
+        if (prev.some(m => m.agentName === data.agentName && m.timestamp.getTime() === new Date(data.timestamp).getTime())) {
+          return prev;
+        }
+        return [...prev, {
+          id: newId,
+          role: 'assistant' as const,
+          content: data.message,
+          timestamp: new Date(data.timestamp),
+          source: 'agent' as const,
+          agentName: data.agentName,
+        }];
+      });
+    });
+
+    // ── REPLAY recent broadcasts for late-connecting clients ──────────────
+    socket.on('chat:broadcast_history', (history: { agentName: string; message: string; timestamp: string }[]) => {
+      if (!history?.length) return;
+      setMessages(prev => {
+        const existingTimestamps = new Set(prev.filter(m => m.source === 'agent').map(m => `${m.agentName}-${m.timestamp.getTime()}`));
+        const newMsgs = history
+          .filter(d => !existingTimestamps.has(`${d.agentName}-${new Date(d.timestamp).getTime()}`))
+          .map((d, i) => ({
+            id: `agent-hist-${i}-${new Date(d.timestamp).getTime()}`,
+            role: 'assistant' as const,
+            content: d.message,
+            timestamp: new Date(d.timestamp),
+            source: 'agent' as const,
+            agentName: d.agentName,
+          }));
+        if (!newMsgs.length) return prev;
+        // Insert in chronological order: put before any non-agent messages that are newer
+        return [...prev, ...newMsgs].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      });
     });
 
     return () => {
@@ -357,6 +385,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       socket.off('chat:error');
       socket.off('chat:cleared');
       socket.off('chat:broadcast');
+      socket.off('chat:broadcast_history');
     };
   }, [sessionId]);
 
