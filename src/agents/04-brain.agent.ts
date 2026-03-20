@@ -225,6 +225,20 @@ export class BrainAgent extends BaseAgent {
     }
 
     const message = ctx.args || ctx.command;
+
+    // Approval/rejection commands must NEVER be processed by the Brain.
+    // In Telegram they are caught by index.ts before reaching here.
+    // In the dashboard they arrive as free text — intercept and redirect.
+    if (/^\/(approve|reject)_/i.test(message.trim())) {
+      await this.respond(ctx.chatId,
+        '⚠️ *Approval command detected.*\n\n' +
+        'Approval commands only work via *Telegram* — they cannot be sent through the dashboard chat.\n\n' +
+        'Open Telegram and send the command there. If the approval expired (server restarted), ' +
+        'run the original command again (e.g. `/bulkoutreach intersolar`) to get a fresh approval request.'
+      );
+      return { success: false, message: 'Approval command must be sent via Telegram', confidence: 'HIGH' };
+    }
+
     const lang = await detectLanguage(message);
     const ack = lang === 'ar' ? '...' : lang === 'franco' ? 'ثانية...' : '...';
     await this.respond(ctx.chatId, ack);

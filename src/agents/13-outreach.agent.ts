@@ -7,7 +7,7 @@ import { addProspectToCampaign, addProspectsToCampaign, getCampaignStats, listCa
 import { findExhibitorFiles, parseExhibitorFile } from '../services/drive-exhibitor';
 import { validateShow } from '../config/shows';
 import { generateOutreachEmail, generateText } from '../services/ai/client';
-import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
+import { saveKnowledge, buildKnowledgeContext, searchKnowledge } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
@@ -562,6 +562,17 @@ export class OutreachAgent extends BaseAgent {
       ? '\n\n⚠️ *Campaign is DRAFT* — go to Woodpecker UI and set it to RUNNING so emails actually send.'
       : '';
 
+    // Persist approval params to Knowledge Base so they survive a Railway redeploy.
+    // If the in-memory callback is gone when Mo approves, reconstructBulkApproval()
+    // will read this entry and re-run the push from scratch.
+    await saveKnowledge({
+      source: `bulk-approval-${approvalId}`,
+      sourceType: 'sheet',
+      topic: `bulk-approval-pending`,
+      tags: `bulk-approval,${showFilter.replace(/\s+/g, '-')},pending`,
+      content: JSON.stringify({ approvalId, showFilter, campaignId, campaignName, timestamp: Date.now() }),
+    }).catch(() => {}); // non-fatal — in-memory still works for same-deploy approvals
+
     registerApproval(approvalId, {
       action: `Bulk push ${prospects.length} ${showFilter} leads to "${campaignName}"`,
       data: { prospects, campaignId, campaignName, showFilter },
@@ -770,5 +781,89 @@ export class OutreachAgent extends BaseAgent {
     } catch (err: any) {
       logger.warn(`[Outreach] Could not update log status: ${err.message}`);
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exported: Reconstruct and execute a bulk outreach approval after a redeploy.
+//
+// Called from index.ts when handleApproval() returns null for a bulkoutreach_
+// approval ID. Reads persisted params from Knowledge Base, re-reads LEAD_MASTER,
+// and pushes directly to Woodpecker without needing the in-memory callback.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function reconstructBulkApproval(approvalId: string): Promise<string | null> {
+  try {
+    // 1. Read persisted params from Knowledge Base
+    const entries = await searchKnowledge(`bulk-approval-${approvalId}`, 1).catch(() => []);
+    if (!entries.length) return null;
+
+    let params: { showFilter: string; campaignId: number; campaignName: string } | null = null;
+    try { params = JSON.parse(entries[0].content); } catch { return null; }
+    if (!params?.campaignId || !params?.showFilter) return null;
+
+    const { showFilter, campaignId, campaignName } = params;
+
+    // 2. Re-read LEAD_MASTER and rebuild prospects (no AI hooks — simpler reconstruction)
+    const master = await readSheet(SHEETS.LEAD_MASTER);
+    const dataRows = master.slice(1);
+    const showLower = showFilter.toLowerCase();
+
+    const prospects: WoodpeckerProspect[] = [];
+    for (const r of dataRows) {
+      const rowShow = (r[6] || '').toLowerCase();
+      if (!rowShow.includes(showLower) && !showLower.includes(rowShow)) continue;
+
+      const email = r[21] || r[4];
+      if (!email || !email.includes('@')) continue;
+
+      const dmName   = r[18] || r[3] || '';
+      const nameParts = dmName.trim().split(' ').filter(Boolean);
+
+      prospects.push({
+        email,
+        first_name: nameParts[0] || 'Team',
+        last_name:  nameParts.slice(1).join(' ') || '',
+        company:    r[2]  || '',
+        industry:   r[10] || '',
+        snippet1:   r[10] || 'your upcoming trade show stand',
+        snippet2:   r[19] || '',
+        snippet3:   '',
+        tags:       `standme-outreach,${showFilter.replace(/\s+/g, '-')},bulk-reconstruct`,
+      });
+    }
+
+    if (prospects.length === 0) return null;
+
+    // 3. Push to Woodpecker
+    const ids   = await addProspectsToCampaign(campaignId, prospects);
+    const sent  = ids.filter(id => id !== null).length;
+    const failed = ids.length - sent;
+
+    // 4. Log to OUTREACH_LOG
+    const logDate = new Date().toISOString();
+    for (const p of prospects) {
+      await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
+        id:          `OL-BULK-R-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        leadId:      '',
+        companyName: p.company,
+        emailType:   'BULK_EMAIL_1',
+        sentDate:    logDate,
+        status:      'SENT',
+        replyClassification: '',
+        woodpeckerId: '',
+        notes:       `Bulk reconstruct → campaign ${campaignId} (${campaignName}) | ${showFilter}`,
+      })).catch(() => {});
+    }
+
+    return (
+      `✅ *Bulk push complete (reconstructed after redeploy)*\n\n` +
+      `Campaign: *${campaignName}* (ID: ${campaignId})\n` +
+      `Pushed: *${sent}* ${showFilter} leads\n` +
+      (failed > 0 ? `Skipped: ${failed} (already in campaign or invalid email)\n` : '') +
+      `\n📧 Check Woodpecker — set campaign to RUNNING if it's still DRAFT.`
+    );
+  } catch (err: any) {
+    logger.warn(`[Outreach] reconstructBulkApproval failed: ${err.message}`);
+    return null;
   }
 }

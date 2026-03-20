@@ -31,7 +31,7 @@ import { TechnicalDeadlineAgent } from './agents/09-technical-deadline.agent';
 import { ContractorCoordAgent } from './agents/10-contractor-coord.agent';
 import { LessonsLearnedAgent } from './agents/11-lessons-learned.agent';
 import { DealAnalyserAgent } from './agents/12-deal-analyser.agent';
-import { OutreachAgent } from './agents/13-outreach.agent';
+import { OutreachAgent, reconstructBulkApproval } from './agents/13-outreach.agent';
 import { DriveIndexerAgent } from './agents/14-drive-indexer.agent';
 import { MarketingContentAgent } from './agents/15-marketing-content.agent';
 import { CardManagerAgent } from './agents/08-card-manager.agent';
@@ -167,10 +167,22 @@ async function main() {
         return;
       }
 
-      const result = await handleApproval(approvalId, isApprove);
+      let result = await handleApproval(approvalId, isApprove);
+
+      // In-memory callback missing (most common cause: Railway redeploy between
+      // the approval request and Mo's approval). For bulk outreach approvals,
+      // we persisted the params to Knowledge Base — try to reconstruct and re-run.
+      if (result === null && isApprove && approvalId.startsWith('bulkoutreach_')) {
+        await bot.sendMessage(msg.chat.id, '⏳ Approval callback expired (server restarted). Reconstructing bulk push from saved params...', { parse_mode: 'Markdown' });
+        result = await reconstructBulkApproval(approvalId).catch(() => null);
+      }
+
       if (result === null) {
-        // Approval ID not found — expired (24h limit) or the ID was mistyped
-        await bot.sendMessage(msg.chat.id, '⚠️ Approval not found — it may have expired (24h limit) or the ID is incorrect. Check /outreachstatus or re-run the command.', { parse_mode: 'Markdown' });
+        // Still null — truly expired or unknown approval
+        const hint = approvalId.startsWith('bulkoutreach_')
+          ? ' Run `/bulkoutreach [show]` again to get a fresh approval request.'
+          : '';
+        await bot.sendMessage(msg.chat.id, `⚠️ Approval not found — it may have expired (24h limit) or the ID is incorrect.${hint}`, { parse_mode: 'Markdown' });
       } else {
         await bot.sendMessage(msg.chat.id, result, { parse_mode: 'Markdown' });
       }
