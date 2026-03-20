@@ -4,6 +4,8 @@ import { dashboardBus } from './event-bus';
 import { UserRole } from '../../config/access';
 import { logger } from '../../utils/logger';
 import { searchKnowledge } from '../knowledge';
+import { handleApproval } from '../approvals';
+import { reconstructBulkApproval } from '../../agents/13-outreach.agent';
 
 /** Fast env-var check — no API calls, no latency */
 function getConnectionStatus(): string {
@@ -251,6 +253,35 @@ export async function processChat(
     content: userMessage,
     timestamp: new Date().toISOString(),
   });
+
+  // ── APPROVAL / REJECTION COMMANDS ──────────────────────────────────────────
+  // Handle /approve_xxx and /reject_xxx directly without going through Claude.
+  // This keeps the result in the dashboard chat only — no Telegram duplication.
+  const trimmedMsg = userMessage.trim();
+  if (/^\/(approve|reject)_/i.test(trimmedMsg)) {
+    const isApprove = /^\/approve_/i.test(trimmedMsg);
+    const approvalId = trimmedMsg.replace(/^\/(approve|reject)_/i, '');
+
+    let result = await handleApproval(approvalId, isApprove).catch(() => null);
+
+    // Expired callback (e.g. Railway redeployed between request + approval)?
+    // For bulk outreach, params were persisted to KB — reconstruct and re-run.
+    if (result === null && isApprove && approvalId.startsWith('bulkoutreach_')) {
+      onChunk('⏳ Approval callback expired (server restarted). Reconstructing bulk push from saved params...\n\n');
+      result = await reconstructBulkApproval(approvalId).catch(() => null);
+    }
+
+    const responseText = result ?? (
+      approvalId.startsWith('bulkoutreach_')
+        ? '⚠️ Approval expired and could not be reconstructed. Run `/bulkoutreach [show]` again to get a fresh approval request.'
+        : '⚠️ Approval not found — it may have expired (24h limit) or the ID is incorrect.'
+    );
+
+    onChunk(responseText);
+    session.history.push({ role: 'assistant', content: responseText, timestamp: new Date().toISOString() });
+    return;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 

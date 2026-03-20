@@ -226,17 +226,18 @@ export class BrainAgent extends BaseAgent {
 
     const message = ctx.args || ctx.command;
 
-    // Approval/rejection commands must NEVER be processed by the Brain.
-    // In Telegram they are caught by index.ts before reaching here.
-    // In the dashboard they arrive as free text — intercept and redirect.
+    // Approval/rejection commands are handled upstream:
+    // - Telegram: caught by index.ts handler before Brain is called
+    // - Dashboard: caught by chat-service.ts processChat() before Brain is called
+    // If the Brain somehow still receives one, return a neutral fallback rather
+    // than hallucinating a fake approval response.
     if (/^\/(approve|reject)_/i.test(message.trim())) {
       await this.respond(ctx.chatId,
-        '⚠️ *Approval command detected.*\n\n' +
-        'Approval commands only work via *Telegram* — they cannot be sent through the dashboard chat.\n\n' +
-        'Open Telegram and send the command there. If the approval expired (server restarted), ' +
-        'run the original command again (e.g. `/bulkoutreach intersolar`) to get a fresh approval request.'
+        '⚠️ This is a system approval command — it should have been handled automatically. ' +
+        'If you see this message, please try again. If the approval expired, run the original command ' +
+        '(e.g. `/bulkoutreach intersolar`) to get a fresh approval request.'
       );
-      return { success: false, message: 'Approval command must be sent via Telegram', confidence: 'HIGH' };
+      return { success: false, message: 'Approval command reached Brain — should have been intercepted earlier', confidence: 'HIGH' };
     }
 
     const lang = await detectLanguage(message);
