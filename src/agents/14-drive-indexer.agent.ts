@@ -9,6 +9,9 @@ import { saveKnowledge, updateKnowledge, searchKnowledge, buildKnowledgeContext,
 import { sendToMo, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
 
+// Global mutex — prevents two concurrent indexDrive runs (e.g. scheduled + manual at the same time)
+let _indexingInProgress = false;
+
 export class DriveIndexerAgent extends BaseAgent {
   config: AgentConfig = {
     name: 'Drive Indexer',
@@ -230,6 +233,14 @@ export class DriveIndexerAgent extends BaseAgent {
   }
 
   private async indexDrive(ctx: AgentContext, forceReindex = false): Promise<AgentResponse> {
+    // Prevent two concurrent indexing jobs — second caller gets a friendly message
+    if (_indexingInProgress) {
+      await this.respond(ctx.chatId, '⏳ Drive indexing is already running. Please wait for it to finish before starting another.');
+      return { success: false, message: 'Indexing already in progress', confidence: 'HIGH' };
+    }
+
+    _indexingInProgress = true;
+
     const BATCH_SIZE = 25;
     const PARALLEL_AI = 3; // concurrent AI calls per batch
     const MAX_TOTAL_MS = 20 * 60 * 1000; // 20 minute overall timeout
@@ -442,9 +453,11 @@ export class DriveIndexerAgent extends BaseAgent {
       await sendToMo(formatType2('Drive Index Complete', summary));
       await this.respond(ctx.chatId, summary);
 
+      _indexingInProgress = false;
       return { success: true, message: summary, confidence: 'HIGH' };
 
     } catch (err: any) {
+      _indexingInProgress = false;
       await this.respond(ctx.chatId, `Failed to index Drive: ${err.message}`);
       return { success: false, message: err.message, confidence: 'LOW' };
     }

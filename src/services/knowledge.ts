@@ -84,8 +84,11 @@ export async function updateKnowledge(
   updates: Partial<Omit<KnowledgeEntry, 'id' | 'source'>>
 ): Promise<boolean> {
   try {
-    // Always read fresh for writes (never from cache)
-    const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+    // Use the shared cache for the lookup — this is critical during bulk reindex.
+    // Doing a fresh readSheet() per file would hammer the Sheets API quota (60 reads/min).
+    // Since updateKnowledge only modifies content in-place (never adds/removes rows),
+    // cached row indices are stable throughout the entire reindex run.
+    const rows = await getCachedRows();
     const sourceLower = source.toLowerCase();
 
     // Find the row where column B (index 1) matches the source
@@ -98,7 +101,7 @@ export async function updateKnowledge(
     }
 
     if (foundIndex === -1) {
-      // Not found — fall back to saving as a new entry
+      // Not found — fall back to saving as a new entry (saveKnowledge handles cache invalidation)
       if (updates.content) {
         await saveKnowledge({
           source,
@@ -127,7 +130,9 @@ export async function updateKnowledge(
     const sheetRow = foundIndex + 1;
     await updateRange(SHEETS.KNOWLEDGE_BASE, `A${sheetRow}:G${sheetRow}`, [updatedRow]);
 
-    invalidateCache(); // next read will fetch fresh data
+    // Do NOT invalidate cache here — updateKnowledge only modifies content in-place.
+    // Row structure is unchanged so cached indices remain valid.
+    // Cache will naturally expire after CACHE_TTL_MS (5 min).
     return true;
   } catch (err: any) {
     logger.warn(`[Knowledge] Update failed for "${source}": ${err.message}`);
