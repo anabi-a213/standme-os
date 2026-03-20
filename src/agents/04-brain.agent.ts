@@ -307,14 +307,31 @@ export class BrainAgent extends BaseAgent {
       }
 
       // Trigger agent action if requested
+      // IMPORTANT: Heavy/long-running commands are blocked from auto-triggering.
+      // The Brain AI may recommend these but must never execute them automatically —
+      // they must only run when the user explicitly types the command.
+      const BRAIN_BLOCKED_COMMANDS = new Set([
+        '/indexdrive',
+        '/reindexdrive',
+        '/newcampaign',
+        '/discover',
+        '/outreach',
+        '/bulkoutreach',
+      ]);
+
       if (actionMatch) {
         const command = actionMatch[1].toLowerCase();
         const args = actionMatch[2].trim();
-        const agent = getAgent(command);
 
-        if (agent) {
-          const actionCtx: AgentContext = { ...ctx, command, args };
-          await agent.run(actionCtx);
+        if (BRAIN_BLOCKED_COMMANDS.has(command)) {
+          // Log the blocked auto-trigger but do NOT execute it
+          logger.warn(`[Brain] Blocked auto-trigger of heavy command: ${command}`);
+        } else {
+          const agent = getAgent(command);
+          if (agent) {
+            const actionCtx: AgentContext = { ...ctx, command, args };
+            await agent.run(actionCtx);
+          }
         }
       }
 
