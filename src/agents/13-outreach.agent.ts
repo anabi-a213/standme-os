@@ -618,7 +618,7 @@ export class OutreachAgent extends BaseAgent {
     await this.respond(ctx.chatId,
       `📤 *Approval sent to Mo.*\n\n` +
       `*${prospects.length}* ${showFilter} leads ready for *${campaignName}*.\n` +
-      `Mo approves with \`/approve\\_${approvalId}\` to push all at once.` +
+      `Mo approves with \`/approve_${approvalId}\` to push all at once.` +
       draftWarning
     );
 
