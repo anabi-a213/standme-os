@@ -131,6 +131,7 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /outreach — run outreach for qualified leads already in the OUTREACH_QUEUE (scored 6+), max 5 per run with individual Mo approval
 - /bulkoutreach [show name] — bulk push ALL leads for a show from Lead Master directly to the matching Woodpecker campaign in one batch. One approval covers every lead. Use this for large imports (100+ leads). Example: /bulkoutreach intersolar
 - /importleads [show name] — import exhibitor leads from Google Drive files (Excel/CSV/Google Sheets) into Lead Master. Files must be in the exhibitor Drive folder named after the show. Run /bulkoutreach [show name] after to push to Woodpecker. Works for any show. Example: /importleads gulfood
+- /generateemails [show name] — AI-generates a ready-to-paste 3-step Woodpecker email sequence for any show. Run this once per campaign when setting up, copy-paste the output into Woodpecker UI. Example: /generateemails intersolar
 - /outreachstatus — outreach campaign stats
 - /discover [show name] — scan exhibitor files from Drive, find contacts, build Woodpecker campaign (use this when Mo says "launch campaign using files", "discover leads for X", "run campaign from the list/xlsx")
 - /newcampaign [show name] — generate personalised emails for existing pipeline leads and launch Woodpecker campaign

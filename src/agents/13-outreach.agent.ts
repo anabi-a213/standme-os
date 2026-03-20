@@ -17,8 +17,9 @@ export class OutreachAgent extends BaseAgent {
     name: 'Automated Outreach Sender',
     id: 'agent-13',
     description: 'Run personalised outreach sequences via Woodpecker',
-    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach', '/importleads', '/testpush'],
+    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach', '/importleads', '/testpush', '/generateemails'],
     requiredRole: UserRole.ADMIN,
+    schedule: '0 9 * * 1', // Every Monday 9am Berlin — auto-push new leads to all RUNNING campaigns
   };
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
@@ -27,7 +28,112 @@ export class OutreachAgent extends BaseAgent {
     if (ctx.command === '/bulkoutreach') return this.runBulkOutreach(ctx);
     if (ctx.command === '/importleads') return this.runImportLeads(ctx);
     if (ctx.command === '/testpush') return this.runTestPush(ctx);
+    if (ctx.command === '/generateemails') return this.runGenerateEmails(ctx);
     return this.runOutreach(ctx);
+  }
+
+  // ── Scheduled: every Monday 9am — auto-push new leads, no human approval needed ──
+  async runScheduled(): Promise<void> {
+    logger.info('[Outreach] Scheduled auto-push starting...');
+
+    let campaigns: { id: number; name: string; status: string }[] = [];
+    try {
+      campaigns = await listCampaigns();
+    } catch (err: any) {
+      logger.warn(`[Outreach] Auto-push: could not fetch campaigns: ${err.message}`);
+      return;
+    }
+
+    const runningCampaigns = campaigns.filter(c => c.status.toUpperCase() === 'RUNNING');
+    if (runningCampaigns.length === 0) {
+      logger.info('[Outreach] Auto-push: no RUNNING campaigns found — nothing to push.');
+      return;
+    }
+
+    // Load LEAD_MASTER and OUTREACH_LOG once
+    const [masterRows, logRows] = await Promise.all([
+      readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]),
+      readSheet(SHEETS.OUTREACH_LOG).catch(() => [] as string[][]),
+    ]);
+
+    // Build set of already-pushed emails from OUTREACH_LOG
+    const pushedEmails = new Set(logRows.slice(1).map(r => (r[4] || '').toLowerCase().trim()).filter(Boolean));
+
+    const results: string[] = [];
+
+    for (const campaign of runningCampaigns) {
+      // Derive show filter from campaign name (remove common suffixes like year/location)
+      const showFilter = campaign.name.toLowerCase()
+        .replace(/\s*\d{4}.*$/, '')  // strip year and everything after
+        .replace(/standme\s*(os)?/gi, '')
+        .trim();
+
+      if (!showFilter) continue;
+
+      // Find LEAD_MASTER leads for this show that haven't been pushed yet
+      const leads = masterRows.slice(1).filter(r => {
+        const rowShow = (r[6] || '').toLowerCase();
+        if (!rowShow.includes(showFilter) && !showFilter.includes(rowShow.substring(0, 6))) return false;
+        const email = (r[21] || r[4] || '').toLowerCase().trim();
+        return email && email.includes('@') && !pushedEmails.has(email);
+      });
+
+      if (leads.length === 0) {
+        logger.info(`[Outreach] Auto-push: no new leads for "${campaign.name}"`);
+        continue;
+      }
+
+      // Build prospects
+      const prospects: WoodpeckerProspect[] = leads.map(r => {
+        const dmName = r[18] || r[3] || '';
+        const parts = dmName.trim().split(' ').filter(Boolean);
+        return {
+          email:      r[21] || r[4],
+          first_name: parts[0] || 'Team',
+          last_name:  parts.slice(1).join(' ') || '',
+          company:    r[2]  || '',
+          industry:   r[10] || '',
+          snippet1:   r[10] || 'your upcoming trade show stand',
+          snippet2:   r[19] || '',
+          snippet3:   '',
+          tags:       `standme-outreach,auto-push,${showFilter.replace(/\s+/g, '-')}`,
+        };
+      });
+
+      try {
+        const ids  = await addProspectsToCampaign(campaign.id, prospects);
+        const sent = ids.filter(id => id !== null).length;
+
+        // Log to OUTREACH_LOG
+        const logDate = new Date().toISOString();
+        for (const p of prospects) {
+          await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
+            id:          `OL-AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            leadId:      '',
+            companyName: p.company,
+            emailType:   'AUTO_PUSH',
+            sentDate:    logDate,
+            status:      'SENT',
+            replyClassification: '',
+            woodpeckerId: '',
+            notes:       `Auto-push → campaign ${campaign.id} (${campaign.name})`,
+          })).catch(() => {});
+        }
+
+        results.push(`✅ *${campaign.name}*: pushed *${sent}* new leads`);
+        logger.info(`[Outreach] Auto-push: sent ${sent} leads to "${campaign.name}"`);
+      } catch (err: any) {
+        results.push(`❌ *${campaign.name}*: ${err.message}`);
+        logger.warn(`[Outreach] Auto-push: failed for "${campaign.name}": ${err.message}`);
+      }
+    }
+
+    if (results.length > 0) {
+      await sendToMo(formatType2(
+        '📬 Weekly Auto-Push Complete',
+        results.join('\n') + '\n\nLeads are loading into Woodpecker. No action needed — emails send on campaign schedule.'
+      ));
+    }
   }
 
   // ---- Auto-sync LEAD_MASTER → OUTREACH_QUEUE ----
@@ -557,11 +663,41 @@ export class OutreachAgent extends BaseAgent {
       });
     }
 
-    // 5. Build approval message and register single bulk approval
+    // 5. DRAFT campaign guard — test one prospect push before asking for approval.
+    // A DRAFT campaign with no email steps will always fail with E_RECORD_NOT_FOUND.
+    // Detect this early and show the setup guide so Mo can configure Woodpecker first.
+    if (campaignStatus.toUpperCase() === 'DRAFT') {
+      let campaignReady = false;
+      try {
+        const axios = (await import('axios')).default;
+        const apiKey = process.env.WOODPECKER_API_KEY || '';
+        const auth   = Buffer.from(`${apiKey}:`).toString('base64');
+        await axios.post('https://api.woodpecker.co/rest/v1/add_prospects_campaign', {
+          campaign: { id: campaignId },
+          prospects: [{ email: `probe-${Date.now()}@standme-probe.invalid`, first_name: 'Probe', last_name: '', company: 'Probe' }],
+        }, { headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' }, timeout: 8000 });
+        campaignReady = true; // DRAFT but has email steps — proceed
+      } catch { /* campaign not ready */ }
+
+      if (!campaignReady) {
+        await this.respond(ctx.chatId,
+          `⚠️ *Campaign not ready: "${campaignName}"*\n\n` +
+          `The campaign is in *DRAFT* and has no email steps — Woodpecker won't accept prospects yet.\n\n` +
+          `*One-time setup (5 min):*\n` +
+          `1. Open Woodpecker → Campaigns → *"${campaignName}"*\n` +
+          `2. Add email steps to the sequence (run \`/generateemails ${showFilter}\` to get ready-to-paste emails)\n` +
+          `3. Set the *From* sender email\n` +
+          `4. Set campaign to *RUNNING*\n` +
+          `5. Run \`/bulkoutreach ${showFilter}\` again — it will push all ${prospects.length} leads automatically\n\n` +
+          `After this one-time setup, every new lead that comes in will be pushed automatically every Monday morning with no action needed from you.`
+        );
+        return { success: false, message: 'Campaign not ready — needs email steps', confidence: 'HIGH' };
+      }
+    }
+
+    // 5b. Build approval message and register single bulk approval
     const approvalId = `bulkoutreach_${showFilter.replace(/\s+/g, '_')}_${Date.now()}`;
-    const draftWarning = campaignStatus.toUpperCase() === 'DRAFT'
-      ? '\n\n⚠️ *Campaign is DRAFT* — go to Woodpecker UI and set it to RUNNING so emails actually send.'
-      : '';
+    const draftWarning = '';
 
     // Persist approval params to Knowledge Base so they survive a Railway redeploy.
     // If the in-memory callback is gone when Mo approves, reconstructBulkApproval()
@@ -698,6 +834,65 @@ export class OutreachAgent extends BaseAgent {
 
     await this.respond(ctx.chatId, `📊 *Outreach Status*\n\n${sections.join('\n\n')}`);
     return { success: true, message: 'Outreach status shown', confidence: 'HIGH' };
+  }
+
+  // ---- /generateemails [show] — AI-generates a 3-step email sequence for copy-paste into Woodpecker ----
+
+  private async runGenerateEmails(ctx: AgentContext): Promise<AgentResponse> {
+    const showName = ctx.args?.trim();
+    if (!showName) {
+      await this.respond(ctx.chatId,
+        'Usage: `/generateemails [show name]`\nExample: `/generateemails intersolar`\n\n' +
+        'Generates a 3-step cold email sequence formatted for direct copy-paste into Woodpecker.'
+      );
+      return { success: false, message: 'No show name', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `✍️ Generating email sequence for *${showName}*...`);
+
+    const showInfo = validateShow(showName);
+    const industry = showInfo.match?.industry || 'trade show';
+    const city     = showInfo.match?.city || showName;
+    const country  = showInfo.match?.country || 'Europe';
+
+    const prompt =
+      `You are writing cold outreach emails for StandMe, an exhibition stand design & build company (standme.de).\n` +
+      `Target: companies exhibiting at *${showName}* (${industry} industry, ${city}, ${country}).\n` +
+      `StandMe offers: full-service custom stands — design, production, installation, strip.\n` +
+      `Budget range: €15,000–80,000+. Focus on ROI, brand impact, and stress-free execution.\n\n` +
+      `Write a 3-step email sequence. For each step output EXACTLY this format:\n\n` +
+      `STEP 1 — Subject: [subject line]\nDelay: Send immediately\nBody:\n[email body]\n\n` +
+      `STEP 2 — Subject: [subject line]\nDelay: 4 days after Step 1\nBody:\n[email body]\n\n` +
+      `STEP 3 — Subject: [subject line]\nDelay: 8 days after Step 1\nBody:\n[email body]\n\n` +
+      `Rules:\n` +
+      `- Use {{FIRST_NAME}}, {{COMPANY}} personalisation tokens\n` +
+      `- Step 1: value-led cold intro — one specific insight about ${industry} exhibiting\n` +
+      `- Step 2: social proof / case study angle — reference a real exhibition challenge (space, logistics, brand)\n` +
+      `- Step 3: urgency — stands book up 6+ months before the show, deadline framing\n` +
+      `- Each email max 120 words — scannable, no fluff, no excessive punctuation\n` +
+      `- Sign off as: Mohammed | StandMe | standme.de\n` +
+      `- No em dashes. Plain text only.`;
+
+    const sequence = await generateText(prompt, 'Return only the three formatted email steps. No intro, no closing commentary.', 1200)
+      .catch(() => null);
+
+    if (!sequence) {
+      await this.respond(ctx.chatId, '❌ Failed to generate email sequence. Try again.');
+      return { success: false, message: 'AI generation failed', confidence: 'LOW' };
+    }
+
+    const msg =
+      `📧 *Email Sequence — ${showName}*\n\n` +
+      `Copy-paste each step into Woodpecker → Campaign → Steps:\n\n` +
+      `\`\`\`\n${sequence}\n\`\`\`\n\n` +
+      `*After pasting:*\n` +
+      `1. Set *From* sender email in campaign settings\n` +
+      `2. Set campaign to *RUNNING*\n` +
+      `3. Run \`/bulkoutreach ${showName}\` to push all leads\n\n` +
+      `After that: new leads push automatically every Monday — no action needed.`;
+
+    await this.respond(ctx.chatId, msg);
+    return { success: true, message: `Email sequence generated for ${showName}`, confidence: 'HIGH' };
   }
 
   // ---- /testpush [campaign_id] — raw diagnostic for Woodpecker add_prospects_campaign ----
