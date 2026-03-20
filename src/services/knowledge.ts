@@ -2,10 +2,14 @@
  * Knowledge Base Service
  * Persistent memory that grows as agents read files, Trello cards, sheets, etc.
  * Stored in Google Sheets (KNOWLEDGE_BASE tab) — always available, no cold start.
+ *
+ * CACHING: All reads share a 5-minute in-memory cache. Multiple agents running
+ * in the same process will share one cache — no redundant Sheets API calls.
+ * The cache is automatically invalidated on every write (save or update).
  */
 
 import { SHEETS } from '../config/sheets';
-import { appendRow, readSheet, objectToRow } from './google/sheets';
+import { appendRow, readSheet, updateRange, objectToRow } from './google/sheets';
 import { logger } from '../utils/logger';
 
 export interface KnowledgeEntry {
@@ -18,7 +22,35 @@ export interface KnowledgeEntry {
   lastUpdated: string;
 }
 
-// ---- Save a single knowledge entry ----
+// ──────────────────────────────────────────────────────────────
+// Internal cache — shared across all agents in this process
+// ──────────────────────────────────────────────────────────────
+
+interface KbCache {
+  rows: string[][];
+  fetchedAt: number;
+}
+
+let _cache: KbCache | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getCachedRows(): Promise<string[][]> {
+  const now = Date.now();
+  if (_cache && (now - _cache.fetchedAt) < CACHE_TTL_MS) {
+    return _cache.rows;
+  }
+  const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+  _cache = { rows, fetchedAt: now };
+  return rows;
+}
+
+function invalidateCache(): void {
+  _cache = null;
+}
+
+// ──────────────────────────────────────────────────────────────
+// Write: save a new entry
+// ──────────────────────────────────────────────────────────────
 
 export async function saveKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'lastUpdated'>): Promise<void> {
   try {
@@ -34,16 +66,82 @@ export async function saveKnowledge(entry: Omit<KnowledgeEntry, 'id' | 'lastUpda
       content: entry.content.slice(0, 500),
       lastUpdated,
     }));
+
+    invalidateCache(); // next read will fetch fresh data
   } catch (err: any) {
     logger.warn(`[Knowledge] Failed to save entry: ${err.message}`);
   }
 }
 
-// ---- Search knowledge by keyword (multi-term scored ranking) ----
+// ──────────────────────────────────────────────────────────────
+// Write: update an existing entry by source (used by /reindexdrive)
+// If source not found, falls back to saveKnowledge (creates new).
+// Returns true if an existing entry was updated, false if not found.
+// ──────────────────────────────────────────────────────────────
+
+export async function updateKnowledge(
+  source: string,
+  updates: Partial<Omit<KnowledgeEntry, 'id' | 'source'>>
+): Promise<boolean> {
+  try {
+    // Always read fresh for writes (never from cache)
+    const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+    const sourceLower = source.toLowerCase();
+
+    // Find the row where column B (index 1) matches the source
+    let foundIndex = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if ((rows[i][1] || '').toLowerCase() === sourceLower) {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    if (foundIndex === -1) {
+      // Not found — fall back to saving as a new entry
+      if (updates.content) {
+        await saveKnowledge({
+          source,
+          sourceType: updates.sourceType || 'drive',
+          topic: updates.topic || 'general',
+          tags: updates.tags || '',
+          content: updates.content,
+        });
+      }
+      return false; // signals "was not an update, was a create"
+    }
+
+    // Build the updated row, preserving fields that aren't being updated
+    const existing = rows[foundIndex];
+    const updatedRow = [
+      existing[0] || '',                                                        // id (A) — never changes
+      existing[1] || '',                                                        // source (B) — never changes
+      updates.sourceType || existing[2] || '',                                  // sourceType (C)
+      (updates.topic || existing[3] || '').slice(0, 100),                      // topic (D)
+      (updates.tags || existing[4] || '').slice(0, 200),                       // tags (E)
+      (updates.content ? updates.content.slice(0, 500) : existing[5] || ''),  // content (F)
+      new Date().toISOString(),                                                  // lastUpdated (G)
+    ];
+
+    // Sheet row number is 1-indexed: header = row 1, first data = row 2
+    const sheetRow = foundIndex + 1;
+    await updateRange(SHEETS.KNOWLEDGE_BASE, `A${sheetRow}:G${sheetRow}`, [updatedRow]);
+
+    invalidateCache(); // next read will fetch fresh data
+    return true;
+  } catch (err: any) {
+    logger.warn(`[Knowledge] Update failed for "${source}": ${err.message}`);
+    return false;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Read: search by keyword (multi-term scored ranking)
+// ──────────────────────────────────────────────────────────────
 
 export async function searchKnowledge(query: string, limit = 10): Promise<KnowledgeEntry[]> {
   try {
-    const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+    const rows = await getCachedRows();
 
     // Split into meaningful terms (ignore short stop words)
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
@@ -76,11 +174,13 @@ export async function searchKnowledge(query: string, limit = 10): Promise<Knowle
   }
 }
 
-// ---- Check if a source already exists (for deduplication) ----
+// ──────────────────────────────────────────────────────────────
+// Read: check if a source already exists (deduplication)
+// ──────────────────────────────────────────────────────────────
 
 export async function sourceExistsInKnowledge(source: string): Promise<boolean> {
   try {
-    const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+    const rows = await getCachedRows();
     const s = source.toLowerCase();
     return rows.slice(1).some(r => (r[1] || '').toLowerCase() === s);
   } catch {
@@ -88,11 +188,13 @@ export async function sourceExistsInKnowledge(source: string): Promise<boolean> 
   }
 }
 
-// ---- Get all entries for a topic (company/show/etc.) ----
+// ──────────────────────────────────────────────────────────────
+// Read: get all entries for a topic
+// ──────────────────────────────────────────────────────────────
 
 export async function getKnowledgeByTopic(topic: string, limit = 15): Promise<KnowledgeEntry[]> {
   try {
-    const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+    const rows = await getCachedRows();
     const t = topic.toLowerCase();
 
     return rows.slice(1)
@@ -113,11 +215,13 @@ export async function getKnowledgeByTopic(topic: string, limit = 15): Promise<Kn
   }
 }
 
-// ---- Get recent entries (for Brain context) ----
+// ──────────────────────────────────────────────────────────────
+// Read: get recent entries (for Brain context)
+// ──────────────────────────────────────────────────────────────
 
 export async function getRecentKnowledge(limit = 20): Promise<KnowledgeEntry[]> {
   try {
-    const rows = await readSheet(SHEETS.KNOWLEDGE_BASE);
+    const rows = await getCachedRows();
     return rows.slice(1)
       .slice(-limit)
       .map(r => ({
@@ -136,7 +240,9 @@ export async function getRecentKnowledge(limit = 20): Promise<KnowledgeEntry[]> 
   }
 }
 
-// ---- Build a knowledge context string for AI prompts ----
+// ──────────────────────────────────────────────────────────────
+// Read: build a context string for AI prompts
+// ──────────────────────────────────────────────────────────────
 
 export async function buildKnowledgeContext(query: string): Promise<string> {
   const entries = await searchKnowledge(query, 8);
@@ -147,9 +253,45 @@ export async function buildKnowledgeContext(query: string): Promise<string> {
   ).join('\n');
 }
 
-// ---- Build agent system prompt prefix from static knowledge ----
-// Use this in any agent's system prompt to give it StandMe + industry context.
-// Import getStaticKnowledge from '../config/standme-knowledge' and call this.
+// ──────────────────────────────────────────────────────────────
+// Read: raw row count + type breakdown (used by /kbstats)
+// ──────────────────────────────────────────────────────────────
+
+export async function getKnowledgeStats(): Promise<{
+  total: number;
+  byType: Record<string, number>;
+  recent: KnowledgeEntry[];
+}> {
+  try {
+    const rows = await getCachedRows();
+    const data = rows.slice(1).filter(r => r[0]); // skip empty rows
+
+    const byType: Record<string, number> = {};
+    for (const r of data) {
+      const t = r[2] || 'unknown';
+      byType[t] = (byType[t] || 0) + 1;
+    }
+
+    const recent = data.slice(-5).reverse().map(r => ({
+      id: r[0] || '',
+      source: r[1] || '',
+      sourceType: r[2] || '',
+      topic: r[3] || '',
+      tags: r[4] || '',
+      content: r[5] || '',
+      lastUpdated: r[6] || '',
+    }));
+
+    return { total: data.length, byType, recent };
+  } catch (err: any) {
+    logger.warn(`[Knowledge] Stats failed: ${err.message}`);
+    return { total: 0, byType: {}, recent: [] };
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Build agent system prompt prefix from static knowledge
+// ──────────────────────────────────────────────────────────────
 
 export function buildAgentKnowledgePrefix(agentName: string): string {
   const { getStaticKnowledge } = require('../config/standme-knowledge');

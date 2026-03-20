@@ -5,7 +5,7 @@ import { SHEETS } from '../config/sheets';
 import { appendRow, appendRows, readSheet, objectToRow } from '../services/google/sheets';
 import { listAllPersonalFiles, listSharedDrives, listSharedDriveFiles, readFileContent, buildFolderMap, resolveFullPath, searchFiles, listAllFilesInFolder, enableLinkSharing, listStandMeSubfolders, resolveAgentFolder, invalidateFolderCache, setupDriveFolderTree, createProjectFolderTree, createShowFolder, createContractorFolder, STANDME_ROOT, DriveFile } from '../services/google/drive';
 import { generateText } from '../services/ai/client';
-import { saveKnowledge, searchKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '../services/knowledge';
+import { saveKnowledge, updateKnowledge, searchKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '../services/knowledge';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
 
@@ -358,7 +358,12 @@ export class DriveIndexerAgent extends BaseAgent {
             const metaKnowledge = this.extractMetadataKnowledge(file, linkedProject, folderPath, category);
             if (metaKnowledge) {
               const src = (file.webViewLink || file.name).toLowerCase();
-              if (!existingKnowledgeSources.has(src)) {
+              if (forceReindex) {
+                // /reindexdrive: update the existing KB entry with fresh content
+                await updateKnowledge(src, metaKnowledge);
+                knowledgeSaved++;
+              } else if (!existingKnowledgeSources.has(src)) {
+                // /indexdrive: only save if not yet known
                 await saveKnowledge(metaKnowledge);
                 existingKnowledgeSources.add(src);
                 knowledgeSaved++;
@@ -392,7 +397,12 @@ export class DriveIndexerAgent extends BaseAgent {
                 const knowledge = await this.extractKnowledge(file, rawContent, linkedProject, folderPath);
                 if (knowledge) {
                   const src = (file.webViewLink || file.name).toLowerCase();
-                  if (!existingKnowledgeSources.has(src)) {
+                  if (forceReindex) {
+                    // /reindexdrive: update the existing KB entry with fresh AI summary
+                    await updateKnowledge(src, knowledge);
+                    knowledgeSaved++;
+                  } else if (!existingKnowledgeSources.has(src)) {
+                    // /indexdrive: only save if not yet known
                     await saveKnowledge(knowledge);
                     existingKnowledgeSources.add(src);
                     knowledgeSaved++;

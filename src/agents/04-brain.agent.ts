@@ -7,7 +7,7 @@ import { getBoardCardsWithListNames } from '../services/trello/client';
 import { generateText, generateChat, detectLanguage } from '../services/ai/client';
 import { saveThreadEntry, setActiveFocus } from '../services/thread-context';
 import { formatType3, sendToTeam } from '../services/telegram/bot';
-import { buildKnowledgeContext } from '../services/knowledge';
+import { buildKnowledgeContext, getKnowledgeStats } from '../services/knowledge';
 import { getAgent } from './registry';
 import { logger } from '../utils/logger';
 import { getStaticKnowledge } from '../config/standme-knowledge';
@@ -187,7 +187,7 @@ export class BrainAgent extends BaseAgent {
     name: 'StandMe Brain',
     id: 'agent-04',
     description: 'Central intelligence — answers any question, connects all agents',
-    commands: ['/brain', '/ask', '/seedknowledge', '/healthcheck', '/sheetssetup'],
+    commands: ['/brain', '/ask', '/seedknowledge', '/kbstats', '/healthcheck', '/sheetssetup'],
     schedule: '0 8 * * *',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -210,6 +210,11 @@ export class BrainAgent extends BaseAgent {
     // Sheets setup: show Google Sheets status + auto-create missing tabs
     if (ctx.command === '/sheetssetup') {
       return this.runSheetsSetup(ctx);
+    }
+
+    // Knowledge base stats: entry count, types, recent entries
+    if (ctx.command === '/kbstats') {
+      return this.showKbStats(ctx);
     }
 
     const message = ctx.args || ctx.command;
@@ -597,6 +602,42 @@ export class BrainAgent extends BaseAgent {
     await sendToTeam(briefing, recipients);
 
     return { success: true, message: 'Morning briefing sent', confidence: 'HIGH' };
+  }
+
+  private async showKbStats(ctx: AgentContext): Promise<AgentResponse> {
+    try {
+      const stats = await getKnowledgeStats();
+
+      if (stats.total === 0) {
+        await this.respond(ctx.chatId, '📭 Knowledge base is empty. Run /indexdrive to populate it.');
+        return { success: true, message: 'KB empty', confidence: 'HIGH' };
+      }
+
+      // Type breakdown sorted by count
+      const typeBreakdown = Object.entries(stats.byType)
+        .sort((a, b) => b[1] - a[1])
+        .map(([type, count]) => `  ${type}: *${count}*`)
+        .join('\n');
+
+      // 5 most recent — show topic + snippet
+      const recentLines = stats.recent.map(e => {
+        const snippet = (e.content || '').slice(0, 70);
+        return `  • [${e.sourceType}] *${e.topic}* — ${snippet}${e.content.length > 70 ? '...' : ''}`;
+      }).join('\n');
+
+      const msg =
+        `*📊 Knowledge Base*\n\n` +
+        `Total entries: *${stats.total}*\n\n` +
+        `*By source:*\n${typeBreakdown}\n\n` +
+        `*5 most recent:*\n${recentLines}\n\n` +
+        `_Use /knowledge [term] to search • /indexdrive to add new files_`;
+
+      await this.respond(ctx.chatId, msg);
+      return { success: true, message: `KB stats: ${stats.total} entries`, confidence: 'HIGH' };
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `Failed to read KB stats: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
   }
 
   private async seedKnowledgeBase(ctx: AgentContext): Promise<AgentResponse> {
