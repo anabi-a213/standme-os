@@ -142,6 +142,10 @@ router.post('/api/approve', async (req: Request, res: Response) => {
   if (!approvalId) { res.status(400).json({ error: 'approvalId required' }); return; }
   try {
     const result = await handleApproval(approvalId, approved === true);
+    if (result === null) {
+      res.status(404).json({ ok: false, error: 'Approval not found or expired (24h limit)' });
+      return;
+    }
     res.json({ ok: true, result });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });

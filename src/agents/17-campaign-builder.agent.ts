@@ -1605,6 +1605,13 @@ ${emailsText}`;
     const companyName = row[3] || '';
     const campaignIdVal = row[1] || '';
 
+    // Guard: leadMasterId is column R (index 17) in CAMPAIGN_SALES.
+    // If already set, this prospect was already converted — skip to prevent duplicate leads.
+    if (row[17]) {
+      logger.info(`[Campaign] Skipping duplicate convertToLead for "${companyName}" — leadMasterId already set: ${row[17]}`);
+      return;
+    }
+
     try {
       const leadId = `SM-${Date.now()}-C`; // C suffix = campaign origin
 

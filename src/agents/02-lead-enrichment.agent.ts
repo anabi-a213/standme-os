@@ -5,7 +5,7 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, updateCell, appendRow, objectToRow, sheetUrl, findRowByValue } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
-import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
+import { saveKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '../services/knowledge';
 import { logger } from '../utils/logger';
 
 export class LeadEnrichmentAgent extends BaseAgent {
@@ -84,14 +84,18 @@ export class LeadEnrichmentAgent extends BaseAgent {
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'W', readiness.toString());
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'Y', `AI Enrichment: ${enrichmentResult.substring(0, 200)}`);
 
-        // Save enrichment research to KB so all agents benefit
-        await saveKnowledge({
-          source: `enrichment-${lead.data[0]}`,
-          sourceType: 'sheet',
-          topic: companyName,
-          tags: `enrichment,decision-maker,buyer-persona,${(industry || '').toLowerCase()}`,
-          content: `DM research for ${companyName} (${industry || 'unknown'}): ${enrichmentResult.slice(0, 400)}`,
-        });
+        // Save enrichment research to KB — check for duplicates first (re-runs on same lead)
+        const kbSource = `enrichment-${lead.data[0]}`;
+        const alreadyInKb = await sourceExistsInKnowledge(kbSource).catch(() => false);
+        if (!alreadyInKb) {
+          await saveKnowledge({
+            source: kbSource,
+            sourceType: 'sheet',
+            topic: companyName,
+            tags: `enrichment,decision-maker,buyer-persona,${(industry || '').toLowerCase()}`,
+            content: `DM research for ${companyName} (${industry || 'unknown'}): ${enrichmentResult.slice(0, 400)}`,
+          });
+        }
 
         // If readiness 5+, add to outreach queue — but only if not already queued
         if (readiness >= 5) {

@@ -32,9 +32,32 @@ export class LessonsLearnedAgent extends BaseAgent {
 
     // Try to get Trello card data
     let cardData = '';
+    let extractedClient = cardIdOrName;
+    let extractedShow = '';
+    let extractedOutcome = '';
+
     try {
       const card = await getCard(cardIdOrName);
       cardData = `Project: ${card.name}\nDescription: ${card.desc}\nStage: ${card.listName || 'Unknown'}`;
+
+      // Parse card name — agent 01 creates cards as "CompanyName — ShowName"
+      const nameParts = card.name.split(' — ');
+      if (nameParts.length >= 2) {
+        extractedClient = nameParts[0].trim();
+        extractedShow = nameParts.slice(1).join(' — ').trim();
+      } else {
+        extractedClient = card.name;
+      }
+
+      // Derive outcome from Trello pipeline stage
+      const stage = (card.listName || '').toLowerCase();
+      if (stage.includes('06') || stage.includes('won')) {
+        extractedOutcome = 'WON';
+      } else if (stage.includes('07') || stage.includes('lost') || stage.includes('delayed')) {
+        extractedOutcome = 'LOST';
+      } else {
+        extractedOutcome = 'IN_PROGRESS';
+      }
     } catch {
       cardData = `Project reference: ${cardIdOrName}`;
     }
@@ -108,13 +131,13 @@ export class LessonsLearnedAgent extends BaseAgent {
       category: 'Lessons Learned',
     })).catch(() => {});
 
-    // Add summary to sheet
+    // Add summary to sheet — with structured fields so Deal Analyser can correlate
     await appendRow(SHEETS.LESSONS_LEARNED, objectToRow(SHEETS.LESSONS_LEARNED, {
       id: `LL-${Date.now()}`,
       projectName: cardIdOrName,
-      showName: '',
-      client: '',
-      outcome: '',
+      showName: extractedShow,
+      client: extractedClient,
+      outcome: extractedOutcome,
       standSize: '',
       budget: '',
       whatWentWell: 'See doc',

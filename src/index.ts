@@ -168,12 +168,17 @@ async function main() {
       }
 
       const result = await handleApproval(approvalId, isApprove);
-      await bot.sendMessage(msg.chat.id, result || (isApprove ? '✅ Approved.' : '❌ Rejected.'), { parse_mode: 'Markdown' });
+      if (result === null) {
+        // Approval ID not found — expired (24h limit) or the ID was mistyped
+        await bot.sendMessage(msg.chat.id, '⚠️ Approval not found — it may have expired (24h limit) or the ID is incorrect. Check /outreachstatus or re-run the command.', { parse_mode: 'Markdown' });
+      } else {
+        await bot.sendMessage(msg.chat.id, result, { parse_mode: 'Markdown' });
+      }
       await writeSystemLog({
         agent: 'Brain',
         actionType: isApprove ? 'APPROVE' : 'REJECT',
         detail: approvalId,
-        result: 'SUCCESS',
+        result: result === null ? 'NOT_FOUND' : 'SUCCESS',
       });
       return;
     }

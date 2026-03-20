@@ -159,7 +159,9 @@ export class OutreachAgent extends BaseAgent {
             // Update outreach log
             await this.updateLogStatus(logId, 'SENT', wpId?.toString() || '');
             // Mark OUTREACH_QUEUE row as SENT so /outreach won't draft this lead again
-            await updateCell(SHEETS.OUTREACH_QUEUE, sheetRowIndex, 'H', 'SENT').catch(() => {});
+            await updateCell(SHEETS.OUTREACH_QUEUE, sheetRowIndex, 'H', 'SENT').catch((err: any) => {
+              logger.warn(`[Outreach] Failed to mark OUTREACH_QUEUE row ${sheetRowIndex} as SENT: ${err.message}. Lead may be re-drafted on next /outreach run.`);
+            });
             return `✅ Sent to Woodpecker: *${company}* (${dmEmail})\nCampaign: ${campaignId} | Woodpecker ID: ${wpId || 'N/A'}`;
           } catch (err: any) {
             await this.updateLogStatus(logId, 'ERROR', '');

@@ -27,13 +27,17 @@ export async function handleApproval(id: string, approved: boolean): Promise<str
   const pending = pendingApprovals.get(id);
   if (!pending) return null;
 
-  pendingApprovals.delete(id);
-
-  if (approved) {
-    return pending.onApprove();
-  } else {
-    return pending.onReject ? pending.onReject() : `Rejected: ${pending.action}`;
+  // Delete AFTER the callback completes (in finally) so that if the callback
+  // throws (e.g. Woodpecker is down), Mo can retry the same approval ID again.
+  let result: string;
+  try {
+    result = approved
+      ? await pending.onApprove()
+      : await (pending.onReject ? pending.onReject() : Promise.resolve(`Rejected: ${pending.action}`));
+  } finally {
+    pendingApprovals.delete(id);
   }
+  return result!;
 }
 
 export function hasPending(id: string): boolean {
