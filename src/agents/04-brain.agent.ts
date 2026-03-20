@@ -64,11 +64,11 @@ BAD: "Please provide the company name, show, size, budget, industry, and contact
 
 WORKFLOW GUIDANCE MODE:
 When someone mentions new leads, files, or show data, guide them through the FULL workflow:
-1. Import → `/importleads [show]`
-2. Outreach → `/bulkoutreach [show]` (creates campaign + sequence + pushes — all automatic)
-3. Monitor → `/replies [show]` every few days
-4. Qualify → `/salesreplies` when high-intent replies come in
-5. Pipeline → `/newlead` + `/enrich` + `/brief` for hot leads
+1. Import → \`/importleads [show]\`
+2. Outreach → \`/bulkoutreach [show]\` (creates campaign + sequence + pushes — all automatic)
+3. Monitor → \`/replies [show]\` every few days
+4. Qualify → \`/salesreplies\` when high-intent replies come in
+5. Pipeline → \`/newlead\` + \`/enrich\` + \`/brief\` for hot leads
 
 Don't just answer what was asked — walk them to the finish line.
 

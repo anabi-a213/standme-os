@@ -41,12 +41,12 @@ export class OutreachAgent extends BaseAgent {
   }
 
   // ── Scheduled: every Monday 9am — auto-push new leads to all ACTIVE campaigns ──
-  async runScheduled(): Promise<void> {
+  async runScheduled(): Promise<AgentResponse> {
     logger.info('[Outreach] Scheduled auto-push starting...');
 
     if (!isInstantlyConfigured()) {
       logger.warn('[Outreach] Auto-push skipped: INSTANTLY_API_KEY not set');
-      return;
+      return { success: true, message: 'Auto-push skipped: not configured', confidence: 'LOW' as any };
     }
 
     let campaigns: InstantlyCampaign[] = [];
@@ -54,13 +54,13 @@ export class OutreachAgent extends BaseAgent {
       campaigns = await listCampaigns();
     } catch (err: any) {
       logger.warn(`[Outreach] Auto-push: could not fetch campaigns: ${err.message}`);
-      return;
+      return { success: false, message: err.message, confidence: 'LOW' as any };
     }
 
     const activeCampaigns = campaigns.filter(c => c.status === CAMPAIGN_STATUS.ACTIVE);
     if (!activeCampaigns.length) {
       logger.info('[Outreach] Auto-push: no ACTIVE campaigns — nothing to push.');
-      return;
+      return { success: true, message: 'No active campaigns', confidence: 'LOW' as any };
     }
 
     const [masterRows, logRows] = await Promise.all([
@@ -112,7 +112,7 @@ export class OutreachAgent extends BaseAgent {
           await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
             id:          `OL-AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             leadId:      '',
-            companyName: p.company_name,
+            companyName: p.company_name || '',
             emailType:   'AUTO_PUSH',
             sentDate:    logDate,
             status:      'SENT',
@@ -134,6 +134,8 @@ export class OutreachAgent extends BaseAgent {
         results.join('\n') + '\n\nLeads are loaded into Instantly campaigns. Emails send per campaign schedule.'
       ));
     }
+
+    return { success: true, message: results.join('\n') || 'Auto-push complete', confidence: 'HIGH' as any };
   }
 
   // ── Auto-sync LEAD_MASTER → OUTREACH_QUEUE ────────────────────────────────
