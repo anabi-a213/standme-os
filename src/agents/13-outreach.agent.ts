@@ -17,7 +17,7 @@ export class OutreachAgent extends BaseAgent {
     name: 'Automated Outreach Sender',
     id: 'agent-13',
     description: 'Run personalised outreach sequences via Woodpecker',
-    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach', '/importleads'],
+    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach', '/importleads', '/testpush'],
     requiredRole: UserRole.ADMIN,
   };
 
@@ -26,6 +26,7 @@ export class OutreachAgent extends BaseAgent {
     if (ctx.command === '/campaigns') return this.showCampaigns(ctx);
     if (ctx.command === '/bulkoutreach') return this.runBulkOutreach(ctx);
     if (ctx.command === '/importleads') return this.runImportLeads(ctx);
+    if (ctx.command === '/testpush') return this.runTestPush(ctx);
     return this.runOutreach(ctx);
   }
 
@@ -697,6 +698,121 @@ export class OutreachAgent extends BaseAgent {
 
     await this.respond(ctx.chatId, `📊 *Outreach Status*\n\n${sections.join('\n\n')}`);
     return { success: true, message: 'Outreach status shown', confidence: 'HIGH' };
+  }
+
+  // ---- /testpush [campaign_id] — raw diagnostic for Woodpecker add_prospects_campaign ----
+  // Sends ONE test prospect to the given campaign (or first available) and shows
+  // the full raw request + response so we can diagnose E_RECORD_NOT_FOUND.
+
+  private async runTestPush(ctx: AgentContext): Promise<AgentResponse> {
+    await this.respond(ctx.chatId, '🔬 Running Woodpecker diagnostic...');
+
+    // 1. Fetch raw campaign list
+    let rawCampaigns: any[] = [];
+    let campaignListError = '';
+    try {
+      const axios = (await import('axios')).default;
+      const apiKey = process.env.WOODPECKER_API_KEY || '';
+      const auth = Buffer.from(`${apiKey}:`).toString('base64');
+      const resp = await axios.get('https://api.woodpecker.co/rest/v1/campaign_list', {
+        headers: { Authorization: `Basic ${auth}` },
+        timeout: 10000,
+      });
+      rawCampaigns = Array.isArray(resp.data) ? resp.data : Object.values(resp.data);
+    } catch (err: any) {
+      campaignListError = err.message;
+    }
+
+    if (campaignListError) {
+      await this.respond(ctx.chatId, `❌ campaign_list failed: ${campaignListError}`);
+      return { success: false, message: campaignListError, confidence: 'LOW' };
+    }
+
+    // 2. Show first 3 campaigns with their RAW fields (not filtered by our code)
+    const campaignSample = rawCampaigns.slice(0, 3).map(c =>
+      `ID: \`${c.id}\` | name: ${c.name} | status: ${c.status}`
+    ).join('\n');
+
+    // 3. Pick target campaign
+    const targetIdArg = parseInt(ctx.args?.trim() || '0');
+    const target = targetIdArg > 0
+      ? rawCampaigns.find(c => Number(c.id) === targetIdArg) || rawCampaigns[0]
+      : rawCampaigns[0];
+
+    if (!target) {
+      await this.respond(ctx.chatId, `❌ No campaigns returned from Woodpecker.\n\nRaw: ${JSON.stringify(rawCampaigns).substring(0, 300)}`);
+      return { success: false, message: 'No campaigns', confidence: 'LOW' };
+    }
+
+    const campaignIdRaw = target.id;           // original field — could be string or number
+    const campaignIdNum = Number(target.id);   // what our code sends
+
+    // 4. Try the actual prospect add with ONE test record
+    let pushResult = '';
+    let pushError = '';
+    try {
+      const axios = (await import('axios')).default;
+      const apiKey = process.env.WOODPECKER_API_KEY || '';
+      const auth = Buffer.from(`${apiKey}:`).toString('base64');
+
+      // Try both numeric and string ID to see which one Woodpecker accepts
+      const payload = {
+        campaign: { id: campaignIdNum },   // our current approach
+        prospects: [{
+          email: `test-diag-${Date.now()}@standme-test.invalid`,
+          first_name: 'StandMe',
+          last_name: 'Diagnostic',
+          company: 'DiagTest Corp',
+        }],
+      };
+
+      const resp = await axios.post('https://api.woodpecker.co/rest/v1/add_prospects_campaign', payload, {
+        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+        timeout: 10000,
+      });
+      pushResult = JSON.stringify(resp.data).substring(0, 400);
+    } catch (err: any) {
+      const detail = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+      pushError = `HTTP ${err.response?.status ?? '?'}: ${detail}`;
+
+      // If numeric ID failed, immediately retry with string ID to see if that's the issue
+      if (err.response?.status === 400) {
+        try {
+          const axios2 = (await import('axios')).default;
+          const apiKey = process.env.WOODPECKER_API_KEY || '';
+          const auth2 = Buffer.from(`${apiKey}:`).toString('base64');
+          const payloadStr = {
+            campaign: { id: String(campaignIdRaw) },
+            prospects: [{
+              email: `test-diag2-${Date.now()}@standme-test.invalid`,
+              first_name: 'StandMe', last_name: 'Diag2', company: 'DiagTest Corp',
+            }],
+          };
+          const resp2 = await axios2.post('https://api.woodpecker.co/rest/v1/add_prospects_campaign', payloadStr, {
+            headers: { Authorization: `Basic ${auth2}`, 'Content-Type': 'application/json' },
+            timeout: 10000,
+          });
+          pushResult = `[STRING ID worked!] ${JSON.stringify(resp2.data).substring(0, 300)}`;
+          pushError = `Numeric ID failed: ${pushError}`;
+        } catch (err2: any) {
+          const detail2 = err2.response?.data ? JSON.stringify(err2.response.data) : err2.message;
+          pushError += `\nString ID also failed: ${detail2}`;
+        }
+      }
+    }
+
+    const msg =
+      `🔬 *Woodpecker Push Diagnostic*\n\n` +
+      `*Campaigns from /campaign_list (first 3):*\n${campaignSample}\n\n` +
+      `*Test target:* ${target.name}\n` +
+      `  Raw ID field value: \`${campaignIdRaw}\` (type: ${typeof campaignIdRaw})\n` +
+      `  As Number(): \`${campaignIdNum}\`\n\n` +
+      (pushResult
+        ? `✅ *add_prospects_campaign: SUCCESS*\n\`\`\`${pushResult}\`\`\``
+        : `❌ *add_prospects_campaign: FAILED*\n\`${pushError}\``);
+
+    await this.respond(ctx.chatId, msg);
+    return { success: !pushError || !!pushResult, message: pushResult || pushError, confidence: 'HIGH' };
   }
 
   // ---- /campaigns — list all Woodpecker campaigns ----
