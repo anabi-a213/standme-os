@@ -43,3 +43,10 @@ export async function handleApproval(id: string, approved: boolean): Promise<str
 export function hasPending(id: string): boolean {
   return pendingApprovals.has(id);
 }
+
+export function getPendingApprovals(): { id: string; action: string; timestamp: number }[] {
+  const now = Date.now();
+  return [...pendingApprovals.entries()]
+    .filter(([, v]) => now - v.timestamp < 86400000)
+    .map(([id, v]) => ({ id, action: v.action, timestamp: v.timestamp }));
+}

@@ -334,6 +334,33 @@ export class BrainAgent extends BaseAgent {
       return { success: false, message: 'Approval command reached Brain — should have been intercepted earlier', confidence: 'HIGH' };
     }
 
+    // Natural-language approval detection:
+    // If user says "approve", "yes", "go ahead", etc. AND there's exactly one pending approval,
+    // execute it directly — no need to type /approve_xxx manually.
+    const approvalPhrases = /^(approve|approved|yes|yep|go|go ahead|confirm|ok|okay|send it|do it|push it|launch|نعم|اوكيه|موافق|اعتمد|تمام|تمم)/i;
+    if (approvalPhrases.test(message.trim())) {
+      const { getPendingApprovals, handleApproval } = await import('../services/approvals');
+      const pending = getPendingApprovals();
+      if (pending.length === 1) {
+        const p = pending[0];
+        await this.respond(ctx.chatId, `✅ Executing approval: *${p.action}*...`);
+        try {
+          const result = await handleApproval(p.id, true);
+          await this.respond(ctx.chatId, result || '✅ Done.');
+        } catch (err: any) {
+          await this.respond(ctx.chatId, `❌ Approval failed: ${err.message}`);
+        }
+        return { success: true, message: 'Natural-language approval handled', confidence: 'HIGH' };
+      } else if (pending.length > 1) {
+        const list = pending.map((p, i) => `${i + 1}. ${p.action}\n   → \`/approve_${p.id}\``).join('\n\n');
+        await this.respond(ctx.chatId,
+          `There are *${pending.length}* pending approvals — type the exact command for the one you want:\n\n${list}`
+        );
+        return { success: true, message: 'Multiple pending approvals — listed', confidence: 'HIGH' };
+      }
+      // If 0 pending, fall through to normal Brain response
+    }
+
     const lang = await detectLanguage(message);
     const ack = lang === 'ar' ? '...' : lang === 'franco' ? 'ثانية...' : '...';
     await this.respond(ctx.chatId, ack);
