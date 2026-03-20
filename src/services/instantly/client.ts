@@ -16,6 +16,81 @@ import { logger } from '../../utils/logger';
 
 let _client: AxiosInstance | null = null;
 
+// Cached valid timezone for this account — resolved once, reused forever.
+let _validTimezone: string | null = null;
+
+// Probe list: try these in order until Instantly accepts one.
+// Deliberately broad — covers every format Instantly has been seen to accept.
+const TIMEZONE_CANDIDATES = [
+  'UTC',
+  'Etc/UTC',
+  'America/New_York',
+  'America/Chicago',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Pacific/Auckland',
+];
+
+/**
+ * Resolves a timezone string guaranteed to be accepted by Instantly.
+ * Strategy:
+ *   1. Return cached value if already known.
+ *   2. Fetch the first existing campaign and read its timezone.
+ *   3. Probe TIMEZONE_CANDIDATES one-by-one until a test POST accepts one.
+ * Result is cached so this runs at most once per server lifetime.
+ */
+async function resolveValidTimezone(): Promise<string> {
+  if (_validTimezone) return _validTimezone;
+
+  // Strategy 1: steal timezone from an existing campaign (guaranteed valid)
+  try {
+    const resp = await getClient().get('/campaigns', { params: { limit: 1, skip: 0 } });
+    const items: any[] = Array.isArray(resp.data?.items) ? resp.data.items
+      : Array.isArray(resp.data) ? resp.data : [];
+    const tz = items[0]?.campaign_schedule?.schedules?.[0]?.timezone
+      ?? items[0]?.schedules?.[0]?.timezone;
+    if (tz && typeof tz === 'string') {
+      logger.info(`[Instantly] Using timezone from existing campaign: ${tz}`);
+      _validTimezone = tz;
+      return tz;
+    }
+  } catch { /* no campaigns or API error — fall through to probe */ }
+
+  // Strategy 2: probe until Instantly accepts one
+  for (const tz of TIMEZONE_CANDIDATES) {
+    try {
+      // Minimal test campaign — we'll delete it if creation succeeds
+      const testBody = {
+        name: `__tz_probe_${Date.now()}`,
+        campaign_schedule: {
+          schedules: [{
+            name: 'probe',
+            timing: { from: '08:00', to: '18:00' },
+            days: { monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false },
+            timezone: tz,
+          }],
+        },
+      };
+      const r = await getClient().post('/campaigns', testBody);
+      const probeId = String(r.data?.id ?? r.data?.campaign_id ?? '');
+      // Clean up the probe campaign silently
+      if (probeId) getClient().delete(`/campaigns/${probeId}`).catch(() => {});
+      logger.info(`[Instantly] Probed valid timezone: ${tz}`);
+      _validTimezone = tz;
+      return tz;
+    } catch { /* this tz rejected — try next */ }
+  }
+
+  // Should never reach here, but last-resort: return UTC and let Instantly complain
+  logger.warn('[Instantly] Could not resolve valid timezone — falling back to UTC');
+  _validTimezone = 'UTC';
+  return 'UTC';
+}
+
 function getClient(): AxiosInstance {
   if (!_client) {
     const apiKey = process.env.INSTANTLY_API_KEY || '';
@@ -173,34 +248,31 @@ export async function createCampaign(
     timezone?: string;     // default 'Europe/Berlin'
   } = {}
 ): Promise<string> {
+  // Resolve a timezone Instantly will accept before building the request
+  const tz = options.timezone ?? await resolveValidTimezone();
+
   return retry(async () => {
     const sendDays = options.sendDays ?? [1, 2, 3, 4, 5];
 
-    // NOTE: Instantly has a strict undocumented timezone enum.
-    // To avoid validation failures, we omit the timezone field entirely —
-    // Instantly will apply their account default. The error "must be equal to
-    // one of the allowed values" only fires when the field IS present with a
-    // bad value, so omitting it is the permanent fix.
-    const scheduleEntry: Record<string, any> = {
-      name: 'StandMe Default',
-      timing: {
-        from: `${String(options.startHour ?? 8).padStart(2, '0')}:00`,
-        to:   `${String(options.endHour ?? 18).padStart(2, '0')}:00`,
-      },
-      days: {
-        monday:    sendDays.includes(1),
-        tuesday:   sendDays.includes(2),
-        wednesday: sendDays.includes(3),
-        thursday:  sendDays.includes(4),
-        friday:    sendDays.includes(5),
-        saturday:  sendDays.includes(6),
-        sunday:    sendDays.includes(0),
-      },
+    const schedule = {
+      schedules: [{
+        name: 'StandMe Default',
+        timing: {
+          from: `${String(options.startHour ?? 8).padStart(2, '0')}:00`,
+          to:   `${String(options.endHour ?? 18).padStart(2, '0')}:00`,
+        },
+        days: {
+          monday:    sendDays.includes(1),
+          tuesday:   sendDays.includes(2),
+          wednesday: sendDays.includes(3),
+          thursday:  sendDays.includes(4),
+          friday:    sendDays.includes(5),
+          saturday:  sendDays.includes(6),
+          sunday:    sendDays.includes(0),
+        },
+        timezone: tz,
+      }],
     };
-    // Only include timezone if explicitly provided AND we want to override
-    if (options.timezone) scheduleEntry.timezone = options.timezone;
-
-    const schedule = { schedules: [scheduleEntry] };
 
     const sequences = emailSteps.length > 0 ? [{
       steps: emailSteps.map((step, i) => ({
@@ -217,15 +289,13 @@ export async function createCampaign(
     try {
       resp = await getClient().post('/campaigns', body);
     } catch (err: any) {
-      // If timezone is somehow still the issue (caller passed one), strip it and retry
+      // If timezone is still rejected (cached value stale), reset cache and re-throw
+      // so the next attempt re-probes with a fresh value.
       const errMsg = err?.response?.data?.message || '';
       if (typeof errMsg === 'string' && errMsg.includes('timezone')) {
-        delete body.campaign_schedule.schedules[0].timezone;
-        resp = await getClient().post('/campaigns', body)
-          .catch(e2 => { throw apiError(e2, 'createCampaign'); });
-      } else {
-        throw apiError(err, 'createCampaign');
+        _validTimezone = null; // force re-probe next call
       }
+      throw apiError(err, 'createCampaign');
     }
 
     return String(resp.data?.id ?? resp.data?.campaign_id ?? '');
