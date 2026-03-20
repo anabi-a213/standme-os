@@ -7,7 +7,7 @@ import { getBoardCardsWithListNames } from '../services/trello/client';
 import { generateText, generateChat, detectLanguage } from '../services/ai/client';
 import { saveThreadEntry, setActiveFocus } from '../services/thread-context';
 import { formatType3, sendToTeam } from '../services/telegram/bot';
-import { buildKnowledgeContext, getKnowledgeStats } from '../services/knowledge';
+import { buildKnowledgeContext, getKnowledgeStats, saveKnowledge } from '../services/knowledge';
 import { getAgent } from './registry';
 import { logger } from '../utils/logger';
 import { getStaticKnowledge } from '../config/standme-knowledge';
@@ -215,7 +215,71 @@ When a specific entity is mentioned, add at the END of your response (not shown 
 Examples:
 - "let's work on Pharma Corp" → [FOCUS: type=lead name=Pharma Corp]
 - "Arab Health deadlines" → [FOCUS: type=show name=Arab Health]
-- "book Ahmed" → [FOCUS: type=contractor name=Ahmed]`;
+- "book Ahmed" → [FOCUS: type=contractor name=Ahmed]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONVERSATION-TO-ACTION BRIDGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+When the user describes something in natural language that maps to a system action, OFFER TO EXECUTE IT IMMEDIATELY — don't just explain what to do:
+
+- "We got a new inquiry from [company]..." → Fill in what you know and say "I have everything needed — adding them as a lead now." then [ACTION: /newlead Company | Contact | email | Show | size | budget | industry]
+- "They accepted the proposal / we won the deal" → [ACTION: /movecard CompanyName | 06 Won]
+- "They went silent / lost it" → [ACTION: /movecard CompanyName | 07 Lost-Delayed]
+- "Brief them" / "do the brief for them" → [ACTION: /brief CompanyName]
+- "Follow up with them" → Write the exact follow-up message for Mo to copy-paste. Don't say "you should follow up." Write the actual email/message.
+- "What's the status?" → Give a synthesized answer with €values and risk flags, not raw stage counts.
+
+BRIDGE RULE: If you have 80%+ of the data needed to run a command — DO IT. Don't ask for confirmation unless you have less than that.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BUDGET & DEAL INTELLIGENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Track and apply financial intelligence across conversations:
+
+BUDGET SIGNALS:
+- If a budget is mentioned → note if it's realistic for the stand size (18sqm + €15k = red flag: too low)
+- If budget dropped from previous mention → flag: "Last time you mentioned €50k — now €35k. Has something changed?"
+- If no budget given for 36sqm+ → ask once: "What's their budget range? This affects whether we proceed."
+
+PIPELINE VALUE AWARENESS:
+- Qualifying: typically €25-60k leads. Worth pursuing if show >8 weeks away.
+- Proposal Sent: committed budget. Flag if >7 days no response.
+- Negotiation: close to Won. Mo should be personally engaged.
+- Total pipeline = sum estimate. Surface this proactively.
+
+DEAL VELOCITY:
+- <7 days in stage = healthy
+- 8-14 days in stage = needs a nudge
+- 15-21 days in stage = at risk of going cold — flag it
+- >21 days in stage = stalled — escalate to Mo
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FOLLOW-UP TIMING INTELLIGENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+When follow-up is needed, give a SPECIFIC DATE and SPECIFIC MESSAGE — not generic advice:
+
+TIMING RULES:
+- After sending a proposal → follow up day 5-7 ("Just checking you had a chance to review...")
+- After day 14 with no response → urgent follow-up ("We're finalizing our production schedule...")
+- After a meeting/call → follow up within 48 hours ("Great speaking with you — attached the summary...")
+- After a site visit → follow up same day ("Thanks for showing us the space — here's our initial thinking...")
+- Cold lead (>21 days silent) → re-engage with new angle ("Intersolar is 6 weeks away — still looking for a stand partner?")
+
+FORMAT: When suggesting follow-up, write the actual message text for Mo to use — not instructions.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PERSONALIZATION ENGINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use Knowledge Base entries and conversation history to personalize everything:
+
+- If you know their budget → give advice calibrated to that exact budget
+- If you know the DM's name → use it: "Send Hans a direct message, not email — he responds faster"
+- If you know their show history → reference it: "They did 36sqm at MEDICA — pitch 40sqm for Arab Health"
+- If you know a preference → apply it: "They prefer modular designs — lead with that"
+- If a competitor was mentioned → flag it: "FairMax is likely pitching this too — differentiate on [reason]"
+- If you see a pattern across multiple leads → surface it: "3 of your Gulfood leads are food-tech — same buyer persona, similar pitch"
+
+MEMORY RULE: You remember everything said in this session AND everything saved to the Knowledge Base from past sessions. Use both.`;
 }
 
 
@@ -352,6 +416,9 @@ export class BrainAgent extends BaseAgent {
 
       await this.respond(ctx.chatId, response);
 
+      // Non-blocking: learn from this interaction and save business insights to KB
+      this.detectAndSaveInsights(ctx.userId, message, response).catch(() => { /* silent */ });
+
       // Report any data source issues to Mo as a separate diagnostic message
       const allIssues: string[] = [...dataIssues];
       if (dataTimedOut) allIssues.push('Live data timed out (>8s) — Trello/Sheets may be slow');
@@ -432,6 +499,8 @@ export class BrainAgent extends BaseAgent {
         const byStage = new Map<string, number>();
         const now = new Date();
         const overdue: string[] = [];
+        const stalledDeals: string[] = [];   // Proposal/Negotiation > 21 days inactive
+        const coldQualifying: string[] = []; // Qualifying > 14 days inactive
 
         for (const card of cards) {
           const stage = card.listName || 'Unknown';
@@ -439,15 +508,28 @@ export class BrainAgent extends BaseAgent {
           if (card.due && new Date(card.due) < now) {
             overdue.push(`${card.name} (${stage})`);
           }
+
+          // Velocity tracking via dateLastActivity
+          const lastActivity = (card as any).dateLastActivity
+            ? new Date((card as any).dateLastActivity)
+            : null;
+          if (lastActivity) {
+            const daysInactive = (now.getTime() - lastActivity.getTime()) / 86400000;
+            if (daysInactive > 21 && (stage.toLowerCase().includes('proposal') || stage.toLowerCase().includes('negotiation'))) {
+              stalledDeals.push(`${card.name} (${Math.round(daysInactive)}d stalled)`);
+            } else if (daysInactive > 14 && stage.toLowerCase().includes('qualifying')) {
+              coldQualifying.push(`${card.name} (${Math.round(daysInactive)}d)`);
+            }
+          }
         }
 
         lines.push(`SALES PIPELINE (${cards.length} cards):`);
         for (const [stage, count] of byStage) {
           lines.push(`  ${stage}: ${count}`);
         }
-        if (overdue.length > 0) {
-          lines.push(`  OVERDUE: ${overdue.join(', ')}`);
-        }
+        if (overdue.length > 0) lines.push(`  OVERDUE: ${overdue.join(', ')}`);
+        if (stalledDeals.length > 0) lines.push(`  ⚠️ STALLED (>21d): ${stalledDeals.join(', ')}`);
+        if (coldQualifying.length > 0) lines.push(`  🥶 COLD QUALIFYING (>14d): ${coldQualifying.join(', ')}`);
       }
     } catch (err: any) {
       issues.push(`Trello: ${err.message}`);
@@ -654,9 +736,47 @@ export class BrainAgent extends BaseAgent {
         }
       } catch { /* non-fatal */ }
 
+      // Contractor availability: flag recently booked contractors (potential overlap risk)
+      try {
+        const contractors = await readSheet(SHEETS.CONTRACTOR_DB);
+        const now = new Date();
+        const recentlyBooked = contractors.slice(1).filter(r => {
+          const lastBooked = r[8]; // col I = lastBooked
+          if (!lastBooked) return false;
+          const daysSince = (now.getTime() - new Date(lastBooked).getTime()) / 86400000;
+          return daysSince >= 0 && daysSince <= 60; // booked within last 60 days
+        });
+        if (recentlyBooked.length >= 3) {
+          sections.push({
+            label: '⚠️ CONTRACTOR CAPACITY NOTE',
+            content: `  ${recentlyBooked.length} contractors booked in the last 60 days.\n` +
+              recentlyBooked.slice(0, 5).map(r => `  • ${r[1] || '?'} (${r[3] || 'unknown specialty'}) — last booked: ${r[8]}`).join('\n') +
+              '\n  Check availability before committing to new project timelines.',
+          });
+        }
+      } catch { /* non-fatal — CONTRACTOR_DB sheet may not be set up */ }
+
     } catch (err: any) {
       sections.push({ label: 'ERROR', content: `  ${err.message}` });
     }
+
+    // AI-synthesized deal coaching — runs after all data is collected
+    try {
+      if (sections.length > 0) {
+        const pipelineSnapshot = sections.map(s => `${s.label}:\n${s.content}`).join('\n\n');
+        const coaching = await generateText(
+          `You are Mo's deal coach for StandMe (exhibition stand design & build company, MENA + Europe).\n` +
+          `Based on this morning pipeline snapshot, give 2-3 SPECIFIC and ACTIONABLE recommendations for today.\n` +
+          `Be direct, specific — name actual companies/deals where possible, no generic advice.\n` +
+          `Format as bullet points. Max 120 words.\n\n${pipelineSnapshot}`,
+          undefined,
+          200
+        );
+        if (coaching && coaching.trim()) {
+          sections.push({ label: '🎯 DEAL COACHING', content: coaching.trim() });
+        }
+      }
+    } catch { /* non-fatal */ }
 
     const briefing = formatType3('☀️ MORNING BRIEFING', sections);
     const recipients = [process.env.MO_TELEGRAM_ID || '', process.env.HADEER_TELEGRAM_ID || ''].filter(Boolean);
@@ -731,6 +851,50 @@ export class BrainAgent extends BaseAgent {
     const msg = `Knowledge base seeded.\nAdded: *${added}* new entries\nSkipped: ${skipped} (already existed)\n\nAll agents now have deep StandMe + exhibition industry context.`;
     await this.respond(ctx.chatId, msg);
     return { success: true, message: `Seeded ${added} KB entries`, confidence: 'HIGH' };
+  }
+
+  private async detectAndSaveInsights(userId: string, userMessage: string, brainResponse: string): Promise<void> {
+    try {
+      const extraction = await generateText(
+        `You are an information extractor for a CRM system. Read this conversation and extract concrete business facts worth saving to long-term memory.
+
+USER SAID: "${userMessage.slice(0, 600)}"
+BRAIN RESPONDED: "${brainResponse.slice(0, 600)}"
+
+Extract ONLY facts that are NEW and concrete:
+- A specific budget (e.g. "budget is €40k")
+- A DM name or title (e.g. "contact is Hans Müller, Marketing Director")
+- A stated preference (e.g. "they prefer modular designs")
+- A competitor mentioned (e.g. "FairMax is pitching them too")
+- A deal decision (e.g. "won", "lost", "going ahead")
+- A confirmed show + size (e.g. "36sqm at Hannover Messe 2026")
+
+If nothing concrete or new: reply NONE
+If facts found, reply in this EXACT format (one per line):
+INSIGHT: [company or person] | [type: budget|dm|preference|competitor|decision|show] | [the fact in one sentence]`,
+        undefined,
+        200
+      );
+
+      if (!extraction || extraction.trim() === 'NONE' || !extraction.includes('INSIGHT:')) return;
+
+      const lines = extraction.split('\n').filter(l => l.trimStart().startsWith('INSIGHT:'));
+      for (const line of lines) {
+        const parts = line.replace(/^.*?INSIGHT:\s*/, '').split('|');
+        if (parts.length < 3) continue;
+        const [entity, factType, fact] = parts.map(p => p.trim());
+        if (!entity || !factType || !fact || fact.length < 5) continue;
+
+        await saveKnowledge({
+          source: `brain-insight-${userId}-${entity.toLowerCase().replace(/\s+/g, '-')}-${factType}-${Date.now()}`,
+          topic: `${entity} — ${factType}`,
+          content: fact,
+          sourceType: 'insight',
+          tags: [factType, entity.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30)],
+        });
+        logger.info(`[Brain] Saved insight: ${entity} | ${factType} | ${fact.slice(0, 60)}`);
+      }
+    } catch { /* non-fatal — never interrupt the main flow */ }
   }
 
   private getHistory(userId: string): { role: 'user' | 'assistant'; content: string }[] {
