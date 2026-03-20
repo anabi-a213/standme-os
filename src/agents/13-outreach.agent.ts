@@ -231,10 +231,21 @@ export class OutreachAgent extends BaseAgent {
           `  Interested: ${stats.interested} | Not Interested: ${stats.not_interested}`
         );
       } catch (err: any) {
-        sections.push(`*Woodpecker:* Could not fetch — ${err.message}`);
+        sections.push(`*Woodpecker:* Could not fetch stats — ${err.message}`);
       }
     } else {
-      sections.push(`*Woodpecker:* No campaign ID set. Add WOODPECKER\\_CAMPAIGN\\_ID to Railway env.`);
+      // No campaign auto-resolved — try to list what's available so Mo can pick one
+      try {
+        const campaigns = await listCampaigns();
+        if (campaigns.length === 0) {
+          sections.push(`*Woodpecker:* No campaigns found. Create a campaign in Woodpecker first, then run /outreach.`);
+        } else {
+          const list = campaigns.map(c => `  • *${c.name}* [${c.status}] → \`/outreach ${c.id}\``).join('\n');
+          sections.push(`*Woodpecker:* No active campaign selected. Available campaigns:\n\n${list}\n\nRun \`/outreach [ID]\` to use one, or set WOODPECKER\\_CAMPAIGN\\_ID in Railway to auto-select.`);
+        }
+      } catch (err: any) {
+        sections.push(`*Woodpecker:* Could not connect — ${err.message}\n\nCheck that WOODPECKER\\_API\\_KEY is set in Railway env.`);
+      }
     }
 
     await this.respond(ctx.chatId, `📊 *Outreach Status*\n\n${sections.join('\n\n')}`);
