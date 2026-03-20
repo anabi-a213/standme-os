@@ -801,7 +801,26 @@ export async function reconstructBulkApproval(approvalId: string): Promise<strin
     try { params = JSON.parse(entries[0].content); } catch { return null; }
     if (!params?.campaignId || !params?.showFilter) return null;
 
-    const { showFilter, campaignId, campaignName } = params;
+    let { showFilter, campaignId, campaignName } = params;
+
+    // 1b. Re-verify campaign ID against live Woodpecker campaigns.
+    // The saved ID can become stale if the campaign was renamed/deleted.
+    // Re-fetch and find best match by show name — same logic as runBulkOutreach.
+    try {
+      const liveCampaigns = await listCampaigns();
+      const showLowerCheck = showFilter.toLowerCase();
+      const matched = liveCampaigns.filter(c => c.name.toLowerCase().includes(showLowerCheck));
+      if (matched.length > 0) {
+        // Prefer an exact ID match first, then RUNNING, then DRAFT, then first
+        const exact   = matched.find(c => c.id === campaignId);
+        const running = matched.find(c => c.status.toUpperCase() === 'RUNNING');
+        const draft   = matched.find(c => c.status.toUpperCase() === 'DRAFT');
+        const chosen  = exact || running || draft || matched[0];
+        campaignId   = chosen.id;
+        campaignName = chosen.name;
+      }
+      // If no match found, keep the saved campaignId — Woodpecker will return a clear error
+    } catch { /* non-fatal — proceed with saved campaignId */ }
 
     // 2. Re-read LEAD_MASTER and rebuild prospects (no AI hooks — simpler reconstruction)
     const master = await readSheet(SHEETS.LEAD_MASTER);
