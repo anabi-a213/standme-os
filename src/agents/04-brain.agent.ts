@@ -128,7 +128,8 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /deadlines — upcoming show organiser deadlines
 - /reminders — client follow-up reminders
 - /techdeadlines — technical deadline tracker
-- /outreach — run outreach for qualified leads already in the OUTREACH_QUEUE (scored 6+)
+- /outreach — run outreach for qualified leads already in the OUTREACH_QUEUE (scored 6+), max 5 per run with individual Mo approval
+- /bulkoutreach [show name] — bulk push ALL leads for a show from Lead Master directly to the matching Woodpecker campaign in one batch. One approval covers every lead. Use this for large imports (100+ leads). Example: /bulkoutreach intersolar
 - /outreachstatus — outreach campaign stats
 - /discover [show name] — scan exhibitor files from Drive, find contacts, build Woodpecker campaign (use this when Mo says "launch campaign using files", "discover leads for X", "run campaign from the list/xlsx")
 - /newcampaign [show name] — generate personalised emails for existing pipeline leads and launch Woodpecker campaign
@@ -326,7 +327,7 @@ export class BrainAgent extends BaseAgent {
         '/newcampaign',
         '/discover',
         '/outreach',
-        '/bulkoutreach',
+        '/bulkoutreach', // heavy bulk operation — must only run on explicit user command
       ]);
 
       if (actionMatch) {

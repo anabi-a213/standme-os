@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
-import { addProspectToCampaign, getCampaignStats, listCampaigns, WoodpeckerProspect } from '../services/woodpecker/client';
+import { addProspectToCampaign, addProspectsToCampaign, getCampaignStats, listCampaigns, WoodpeckerProspect } from '../services/woodpecker/client';
 import { generateOutreachEmail, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
@@ -15,13 +15,14 @@ export class OutreachAgent extends BaseAgent {
     name: 'Automated Outreach Sender',
     id: 'agent-13',
     description: 'Run personalised outreach sequences via Woodpecker',
-    commands: ['/outreach', '/outreachstatus', '/campaigns'],
+    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach'],
     requiredRole: UserRole.ADMIN,
   };
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
     if (ctx.command === '/outreachstatus') return this.showStatus(ctx);
     if (ctx.command === '/campaigns') return this.showCampaigns(ctx);
+    if (ctx.command === '/bulkoutreach') return this.runBulkOutreach(ctx);
     return this.runOutreach(ctx);
   }
 
@@ -252,6 +253,221 @@ export class OutreachAgent extends BaseAgent {
     }
     await this.respond(ctx.chatId, msg);
     return { success: true, message: `${drafted} outreach emails drafted`, confidence: 'HIGH' };
+  }
+
+  // ---- /bulkoutreach [show name] — bulk push all LEAD_MASTER leads for a show ----
+  // Reads LEAD_MASTER, filters by show name, resolves the Woodpecker campaign by name,
+  // sends Mo ONE approval for all leads, then bulk-pushes them all at once.
+  // Uses dmEmail (col V) with contactEmail (col E) as fallback so imported leads work too.
+
+  private async runBulkOutreach(ctx: AgentContext): Promise<AgentResponse> {
+    const rawArgs = (ctx.args || '').trim();
+
+    // Optional trailing campaign ID: /bulkoutreach intersolar 2429293
+    const parts = rawArgs.split(/\s+/);
+    const lastPart = parts[parts.length - 1];
+    const trailingId = /^\d+$/.test(lastPart) ? parseInt(lastPart) : 0;
+    const showFilter = (trailingId > 0 ? parts.slice(0, -1).join(' ') : rawArgs).toLowerCase().trim();
+
+    if (!showFilter) {
+      await this.respond(ctx.chatId,
+        'Usage: `/bulkoutreach [show name]`\nExample: `/bulkoutreach intersolar`\n\n' +
+        'Reads all leads for that show from Lead Master and pushes them to the matching Woodpecker campaign in one batch.'
+      );
+      return { success: false, message: 'No show name', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `🔍 Scanning Lead Master for *${showFilter}* leads...`);
+
+    // 1. Read LEAD_MASTER
+    const masterRows = await readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]);
+
+    // Filter by show name — use BOTH dmEmail (V=21) and contactEmail (E=4) as email source
+    const leads = masterRows.slice(1).filter(r => {
+      const show  = (r[6] || '').toLowerCase(); // G = showName
+      const email = r[21] || r[4];              // V = dmEmail, E = contactEmail (fallback)
+      return show.includes(showFilter) && !!email;
+    });
+
+    if (leads.length === 0) {
+      // Diagnose: are there leads for this show but without emails?
+      const showOnly = masterRows.slice(1).filter(r => (r[6] || '').toLowerCase().includes(showFilter));
+      if (showOnly.length > 0) {
+        await this.respond(ctx.chatId,
+          `⚠️ Found *${showOnly.length}* ${showFilter} leads in Lead Master but none have email addresses.\n\n` +
+          `Check columns E (contactEmail) and V (dmEmail) in the Leads sheet — at least one must be filled.`
+        );
+      } else {
+        await this.respond(ctx.chatId,
+          `No leads found for "*${showFilter}*" in Lead Master.\n\n` +
+          `Tip: The show name must match what's in column G of the Leads sheet (partial match, case-insensitive).`
+        );
+      }
+      return { success: false, message: 'No leads found', confidence: 'HIGH' };
+    }
+
+    // 2. Resolve Woodpecker campaign
+    let campaigns: { id: number; name: string; status: string }[] = [];
+    try {
+      campaigns = await listCampaigns();
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `⚠️ Could not connect to Woodpecker: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    let campaignId: number;
+    let campaignName: string;
+    let campaignStatus: string;
+
+    if (trailingId > 0) {
+      // Explicit campaign ID provided
+      const found = campaigns.find(c => c.id === trailingId);
+      campaignId   = trailingId;
+      campaignName = found?.name || `Campaign ${trailingId}`;
+      campaignStatus = found?.status || 'UNKNOWN';
+    } else {
+      const matched = campaigns.filter(c => c.name.toLowerCase().includes(showFilter));
+      if (matched.length === 0) {
+        const all = campaigns.slice(0, 12).map(c => `  • *${c.name}* [${c.status}] — \`/bulkoutreach ${showFilter} ${c.id}\``).join('\n');
+        await this.respond(ctx.chatId,
+          `No Woodpecker campaign found matching "*${showFilter}*".\n\nAvailable campaigns:\n${all}\n\n` +
+          `Run \`/bulkoutreach ${showFilter} [ID]\` to use a specific campaign.`
+        );
+        return { success: false, message: 'No campaign matched', confidence: 'HIGH' };
+      }
+      // Pick best: prefer RUNNING, then DRAFT, then first
+      const chosen = matched.find(c => c.status.toUpperCase() === 'RUNNING')
+                  || matched.find(c => c.status.toUpperCase() === 'DRAFT')
+                  || matched[0];
+      campaignId     = chosen.id;
+      campaignName   = chosen.name;
+      campaignStatus = chosen.status;
+
+      if (matched.length > 1) {
+        const others = matched.filter(c => c.id !== campaignId)
+          .map(c => `  • *${c.name}* [${c.status}] → \`/bulkoutreach ${showFilter} ${c.id}\``).join('\n');
+        await this.respond(ctx.chatId,
+          `Using campaign: *${campaignName}* [${campaignStatus}]\nOther matches (use campaign ID to pick):\n${others}`
+        );
+      }
+    }
+
+    // 3. Pre-generate industry hooks (one AI call per unique industry, cached)
+    const uniqueIndustries = [...new Set(leads.map(r => (r[10] || '').trim()).filter(Boolean))];
+    await this.respond(ctx.chatId,
+      `📋 Found *${leads.length}* ${showFilter} leads with emails.\n` +
+      `Generating email hooks for ${uniqueIndustries.length} unique industries...`
+    );
+
+    const industryHooks = new Map<string, string>();
+    await Promise.all(uniqueIndustries.map(async industry => {
+      const key = industry.toLowerCase();
+      const hook = await generateText(
+        `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at a major trade show. ` +
+        `Be specific to what this industry values on the show floor. No em dashes. No filler.`,
+        'Return only the sentence, nothing else.', 60,
+      ).catch(() => '');
+      industryHooks.set(key, hook.trim());
+    }));
+
+    // 4. Build Woodpecker prospects array
+    const prospects: WoodpeckerProspect[] = [];
+    for (const r of leads) {
+      const email      = r[21] || r[4]; // dmEmail (V) → contactEmail (E)
+      if (!email) continue;
+
+      const companyName = r[2]  || '';  // C = companyName
+      const dmName      = r[18] || r[3] || ''; // S = dmName → D = contactName
+      const dmTitle     = r[19] || r[5] || ''; // T = dmTitle → F = contactTitle
+      const industry    = r[10] || '';  // K = industry
+      const showName    = r[6]  || '';  // G = showName
+      const notes       = r[24] || '';  // Y = notes
+      const websiteM    = notes.match(/Website:\s*([^|]+)/i);
+      const website     = websiteM ? websiteM[1].trim() : '';
+
+      const nameParts = (dmName).trim().split(' ').filter(Boolean);
+      const hook = industryHooks.get(industry.toLowerCase()) || '';
+
+      prospects.push({
+        email,
+        first_name: nameParts[0] || 'Team',
+        last_name:  nameParts.slice(1).join(' ') || '',
+        company:    companyName,
+        industry,
+        snippet1:   hook || industry || 'your upcoming trade show stand',
+        snippet2:   dmTitle,
+        snippet3:   website,
+        tags: `standme-outreach,${showName.toLowerCase().replace(/\s+/g, '-')},bulk`,
+      });
+    }
+
+    // 5. Build approval message and register single bulk approval
+    const approvalId = `bulkoutreach_${showFilter.replace(/\s+/g, '_')}_${Date.now()}`;
+    const draftWarning = campaignStatus.toUpperCase() === 'DRAFT'
+      ? '\n\n⚠️ *Campaign is DRAFT* — go to Woodpecker UI and set it to RUNNING so emails actually send.'
+      : '';
+
+    registerApproval(approvalId, {
+      action: `Bulk push ${prospects.length} ${showFilter} leads to "${campaignName}"`,
+      data: { prospects, campaignId, campaignName, showFilter },
+      timestamp: Date.now(),
+      onApprove: async () => {
+        try {
+          const ids   = await addProspectsToCampaign(campaignId, prospects);
+          const sent  = ids.filter(id => id !== null).length;
+          const failed = ids.length - sent;
+
+          // Log batch to OUTREACH_LOG (one row per lead)
+          const logDate = new Date().toISOString();
+          for (const p of prospects) {
+            await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
+              id:                 `OL-BULK-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              leadId:             '',
+              companyName:        p.company,
+              emailType:          'BULK_EMAIL_1',
+              sentDate:           logDate,
+              status:             'SENT',
+              replyClassification: '',
+              woodpeckerId:       '',
+              notes:              `Bulk → campaign ${campaignId} (${campaignName}) | ${showFilter}`,
+            })).catch(() => {});
+          }
+
+          return (
+            `✅ *Bulk push complete!*\n\n` +
+            `Campaign: *${campaignName}* (ID: ${campaignId})\n` +
+            `Pushed: *${sent}* leads\n` +
+            (failed > 0 ? `Skipped: ${failed} (already in campaign or invalid email)\n` : '') +
+            (campaignStatus.toUpperCase() === 'DRAFT'
+              ? '\n⚠️ Campaign is DRAFT — set to RUNNING in Woodpecker for emails to go out.'
+              : '\n📧 Emails will send per campaign schedule.')
+          );
+        } catch (err: any) {
+          return `❌ Bulk push failed: ${err.message}`;
+        }
+      },
+      onReject: async () => `Bulk outreach to *${campaignName}* cancelled.`,
+    });
+
+    await sendToMo(formatType1(
+      `Bulk Outreach: ${leads.length} ${showFilter} leads`,
+      `→ ${campaignName}`,
+      `*${prospects.length}* leads ready to push.\n\n` +
+      `Campaign: *${campaignName}* [${campaignStatus}]\n` +
+      `Industries: ${uniqueIndustries.slice(0, 5).join(', ')}${uniqueIndustries.length > 5 ? ` +${uniqueIndustries.length - 5} more` : ''}` +
+      draftWarning +
+      `\n\nApprove to push all *${prospects.length}* leads at once.`,
+      approvalId
+    ));
+
+    await this.respond(ctx.chatId,
+      `📤 *Approval sent to Mo.*\n\n` +
+      `*${prospects.length}* ${showFilter} leads ready for *${campaignName}*.\n` +
+      `Mo approves with \`/approve\\_${approvalId}\` to push all at once.` +
+      draftWarning
+    );
+
+    return { success: true, message: `Bulk outreach: ${prospects.length} leads pending approval`, confidence: 'HIGH' };
   }
 
   // ---- /outreachstatus — live Woodpecker stats + local log ----
