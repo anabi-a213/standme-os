@@ -178,7 +178,7 @@ async function main() {
         agent: 'Brain',
         actionType: isApprove ? 'APPROVE' : 'REJECT',
         detail: approvalId,
-        result: result === null ? 'NOT_FOUND' : 'SUCCESS',
+        result: result === null ? 'FAIL' : 'SUCCESS',
       });
       return;
     }
