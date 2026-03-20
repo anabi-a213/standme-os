@@ -513,9 +513,9 @@ export const PRE_THINKING = `
 PROACTIVE INTELLIGENCE — what to notice and say before being asked:
 
 WHEN reviewing leads:
-→ If a lead score is 7+ and no brief has been generated → suggest /brief
+→ If a lead score is 6+ and no brief has been generated → suggest /brief
 → If show is <90 days away and lead is still in "Qualifying" → flag urgency to Mo
-→ If a lead has no DM info and readiness <7 → suggest /enrich before outreach
+→ If a lead has no DM info and readiness <6 → suggest /enrich before outreach
 
 WHEN reviewing pipeline:
 → If a card has been in the same stage for 14+ days → flag as stuck, suggest action
@@ -592,7 +592,7 @@ Biggest budget surprises: AV additions, rigging, freight/customs, last-minute de
 What clients remember: No surprises, one point of contact, stand looked like the render, build was on time
 
 === PRE-THINKING TRIGGERS ===
-Lead score 7+ with no brief → suggest /brief
+Lead score 6+ with no brief → suggest /brief
 Show <90 days + lead in Qualifying → flag urgency
 Card stuck in same stage 14+ days → flag + suggest action
 Organiser portal deadline <2 weeks → remind + check

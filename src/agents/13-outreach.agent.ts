@@ -47,8 +47,8 @@ export class OutreachAgent extends BaseAgent {
         const enrichStatus = r[17];  // R = enrichmentStatus
         const score        = parseInt(r[12] || '0'); // M = score
 
-        // Only pull enriched leads with an email address, score 7+, not already queued
-        if (!leadId || !email || enrichStatus !== 'ENRICHED' || score < 7) continue;
+        // Only pull enriched leads with an email address, score 6+, not already queued
+        if (!leadId || !email || enrichStatus !== 'ENRICHED' || score < 6) continue;
         if (queuedLeadIds.has(leadId)) continue;
 
         await appendRow(SHEETS.OUTREACH_QUEUE, objectToRow(SHEETS.OUTREACH_QUEUE, {
@@ -58,7 +58,7 @@ export class OutreachAgent extends BaseAgent {
           dmName:         r[18] || '',  // S = dmName
           dmEmail:        email,
           showName:       r[6]  || '',  // G = showName
-          readinessScore: r[22] || '7', // W = outreachReadiness
+          readinessScore: r[22] || '6', // W = outreachReadiness
           sequenceStatus: 'READY',
           addedDate: new Date().toISOString(),
           lastAction: '',
@@ -86,10 +86,10 @@ export class OutreachAgent extends BaseAgent {
     // Preserve sheet row indices (1-based, +2 = skip header row) so we can mark as SENT after push
     const ready = queue.slice(1)
       .map((r, i) => ({ row: r, sheetRowIndex: i + 2 }))
-      .filter(({ row: r }) => r[7] === 'READY' && parseInt(r[6] || '0') >= 7);
+      .filter(({ row: r }) => r[7] === 'READY' && parseInt(r[6] || '0') >= 6);
 
     if (ready.length === 0) {
-      await this.respond(ctx.chatId, 'No leads ready for outreach (score 7+ and status READY).');
+      await this.respond(ctx.chatId, 'No leads ready for outreach (score 6+ and status READY).');
       return { success: true, message: 'No leads ready', confidence: 'HIGH' };
     }
 
