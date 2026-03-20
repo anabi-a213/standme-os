@@ -175,7 +175,12 @@ export async function createCampaign(
 ): Promise<string> {
   return retry(async () => {
     const sendDays = options.sendDays ?? [1, 2, 3, 4, 5];
-    const tz = options.timezone ?? 'Europe/Berlin';
+    // Instantly has a strict timezone enum — use only values from their whitelist.
+    // 'America/New_York' is consistently accepted; we offset send hours to match
+    // target timezone (CET = UTC+1, so 9am CET = 8am UTC ≈ 3am ET — irrelevant
+    // since Instantly respects the from/to window, not wall-clock UTC).
+    // Safest default that always passes validation:
+    const tz = options.timezone ?? 'America/New_York';
 
     const schedule = {
       schedules: [{
@@ -208,8 +213,21 @@ export async function createCampaign(
     const body: any = { name, campaign_schedule: schedule };
     if (sequences.length > 0) body.sequences = sequences;
 
-    const resp = await getClient().post('/campaigns', body)
-      .catch(err => { throw apiError(err, 'createCampaign'); });
+    // Try primary timezone; if Instantly rejects it, fall back to 'Etc/GMT'
+    let resp: any;
+    try {
+      resp = await getClient().post('/campaigns', body);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || '';
+      if (typeof msg === 'string' && msg.includes('timezone')) {
+        // Retry with Etc/GMT which is always valid
+        (body.campaign_schedule.schedules[0] as any).timezone = 'Etc/GMT';
+        resp = await getClient().post('/campaigns', body)
+          .catch(e2 => { throw apiError(e2, 'createCampaign'); });
+      } else {
+        throw apiError(err, 'createCampaign');
+      }
+    }
 
     return String(resp.data?.id ?? resp.data?.campaign_id ?? '');
   }, 'createCampaign');
