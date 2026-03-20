@@ -35,15 +35,14 @@ export class LeadIntakeAgent extends BaseAgent {
       return { success: false, message: 'Missing company name', confidence: 'LOW' };
     }
 
-    // Duplicate check — stop and notify Mo rather than creating a corrupt duplicate entry
-    const existing = await this.checkDuplicate(companyName, contactEmail, showName);
-    if (existing) {
+    // Duplicate check — NON-BLOCKING: notify Mo but always create the lead
+    // A false-positive match must never block the flow — Mo reviews and merges manually if needed
+    const existingDup = await this.checkDuplicate(companyName, contactEmail, showName);
+    if (existingDup) {
       await sendToMo(formatType2(
-        'Duplicate Lead Detected',
-        `${companyName} may already exist in the system.\nExisting: ${existing}\nNew data: ${args}\n\nMerging recommended.`
+        'Potential Duplicate Lead',
+        `*${companyName}* may already exist (matched: ${existingDup}).\nNew lead created anyway — review and merge in Lead Master if needed.\nNew data: ${args}`
       ));
-      await this.respond(ctx.chatId, `⚠️ Duplicate detected: *${companyName}* already exists as ${existing}. Notified Mo to review and merge. No new entry created.`);
-      return { success: false, message: 'Duplicate lead — not logged', confidence: 'HIGH' };
     }
 
     // Validate show
@@ -95,7 +94,7 @@ export class LeadIntakeAgent extends BaseAgent {
       dmEmail: '',
       outreachReadiness: '',
       language,
-      notes: '',
+      notes: existingDup ? `POTENTIAL_DUPLICATE: may match ${existingDup}` : '',
     };
 
     // Write to Lead Master Sheet
@@ -158,7 +157,8 @@ export class LeadIntakeAgent extends BaseAgent {
     }
 
     const leadSheetLink = sheetUrl(SHEETS.LEAD_MASTER);
-    await this.respond(ctx.chatId, `✅ Lead captured: ${companyName} — ${scoreResult.status} (${scoreResult.total}/10)${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
+    const dupNote = existingDup ? `\n⚠️ Possible duplicate flagged — Mo notified to review.` : '';
+    await this.respond(ctx.chatId, `✅ Lead captured: ${companyName} — ${scoreResult.status} (${scoreResult.total}/10)${dupNote}${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
 
     return {
       success: true,

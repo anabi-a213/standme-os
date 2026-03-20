@@ -25,9 +25,63 @@ export class OutreachAgent extends BaseAgent {
     return this.runOutreach(ctx);
   }
 
+  // ---- Auto-sync LEAD_MASTER → OUTREACH_QUEUE ----
+  // Finds enriched leads with a known DM email that are not yet in the queue
+  // and adds them automatically. Runs at the start of every /outreach call.
+
+  private async syncLeadMasterToQueue(): Promise<number> {
+    let added = 0;
+    try {
+      const [masterRows, queueRows] = await Promise.all([
+        readSheet(SHEETS.LEAD_MASTER),
+        readSheet(SHEETS.OUTREACH_QUEUE),
+      ]);
+
+      // Build set of leadIds already in queue (any status) to avoid duplicates
+      const queuedLeadIds = new Set(queueRows.slice(1).map(r => r[1]).filter(Boolean));
+
+      for (let i = 1; i < masterRows.length; i++) {
+        const r = masterRows[i];
+        const leadId       = r[0];   // A = id
+        const email        = r[21];  // V = dmEmail
+        const enrichStatus = r[17];  // R = enrichmentStatus
+        const score        = parseInt(r[12] || '0'); // M = score
+
+        // Only pull enriched leads with an email address, score 7+, not already queued
+        if (!leadId || !email || enrichStatus !== 'ENRICHED' || score < 7) continue;
+        if (queuedLeadIds.has(leadId)) continue;
+
+        await appendRow(SHEETS.OUTREACH_QUEUE, objectToRow(SHEETS.OUTREACH_QUEUE, {
+          id:             `OQ-${Date.now()}-${i}`,
+          leadId,
+          companyName:    r[2]  || '',  // C = companyName
+          dmName:         r[18] || '',  // S = dmName
+          dmEmail:        email,
+          showName:       r[6]  || '',  // G = showName
+          readinessScore: r[22] || '7', // W = outreachReadiness
+          sequenceStatus: 'READY',
+          addedDate: new Date().toISOString(),
+          lastAction: '',
+        }));
+
+        queuedLeadIds.add(leadId);
+        added++;
+      }
+    } catch (err: any) {
+      logger.warn(`[Outreach] syncLeadMasterToQueue failed: ${err.message}`);
+    }
+    return added;
+  }
+
   // ---- /outreach — draft + send to Mo for approval, then push to Woodpecker ----
 
   private async runOutreach(ctx: AgentContext): Promise<AgentResponse> {
+    // Auto-source enriched leads with emails from LEAD_MASTER into the queue
+    const synced = await this.syncLeadMasterToQueue();
+    if (synced > 0) {
+      await this.respond(ctx.chatId, `📥 Auto-queued *${synced}* enriched lead(s) from Lead Master.`);
+    }
+
     const queue = await readSheet(SHEETS.OUTREACH_QUEUE);
     // Preserve sheet row indices (1-based, +2 = skip header row) so we can mark as SENT after push
     const ready = queue.slice(1)
@@ -66,6 +120,7 @@ export class OutreachAgent extends BaseAgent {
     };
 
     let drafted = 0;
+    let skippedNoEmail = 0;
 
     for (const { row: lead, sheetRowIndex } of ready.slice(0, 5)) {
       const leadId    = lead[0] || '';
@@ -75,7 +130,11 @@ export class OutreachAgent extends BaseAgent {
       const dmEmail   = lead[4] || '';
       const showName  = lead[5] || '';
 
-      if (!dmEmail) continue;
+      if (!dmEmail) {
+        skippedNoEmail++;
+        logger.info(`[Outreach] Skipping ${company} — no DM email in OUTREACH_QUEUE. Run /enrich to find emails.`);
+        continue;
+      }
 
       // Enrich snippet data from LEAD_MASTER row
       const masterRow  = masterById.get(masterRef) || [];
@@ -123,10 +182,12 @@ export class OutreachAgent extends BaseAgent {
       }));
 
       // Build prospect object for Woodpecker
-      const nameParts = dmName.trim().split(' ');
+      // first_name must never be empty — 'Team' is used when no DM name is known
+      // so Woodpecker email templates render "Hi Team," rather than "Hi ,"
+      const nameParts = (dmName || '').trim().split(' ').filter(Boolean);
       const prospect: WoodpeckerProspect = {
         email: dmEmail,
-        first_name: nameParts[0] || dmName,
+        first_name: nameParts[0] || 'Team',
         last_name: nameParts.slice(1).join(' ') || '',
         company,
         industry,
@@ -185,7 +246,11 @@ export class OutreachAgent extends BaseAgent {
       drafted++;
     }
 
-    await this.respond(ctx.chatId, `📧 ${drafted} outreach draft(s) sent to Mo for approval.\n\nMo approves with /approve\\_outreach\\_[leadId] or rejects with /reject\\_outreach\\_[leadId].`);
+    let msg = `📧 *${drafted}* outreach draft(s) sent to Mo for approval.\n\nMo approves with /approve\\_outreach\\_[leadId] or rejects with /reject\\_outreach\\_[leadId].`;
+    if (skippedNoEmail > 0) {
+      msg += `\n\n⚠️ *${skippedNoEmail}* lead(s) skipped — no email address found. Run /enrich to find DM emails before outreach.`;
+    }
+    await this.respond(ctx.chatId, msg);
     return { success: true, message: `${drafted} outreach emails drafted`, confidence: 'HIGH' };
   }
 
