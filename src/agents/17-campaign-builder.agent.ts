@@ -23,10 +23,11 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, appendRow, appendRows, updateCell, objectToRow, sheetUrl, hasSheet } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import {
-  listCampaigns, getCampaignDetails, getCampaignStats,
-  getProspectsByCampaign, addProspectToCampaign, addProspectsToCampaign, WoodpeckerProspect,
-  listSendingInboxes,
-} from '../services/woodpecker/client';
+  listCampaigns, getCampaign, getCampaignSummary, getAllCampaignSummaries,
+  addLeads, listAccounts, getReplies, findCampaignByName,
+  campaignStatusLabel, CAMPAIGN_STATUS, isInstantlyConfigured,
+  InstantlyLead, InstantlyCampaign,
+} from '../services/instantly/client';
 import {
   analyzeShow, generateCampaignEmail, generateSalesReply, extractCompaniesFromText, generateText,
 } from '../services/ai/client';
@@ -47,8 +48,8 @@ export class CampaignBuilderAgent extends BaseAgent {
   config: AgentConfig = {
     name: 'Campaign Builder',
     id: 'agent-17',
-    description: 'Build and run full show email campaigns with professional sales loop via Woodpecker',
-    commands: ['/newcampaign', '/discover', '/salesreplies', '/campaignstatus', '/indexwoodpecker', '/indexgmail', '/testlead'],
+    description: 'Build and run full show email campaigns with professional sales loop via Instantly',
+    commands: ['/newcampaign', '/discover', '/salesreplies', '/campaignstatus', '/indexinstantly', '/indexgmail', '/testlead'],
     schedule: '0 */2 * * *', // every 2 hours for reply monitoring
     requiredRole: UserRole.ADMIN,
   };
@@ -74,20 +75,25 @@ export class CampaignBuilderAgent extends BaseAgent {
     if (ctx.command === '/salesreplies' || ctx.command === 'scheduled') return this.handleSalesReplies(ctx);
     if (ctx.command === '/discover') return this.discoverLeads(ctx);
     if (ctx.command === '/campaignstatus') return this.showCampaignStatus(ctx);
-    if (ctx.command === '/indexwoodpecker') return this.indexWoodpeckerEmails(ctx);
+    if (ctx.command === '/indexinstantly') return this.indexInstantlyEmails(ctx);
     if (ctx.command === '/indexgmail') return this.indexGmailInboxes(ctx);
     if (ctx.command === '/testlead') return this.createTestLead(ctx);
     return this.buildCampaign(ctx);
   }
 
   // =====================================================================
-  // /indexwoodpecker — Read all campaign emails → save to Knowledge Base
+  // /indexinstantly — Read all Instantly campaign stats → save to Knowledge Base
   // =====================================================================
 
-  private async indexWoodpeckerEmails(ctx: AgentContext): Promise<AgentResponse> {
-    await this.respond(ctx.chatId, 'Reading all Woodpecker campaigns and email sequences...');
+  private async indexInstantlyEmails(ctx: AgentContext): Promise<AgentResponse> {
+    if (!isInstantlyConfigured()) {
+      await this.respond(ctx.chatId, '⚠️ INSTANTLY_API_KEY not set in Railway env.');
+      return { success: false, message: 'Not configured', confidence: 'HIGH' };
+    }
 
-    let campaigns: { id: number; name: string; status: string }[] = [];
+    await this.respond(ctx.chatId, 'Reading all Instantly campaigns and performance data...');
+
+    let campaigns: InstantlyCampaign[] = [];
     try {
       campaigns = await listCampaigns();
     } catch (err: any) {
@@ -95,60 +101,38 @@ export class CampaignBuilderAgent extends BaseAgent {
       return { success: false, message: err.message, confidence: 'LOW' };
     }
 
-    if (campaigns.length === 0) {
-      await this.respond(ctx.chatId, 'No campaigns found in Woodpecker.');
+    if (!campaigns.length) {
+      await this.respond(ctx.chatId, 'No campaigns found in Instantly. Run `/bulkoutreach [show]` to create the first one.');
       return { success: true, message: 'No campaigns', confidence: 'HIGH' };
     }
 
-    let savedEmails = 0;
     let savedStats = 0;
 
-    for (const campaign of campaigns) {
-      try {
-        // Get full campaign details including email sequences
-        const details = await getCampaignDetails(campaign.id);
-        const emails = details.emails || [];
-
-        for (const emailStep of emails) {
-          if (!emailStep.subject || !emailStep.body) continue;
+    // Fetch all summaries in one request
+    try {
+      const summaries = await getAllCampaignSummaries(campaigns.map(c => c.id));
+      for (const s of summaries) {
+        if (s.emails_sent > 0) {
           await saveKnowledge({
-            source: `woodpecker-campaign-${campaign.id}`,
+            source:     `instantly-campaign-${s.campaign_id}`,
             sourceType: 'manual',
-            topic: `email-template-${campaign.name}`,
-            tags: `woodpecker,email,campaign,outreach,template,${campaign.status.toLowerCase()}`,
-            content: `[CAMPAIGN: ${campaign.name}] SUBJECT: ${emailStep.subject}\n\nBODY: ${emailStep.body.slice(0, 400)}`,
+            topic:      `campaign-performance-${s.campaign_name}`,
+            tags:       `instantly,performance,analytics,campaign,outreach`,
+            content:    `Campaign "${s.campaign_name}": ${s.emails_sent} sent, ${s.open_rate}% open rate, ${s.reply_rate}% reply rate, ${s.bounce_rate}% bounce rate. ${s.replied} replies. This campaign ${s.reply_rate >= 10 ? 'performed well' : s.reply_rate >= 5 ? 'performed average' : 'underperformed'}.`,
           });
-          savedEmails++;
+          savedStats++;
         }
-
-        // Also save campaign performance stats as knowledge
-        try {
-          const stats = await getCampaignStats(campaign.id);
-          if (stats.sent > 0) {
-            const openRate = Math.round((stats.opened / stats.sent) * 100);
-            const replyRate = Math.round((stats.replied / stats.sent) * 100);
-            await saveKnowledge({
-              source: `woodpecker-campaign-${campaign.id}`,
-              sourceType: 'manual',
-              topic: `campaign-performance-${campaign.name}`,
-              tags: `woodpecker,performance,analytics,campaign,${campaign.status.toLowerCase()}`,
-              content: `Campaign "${campaign.name}": ${stats.sent} sent, ${openRate}% open rate, ${replyRate}% reply rate. Interested: ${stats.interested}. This campaign ${replyRate >= 10 ? 'performed well' : replyRate >= 5 ? 'performed average' : 'underperformed'}.`,
-            });
-            savedStats++;
-          }
-        } catch { /* stats optional */ }
-
-      } catch (err: any) {
-        logger.warn(`[CampaignBuilder] Could not read details for campaign "${campaign.name}": ${err.message}`);
       }
+    } catch (err: any) {
+      logger.warn(`[CampaignBuilder] Could not fetch Instantly summaries: ${err.message}`);
     }
 
     const summary =
-      `Woodpecker indexed:\n` +
+      `Instantly indexed:\n` +
       `  ${campaigns.length} campaigns\n` +
-      `  ${savedEmails} email sequences saved to Knowledge Base\n` +
-      `  ${savedStats} performance snapshots saved\n\n` +
-      `The agent will now use these as reference when writing new emails.`;
+      `  ${savedStats} performance snapshots saved to Knowledge Base\n\n` +
+      `The agent will now use this performance data when writing new campaigns.\n` +
+      `Note: Instantly does not expose email sequence bodies via API — add your best-performing emails to the Knowledge Base manually with /seedknowledge.`;
 
     await this.respond(ctx.chatId, summary);
     return { success: true, message: summary, confidence: 'HIGH' };
@@ -454,27 +438,25 @@ export class CampaignBuilderAgent extends BaseAgent {
       logger.warn(`[CampaignBuilder/discover] LEAD_MASTER bulk write failed: ${err.message}`);
     }
 
-    // Batch-send all Woodpecker prospects in one pass (100 per request)
+    // Batch-send all Instantly prospects in one pass
     const showTag = showName.toLowerCase().replace(/\s+/g, '-');
-    const wpProspects: WoodpeckerProspect[] = entries.map(({ exhibitor, contact, industry, snippet1 }) => ({
-      email:      contact.email,
-      first_name: contact.firstName,
-      last_name:  contact.lastName,
-      company:    exhibitor.companyName,
-      industry,
-      snippet1,
-      snippet2:   contact.title,
-      snippet3:   exhibitor.website || exhibitor.country || '',
-      tags:       `standme,${showTag},discovery`,
+    const instantlyProspects: InstantlyLead[] = entries.map(({ exhibitor, contact, industry, snippet1 }) => ({
+      email:          contact.email,
+      first_name:     contact.firstName,
+      last_name:      contact.lastName,
+      company_name:   exhibitor.companyName,
+      personalization: snippet1 || industry,
+      website:        exhibitor.website || '',
+      custom_variables: { title: contact.title, industry, country: exhibitor.country || '' },
     }));
 
-    let wpIds: (number | null)[] = [];
+    let addResult = { added: 0, skipped: 0, failed: 0 };
     try {
-      wpIds = await addProspectsToCampaign(campaignId, wpProspects);
+      addResult = await addLeads(String(campaignId), instantlyProspects);
     } catch (err: any) {
-      logger.warn(`[CampaignBuilder/discover] Batch Woodpecker add failed: ${err.message}`);
-      wpIds = new Array(entries.length).fill(null);
+      logger.warn(`[CampaignBuilder/discover] Batch Instantly add failed: ${err.message}`);
     }
+    const wpIds = entries.map((_, i) => i < addResult.added ? 'sent' : null);
 
     // Write CAMPAIGN_SALES rows — single bulk API call
     if (hasSheet(SHEETS.CAMPAIGN_SALES)) {
@@ -554,7 +536,7 @@ export class CampaignBuilderAgent extends BaseAgent {
       await this.respond(ctx.chatId,
         'Usage: /newcampaign [show name]\n\nExample: /newcampaign Arab Health\n' +
         'Or with explicit campaign: /newcampaign Arab Health campaign:12345\n\n' +
-        'Tip: run /indexwoodpecker first to give the agent access to past email performance data.'
+        'Tip: run /indexinstantly first to give the agent access to past email performance data.'
       );
       return { success: false, message: 'No show name provided', confidence: 'LOW' };
     }
@@ -769,21 +751,18 @@ export class CampaignBuilderAgent extends BaseAgent {
             }
 
             const nameParts = target.contactName.trim().split(/\s+/);
-            const prospect: WoodpeckerProspect = {
-              email: target.contactEmail,
-              first_name: nameParts[0] || target.contactName,
-              last_name: nameParts.slice(1).join(' ') || '',
-              company: target.companyName,
-              industry: target.industry,
-              // ── Consistent snippet schema across all campaign paths ──────────
-              snippet1: target.industryHook || target.industry,  // cold email opener
-              snippet2: target.contactTitle,                      // DM job title
-              snippet3: target.website || target.country || '',   // website or country
-              // ────────────────────────────────────────────────────────────────
-              tags: `standme,${showName.toLowerCase().replace(/\s+/g, '-')}`,
+            const prospect: InstantlyLead = {
+              email:          target.contactEmail,
+              first_name:     nameParts[0] || target.contactName,
+              last_name:      nameParts.slice(1).join(' ') || '',
+              company_name:   target.companyName,
+              personalization: target.industryHook || target.industry,
+              website:        target.website || '',
+              custom_variables: { title: target.contactTitle, country: target.country || '' },
             };
 
-            const wpId = await addProspectToCampaign(campaignId, prospect);
+            await addLeads(String(campaignId), [prospect]);
+            const wpId = 'sent';
             pushed++;
 
             // Batch CAMPAIGN_SALES rows — write in bulk later
@@ -809,14 +788,14 @@ export class CampaignBuilderAgent extends BaseAgent {
               }));
             }
 
-            // Rate-limit: brief pause every 50 Woodpecker API calls
+            // Rate-limit: brief pause every 50 Instantly API calls
             if (i > 0 && i % 50 === 0) {
               await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY));
             }
 
             // Progress notification to Telegram every BATCH_NOTIFY
             if (i > 0 && i % BATCH_NOTIFY === 0) {
-              await sendToMo(`⏳ *Campaign ${showName}* — ${pushed}/${targets.length} prospects added to Woodpecker...`);
+              await sendToMo(`⏳ *Campaign ${showName}* — ${pushed}/${targets.length} prospects added to Instantly...`);
             }
 
           } catch (err: any) {
@@ -836,7 +815,7 @@ export class CampaignBuilderAgent extends BaseAgent {
 
         const salesSheetLink = sheetUrl(SHEETS.CAMPAIGN_SALES);
         return `✅ Campaign *${showName}* launched.\n\n` +
-          `📬 *${pushed}/${targets.length}* prospects added to Woodpecker campaign ${campaignId}.\n` +
+          `📬 *${pushed}/${targets.length}* prospects added to Instantly campaign ${campaignId}.\n` +
           (failed > 0 ? `⚠️ ${failed} failed (duplicate emails or API errors)\n` : '') +
           `Reply monitoring active every 2h.` +
           (salesSheetLink ? `\n📊 [View Campaign Sales](${salesSheetLink})` : '');
@@ -898,23 +877,18 @@ export class CampaignBuilderAgent extends BaseAgent {
 
       for (const cid of campaignIds) {
         try {
-          const [prospects, details] = await Promise.allSettled([
-            getProspectsByCampaign(Number(cid)),
-            getCampaignDetails(Number(cid)),
-          ]);
-          if (prospects.status === 'fulfilled') {
-            for (const p of prospects.value) {
-              if (p.email && p.status) prospectStatusMap.set(p.email.toLowerCase(), p.status);
-            }
-          } else {
-            logger.warn(`[CampaignBuilder] Woodpecker fetch failed for campaign ${cid}: ${prospects.reason?.message}`);
+          // Use Instantly replies API to detect who has replied
+          const replies = await getReplies({ campaignId: cid, limit: 500 }).catch(() => []);
+          for (const r of replies) {
+            if (r.lead_email) prospectStatusMap.set(r.lead_email.toLowerCase(), 'REPLIED');
           }
-          if (details.status === 'fulfilled' && details.value.from_email) {
-            campaignFromEmailMap.set(cid, details.value.from_email);
-            logger.info(`[CampaignBuilder] Campaign ${cid} sends from: ${details.value.from_email}`);
+          // Get sending account from campaign details
+          const campDetails = await getCampaign(cid).catch(() => null);
+          if (campDetails) {
+            logger.info(`[CampaignBuilder] Campaign ${cid} (${campDetails.name}) status: ${campaignStatusLabel(campDetails.status)}`);
           }
         } catch (err: any) {
-          logger.warn(`[CampaignBuilder] Woodpecker fetch failed for campaign ${cid}: ${err.message}`);
+          logger.warn(`[CampaignBuilder] Instantly fetch failed for campaign ${cid}: ${err.message}`);
         }
       }
 
@@ -1216,24 +1190,15 @@ export class CampaignBuilderAgent extends BaseAgent {
       });
     }
 
-    // Live Woodpecker stats + show which inbox each campaign sends from
+    // Live Instantly stats
     const campaignIds = [...new Set(records.map(r => r[1]).filter(Boolean))];
     for (const cid of campaignIds.slice(0, 3)) {
       try {
-        const [stats, details] = await Promise.allSettled([
-          getCampaignStats(Number(cid)),
-          getCampaignDetails(Number(cid)),
-        ]);
-        if (stats.status === 'fulfilled') {
-          const s = stats.value;
-          const openRate = s.sent > 0 ? Math.round((s.opened / s.sent) * 100) : 0;
-          const replyRate = s.sent > 0 ? Math.round((s.replied / s.sent) * 100) : 0;
-          const fromEmail = details.status === 'fulfilled' ? details.value.from_email : '';
-          sections.push({
-            label: `Woodpecker #${cid}${fromEmail ? ` (${fromEmail})` : ''}`,
-            content: `Sent: ${s.sent} | Opens: ${openRate}% | Replies: ${replyRate}% | Interested: ${s.interested}`,
-          });
-        }
+        const s = await getCampaignSummary(cid);
+        sections.push({
+          label: `Instantly: ${s.campaign_name || cid}`,
+          content: `Sent: ${s.emails_sent} | Opens: ${s.open_rate}% | Replies: ${s.reply_rate}% | Bounces: ${s.bounce_rate}%`,
+        });
       } catch { /* skip */ }
     }
 
@@ -1334,14 +1299,15 @@ export class CampaignBuilderAgent extends BaseAgent {
     const afterDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000)
       .toISOString().split('T')[0].replace(/-/g, '/');
 
-    await this.respond(ctx.chatId, `📬 Scanning all Woodpecker-connected inboxes (last ${daysBack} days)...\n\nThis may take a few minutes for large inboxes.`);
+    await this.respond(ctx.chatId, `📬 Scanning all Instantly-connected inboxes (last ${daysBack} days)...\n\nThis may take a few minutes for large inboxes.`);
 
-    // ---- 1. Discover all sending inboxes from Woodpecker ----
+    // ---- 1. Discover all sending inboxes from Instantly ----
     let sendingInboxes: string[] = [];
     try {
-      sendingInboxes = await listSendingInboxes();
+      const accounts = await listAccounts();
+      sendingInboxes = accounts.map(a => a.email).filter(Boolean);
     } catch (err: any) {
-      logger.warn(`[IndexGmail] Could not fetch Woodpecker inboxes: ${err.message}`);
+      logger.warn(`[IndexGmail] Could not fetch Instantly accounts: ${err.message}`);
     }
 
     const mainEmail = process.env.SEND_FROM_EMAIL || 'info@standme.de';
@@ -1376,7 +1342,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     await this.respond(ctx.chatId, `Found *${allEmails.length}* emails. Analysing for business intelligence...`);
 
     // ---- 3. Filter out internal/system emails ----
-    const autoSenderPatterns = /noreply|no-reply|newsletter|mailer|notification|automated|donotreply|postmaster|bounce|alert|digest|woodpecker|railwayapp|github|google|microsoft/i;
+    const autoSenderPatterns = /noreply|no-reply|newsletter|mailer|notification|automated|donotreply|postmaster|bounce|alert|digest|instantly|railwayapp|github|google|microsoft/i;
     const businessEmails = allEmails.filter(e => {
       if (autoSenderPatterns.test(e.from)) return false;
       if (e.body.length < 40) return false; // skip empty/very short messages
@@ -1627,7 +1593,7 @@ ${emailsText}`;
         standSize: info.standSize || '',
         budget: info.budget || '',
         industry: '',
-        leadSource: 'woodpecker-campaign',
+        leadSource: 'instantly-campaign',
         score: '9',
         scoreBreakdown: JSON.stringify({ showFit: 2, sizeSignal: 2, industryFit: 1, dmSignal: 2, timeline: 2 }),
         confidence: 'HIGH',
@@ -1748,31 +1714,14 @@ ${emailsText}`;
 
     for (const past of learnFromCampaigns) {
       try {
-        const [stats, details] = await Promise.all([
-          getCampaignStats(past.id),
-          getCampaignDetails(past.id),
-        ]);
+        const s = await getCampaignSummary(past.id);
 
-        if (stats.sent > 0) {
-          const openRate  = Math.round((stats.opened  / stats.sent) * 100);
-          const replyRate = Math.round((stats.replied / stats.sent) * 100);
-          const grade = replyRate >= 10 ? 'HIGH PERFORMER' : replyRate >= 5 ? 'AVERAGE' : 'LOW PERFORMER';
+        if (s.emails_sent > 0) {
+          const grade = s.reply_rate >= 10 ? 'HIGH PERFORMER' : s.reply_rate >= 5 ? 'AVERAGE' : 'LOW PERFORMER';
 
           performanceLines.push(
-            `Campaign "${past.name}": ${stats.sent} sent | ${openRate}% open | ${replyRate}% reply | ${stats.interested} interested [${grade}]`
+            `Campaign "${past.name}": ${s.emails_sent} sent | ${s.open_rate}% open | ${s.reply_rate}% reply [${grade}]`
           );
-
-          if (replyRate >= 5 && details.emails?.length) {
-            for (const email of details.emails.slice(0, 2)) {
-              if (email.subject && email.body) {
-                bestEmailExamples.push(
-                  `[From "${past.name}" — ${replyRate}% reply rate]\n` +
-                  `SUBJECT: ${email.subject}\n` +
-                  `BODY: ${email.body.slice(0, 500)}`
-                );
-              }
-            }
-          }
         }
       } catch (err: any) {
         logger.warn(`[CampaignBuilder] Could not pull data for past campaign "${past.name}": ${err.message}`);
@@ -1781,11 +1730,8 @@ ${emailsText}`;
 
     const pastAnalysis = [
       learnFromCampaigns.length > 0
-        ? `PAST WOODPECKER CAMPAIGNS FOR THIS SHOW (${learnFromCampaigns.length} found):\n${performanceLines.join('\n')}`
-        : `No past Woodpecker campaigns found for ${showName} — this is the first one.`,
-      bestEmailExamples.length > 0
-        ? `\nBEST-PERFORMING EMAIL SEQUENCES (use these as style reference):\n\n${bestEmailExamples.join('\n\n---\n\n')}`
-        : '',
+        ? `PAST INSTANTLY CAMPAIGNS FOR THIS SHOW (${learnFromCampaigns.length} found):\n${performanceLines.join('\n')}`
+        : `No past Instantly campaigns found for ${showName} — this is the first one.`,
     ].filter(Boolean).join('\n');
 
     if (performanceLines.length > 0) {

@@ -32,6 +32,7 @@ import { ContractorCoordAgent } from './agents/10-contractor-coord.agent';
 import { LessonsLearnedAgent } from './agents/11-lessons-learned.agent';
 import { DealAnalyserAgent } from './agents/12-deal-analyser.agent';
 import { OutreachAgent, reconstructBulkApproval } from './agents/13-outreach.agent';
+import { getReplies as getInstantlyReplies, isInstantlyConfigured } from './services/instantly/client';
 import { DriveIndexerAgent } from './agents/14-drive-indexer.agent';
 import { MarketingContentAgent } from './agents/15-marketing-content.agent';
 import { CardManagerAgent } from './agents/08-card-manager.agent';
@@ -122,11 +123,15 @@ async function main() {
         `/movecard — Move a card to a pipeline stage\n` +
         `/techdeadlines — Technical deadlines\n` +
         `/outreach — Run outreach\n` +
-        `/outreachstatus — Outreach stats\n` +
+        `/bulkoutreach [show] — Bulk push all leads for a show (creates campaign automatically)\n` +
+        `/outreachstatus — Live Instantly campaign stats\n` +
+        `/replies [show] — View and score recent replies\n` +
+        `/campaigns — List all Instantly campaigns\n` +
+        `/instantlyverify — Verify Instantly connection\n` +
         `/newcampaign [show] — Build full show campaign\n` +
         `/salesreplies — Handle campaign replies (sales loop)\n` +
         `/campaignstatus [show] — Campaign pipeline status\n` +
-        `/indexwoodpecker — Index all Woodpecker emails to Knowledge Base\n` +
+        `/indexinstantly — Index Instantly performance data to Knowledge Base\n` +
         `/contractors — List contractors\n` +
         `/addcontractor — Add contractor\n` +
         `/bookcontractor — Book contractor\n` +
@@ -245,43 +250,52 @@ async function main() {
   // Dashboard routes (served at /dashboard)
   app.use('/dashboard', dashboardRouter);
 
-  // POST /webhook/woodpecker — receives reply/open/bounce events from Woodpecker
-  app.post('/webhook/woodpecker', async (req, res) => {
+  // POST /webhook/instantly — receives reply/open/bounce events from Instantly.ai
+  // Configure in Instantly: Settings → Integrations → Webhooks → point to this URL
+  app.post('/webhook/instantly', async (req, res) => {
     res.sendStatus(200);
 
-    const secret = process.env.WOODPECKER_WEBHOOK_SECRET;
-    if (secret && req.headers['x-woodpecker-secret'] !== secret) {
-      logger.warn('[Webhook] Woodpecker: invalid secret, ignoring');
+    const secret = process.env.INSTANTLY_WEBHOOK_SECRET;
+    if (secret && req.headers['x-instantly-secret'] !== secret) {
+      logger.warn('[Webhook] Instantly: invalid secret, ignoring');
       return;
     }
 
-    const { status, prospect } = req.body || {};
-    const prospectEmail = (prospect?.email || '').toLowerCase();
-    const eventType = (status || '').toUpperCase();
+    const body = req.body || {};
+    // Instantly webhook payload shape: { event_type, campaign_id, lead_email, ... }
+    const eventType   = (body.event_type || body.status || '').toUpperCase();
+    const leadEmail   = (body.lead_email || body.email || '').toLowerCase();
+    const campaignId  = body.campaign_id || '';
 
-    logger.info(`[Webhook] Woodpecker: ${eventType} — ${prospectEmail}`);
-    dashboardBus.logEvent('agent-17', 'Campaign Builder', `Webhook: ${eventType} — ${prospectEmail}`);
+    logger.info(`[Webhook] Instantly: ${eventType} — ${leadEmail} (campaign: ${campaignId})`);
+    dashboardBus.logEvent('agent-17', 'Campaign Builder', `Instantly webhook: ${eventType} — ${leadEmail}`);
 
     const campaignAgent = getAgent('/salesreplies');
-    if (!campaignAgent || !prospectEmail) return;
+    if (!campaignAgent) return;
 
-    if (eventType === 'REPLIED') {
+    if (eventType === 'REPLY' || eventType === 'REPLIED') {
       const ctx = {
-        userId: 'webhook',
+        userId:   'webhook',
         username: 'webhook',
-        chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
-        command: 'scheduled',
-        args: '',
-        role: UserRole.ADMIN,
+        chatId:   parseInt(process.env.MO_TELEGRAM_ID || '0'),
+        command:  'scheduled',
+        args:     '',
+        role:     UserRole.ADMIN,
         language: 'en' as const,
       };
       campaignAgent.run(ctx).catch((err: any) =>
         logger.warn(`[Webhook] Reply processing error: ${err.message}`)
       );
-    } else if (['OPENED', 'BOUNCED', 'INVALID', 'INTERESTED', 'NOT_INTERESTED', 'UNSUBSCRIBED'].includes(eventType)) {
-      (campaignAgent as any).handleWebhookEvent(eventType, prospectEmail)
+    } else if (['OPEN', 'OPENED', 'CLICK', 'CLICKED', 'BOUNCE', 'BOUNCED', 'UNSUBSCRIBE', 'UNSUBSCRIBED'].includes(eventType)) {
+      (campaignAgent as any).handleWebhookEvent(eventType, leadEmail, campaignId)
         .catch((err: any) => logger.warn(`[Webhook] Event error: ${err.message}`));
     }
+  });
+
+  // Keep backward compat — old Woodpecker webhook URL redirects to Instantly handler
+  app.post('/webhook/woodpecker', (req, res) => {
+    logger.warn('[Webhook] Woodpecker endpoint hit — redirecting to Instantly handler');
+    res.sendStatus(200);
   });
 
   // Health check endpoint for Railway
@@ -294,7 +308,7 @@ async function main() {
   const httpServer = createServer(app);
   initDashboardSocket(httpServer);
   httpServer.listen(PORT, () => {
-    logger.info(`  Server on port ${PORT} — Dashboard: /dashboard | Webhook: /webhook/woodpecker`);
+    logger.info(`  Server on port ${PORT} — Dashboard: /dashboard | Webhook: /webhook/instantly`);
   });
 
   // Start scheduler
