@@ -4,6 +4,8 @@ import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
 import { addProspectToCampaign, addProspectsToCampaign, getCampaignStats, listCampaigns, WoodpeckerProspect } from '../services/woodpecker/client';
+import { findExhibitorFiles, parseExhibitorFile } from '../services/drive-exhibitor';
+import { validateShow } from '../config/shows';
 import { generateOutreachEmail, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
@@ -15,7 +17,7 @@ export class OutreachAgent extends BaseAgent {
     name: 'Automated Outreach Sender',
     id: 'agent-13',
     description: 'Run personalised outreach sequences via Woodpecker',
-    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach'],
+    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach', '/importleads'],
     requiredRole: UserRole.ADMIN,
   };
 
@@ -23,6 +25,7 @@ export class OutreachAgent extends BaseAgent {
     if (ctx.command === '/outreachstatus') return this.showStatus(ctx);
     if (ctx.command === '/campaigns') return this.showCampaigns(ctx);
     if (ctx.command === '/bulkoutreach') return this.runBulkOutreach(ctx);
+    if (ctx.command === '/importleads') return this.runImportLeads(ctx);
     return this.runOutreach(ctx);
   }
 
@@ -253,6 +256,158 @@ export class OutreachAgent extends BaseAgent {
     }
     await this.respond(ctx.chatId, msg);
     return { success: true, message: `${drafted} outreach emails drafted`, confidence: 'HIGH' };
+  }
+
+  // ---- /importleads [show name] — import exhibitor leads from Drive files into LEAD_MASTER ----
+  // Reads Excel / CSV / Google Sheets from the exhibitor Drive folder, normalises columns
+  // with Claude AI (via parseExhibitorFile), deduplicates against LEAD_MASTER, and appends
+  // new leads. Writes the email to BOTH contactEmail (col E) and dmEmail (col V) so
+  // /bulkoutreach finds it immediately without needing enrichment first.
+
+  private async runImportLeads(ctx: AgentContext): Promise<AgentResponse> {
+    const showName = (ctx.args || '').trim();
+    if (!showName) {
+      await this.respond(ctx.chatId,
+        'Usage: `/importleads [show name]`\nExample: `/importleads intersolar`\n\n' +
+        'Finds all matching exhibitor files in Google Drive and imports them into Lead Master.'
+      );
+      return { success: false, message: 'No show name', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `🔍 Searching Google Drive for *${showName}* exhibitor files...`);
+
+    // 1. Find Drive files matching the show name
+    let files: Awaited<ReturnType<typeof findExhibitorFiles>> = [];
+    try {
+      files = await findExhibitorFiles(showName);
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `⚠️ Could not search Drive: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    if (files.length === 0) {
+      await this.respond(ctx.chatId,
+        `No exhibitor files found for "*${showName}*" in Google Drive.\n\n` +
+        `Files must be in the exhibitor folder and named after the show ` +
+        `(e.g. "Intersolar 2026.xlsx"). Check Drive and try again.`
+      );
+      return { success: false, message: 'No files found', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `📂 Found *${files.length}* file(s). Parsing exhibitor data...`);
+
+    // 2. Parse all files → ExhibitorRecord[]
+    const allRecords: Awaited<ReturnType<typeof parseExhibitorFile>> = [];
+    for (const file of files) {
+      try {
+        const records = await parseExhibitorFile(file);
+        allRecords.push(...records);
+        logger.info(`[ImportLeads] Parsed ${records.length} records from "${file.name}"`);
+      } catch (err: any) {
+        logger.warn(`[ImportLeads] Failed to parse "${file.name}": ${err.message}`);
+      }
+    }
+
+    if (allRecords.length === 0) {
+      await this.respond(ctx.chatId,
+        `Found the file(s) but could not extract any records. ` +
+        `Make sure the file has a header row with company names and emails.`
+      );
+      return { success: false, message: 'No records parsed', confidence: 'HIGH' };
+    }
+
+    // 3. Read LEAD_MASTER → build dedup sets
+    const masterRows = await readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]);
+    const existingEmails    = new Set(masterRows.slice(1).map(r => (r[21] || r[4] || '').toLowerCase()).filter(Boolean));
+    const existingCompanies = new Set(masterRows.slice(1).map(r => (r[2]  || '').toLowerCase().trim()).filter(Boolean));
+
+    // 4. Score and validate show
+    const showValidation = validateShow(showName);
+
+    // 5. Import new records
+    let imported = 0;
+    let skipped  = 0;
+
+    for (let i = 0; i < allRecords.length; i++) {
+      const rec = allRecords[i];
+      const companyName = (rec.companyName || '').trim();
+      if (!companyName) { skipped++; continue; }
+
+      const email = (rec.contactEmail || '').trim().toLowerCase();
+
+      // Dedup: skip if email OR company name already exists
+      if (email && existingEmails.has(email)) { skipped++; continue; }
+      if (existingCompanies.has(companyName.toLowerCase())) { skipped++; continue; }
+
+      // Scoring
+      const industry = (rec.industry || '').toLowerCase();
+      const coreIndustries = ['solar', 'energy', 'medical', 'healthcare', 'food', 'packaging', 'technology', 'industrial'];
+      const adjIndustries  = ['automotive', 'construction', 'pharma', 'agriculture', 'retail'];
+      let industryFit = 0;
+      if (coreIndustries.some(k => industry.includes(k))) industryFit = 2;
+      else if (adjIndustries.some(k => industry.includes(k))) industryFit = 1;
+
+      const dmSignal  = rec.contactTitle ? 1 : 0;
+      const showFit   = showValidation.valid ? 2 : 1;
+      const timeline  = 1;
+      const score     = showFit + industryFit + dmSignal + timeline;
+      const status    = score >= 8 ? 'HOT' : score >= 5 ? 'WARM' : score >= 3 ? 'COLD' : 'DISQUALIFIED';
+
+      const leadId = `SM-${Date.now()}-${i}`;
+      const notes  = [
+        rec.boothNumber ? `Booth: ${rec.boothNumber}` : '',
+        rec.website     ? `Website: ${rec.website}`   : '',
+        rec.country     ? `Country: ${rec.country}`   : '',
+        rec.phone       ? `Phone: ${rec.phone}`       : '',
+      ].filter(Boolean).join(' | ');
+
+      await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
+        id:               leadId,
+        timestamp:        new Date().toISOString(),
+        companyName:      companyName,
+        contactName:      rec.contactName  || '',
+        contactEmail:     email,                         // col E
+        contactTitle:     rec.contactTitle || '',
+        showName:         showValidation.match?.name || showName,
+        showCity:         showValidation.match?.city || '',
+        standSize:        '',
+        budget:           '',
+        industry:         rec.industry || '',
+        leadSource:       'drive-import',
+        score:            score.toString(),
+        scoreBreakdown:   JSON.stringify({ showFit, sizeSignal: 0, industryFit, dmSignal, timeline }),
+        confidence:       showValidation.confidence,
+        status,
+        trelloCardId:     '',
+        enrichmentStatus: 'PENDING',
+        dmName:           rec.contactName  || '',
+        dmTitle:          rec.contactTitle || '',
+        dmLinkedIn:       '',
+        dmEmail:          email,                         // col V — written here so /bulkoutreach finds it
+        outreachReadiness: email ? '7' : '3',
+        language:         'en',
+        notes,
+      }));
+
+      existingEmails.add(email || `_noemail_${leadId}`);
+      existingCompanies.add(companyName.toLowerCase());
+      imported++;
+
+      // Throttle writes to avoid Sheets quota (100ms gap per row)
+      if (imported % 50 === 0) {
+        await this.respond(ctx.chatId, `⏳ Imported ${imported} so far...`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    const summary =
+      `✅ *Import complete for ${showName}*\n\n` +
+      `Imported: *${imported}* new leads\n` +
+      `Skipped:  ${skipped} (already in Lead Master)\n\n` +
+      `Next step: run \`/bulkoutreach ${showName}\` to push all leads to Woodpecker.`;
+
+    await this.respond(ctx.chatId, summary);
+    return { success: true, message: `Imported ${imported} leads for ${showName}`, confidence: 'HIGH' };
   }
 
   // ---- /bulkoutreach [show name] — bulk push all LEAD_MASTER leads for a show ----
