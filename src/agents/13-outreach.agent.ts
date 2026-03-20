@@ -600,7 +600,7 @@ export class OutreachAgent extends BaseAgent {
             await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
               id:                 `OL-BULK-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               leadId:             '',
-              companyName:        p.company_name,
+              companyName:        p.company_name || '',
               emailType:          'BULK_EMAIL_1',
               sentDate:           logDate,
               status:             'SENT',
@@ -1157,7 +1157,7 @@ export async function reconstructBulkApproval(approvalId: string): Promise<strin
       await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
         id:                 `OL-BULK-R-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         leadId:             '',
-        companyName:        p.company_name,
+        companyName:        p.company_name || '',
         emailType:          'BULK_EMAIL_1',
         sentDate:           logDate,
         status:             'SENT',
