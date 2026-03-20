@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
+import { readSheet, updateCell, appendRow, appendRows, objectToRow } from '../services/google/sheets';
 import {
   listCampaigns, getCampaign, createCampaign, findCampaignByName,
   setCampaignStatus, activateCampaign,
@@ -601,21 +601,22 @@ export class OutreachAgent extends BaseAgent {
             );
           }
 
-          // Log to OUTREACH_LOG
+          // Log to OUTREACH_LOG — single batch write to avoid Google Sheets quota
           const logDate = new Date().toISOString();
-          for (const p of prospects) {
-            await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
-              id:                 `OL-BULK-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-              leadId:             '',
-              companyName:        p.company_name || '',
-              emailType:          'BULK_EMAIL_1',
-              sentDate:           logDate,
-              status:             'SENT',
-              replyClassification: '',
-              woodpeckerId:       '',
-              notes:              `Bulk → Instantly campaign ${targetCampaign.id} (${targetCampaign.name}) | ${showFilter}`,
-            })).catch(() => {});
-          }
+          const logRows = prospects.map(p => objectToRow(SHEETS.OUTREACH_LOG, {
+            id:                  `OL-BULK-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            leadId:              '',
+            companyName:         p.company_name || '',
+            emailType:           'BULK_EMAIL_1',
+            sentDate:            logDate,
+            status:              'SENT',
+            replyClassification: '',
+            woodpeckerId:        '',
+            notes:               `Bulk → Instantly campaign ${targetCampaign.id} (${targetCampaign.name}) | ${showFilter}`,
+          }));
+          await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
+            logger.warn(`[Outreach] OUTREACH_LOG write failed (non-fatal): ${err.message}`)
+          );
 
           return (
             `✅ *Bulk push complete!*\n\n` +

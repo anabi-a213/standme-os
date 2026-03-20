@@ -334,52 +334,130 @@ export async function findCampaignByName(showName: string): Promise<InstantlyCam
  * Add leads to a campaign in batches of 100.
  * Instantly deduplicates automatically with skip_if_in_campaign.
  */
+/**
+ * Build a single lead payload (fields Instantly v2 accepts).
+ */
+function buildLeadPayload(l: InstantlyLead) {
+  return {
+    email:           l.email,
+    first_name:      l.first_name      || '',
+    last_name:       l.last_name       || '',
+    company_name:    l.company_name    || '',
+    personalization: l.personalization || '',
+    website:         l.website         || '',
+    phone:           l.phone           || '',
+    ...(l.custom_variables ? { variables: l.custom_variables } : {}),
+  };
+}
+
 export async function addLeads(
   campaignId: string,
   leads: InstantlyLead[],
   options: { skipIfInWorkspace?: boolean; skipIfInCampaign?: boolean } = {}
 ): Promise<{ added: number; skipped: number; failed: number }> {
+
+  // Pre-filter: drop any lead with no email so we never send bad data
+  const valid = leads.filter(l => l.email && l.email.trim());
+  if (valid.length < leads.length) {
+    logger.warn(`[Instantly] addLeads: filtered out ${leads.length - valid.length} leads with no email`);
+  }
+
   let added = 0;
   let skipped = 0;
   let failed = 0;
 
+  // ── Strategy 1: batch endpoint (POST /leads with leads array) ─────────────
+  // Instantly v2 supports bulk add via { campaign_id, leads: [...] }
+  // If ALL batches fail with "Email is required", we fall back to per-lead calls.
+  let batchFormatWorks: boolean | null = null; // null = not yet tested
+
   const BATCH = 100;
-  for (let i = 0; i < leads.length; i += BATCH) {
-    const batch = leads.slice(i, i + BATCH);
+  for (let i = 0; i < valid.length; i += BATCH) {
+    const batch = valid.slice(i, i + BATCH);
+
+    // Once we know the batch format doesn't work, go straight to per-lead
+    if (batchFormatWorks === false) {
+      const r = await addLeadsIndividually(campaignId, batch, options);
+      added += r.added; skipped += r.skipped; failed += r.failed;
+      if (i + BATCH < valid.length) await new Promise(r => setTimeout(r, 300));
+      continue;
+    }
+
     try {
       await retry(async () => {
         const resp = await getClient().post('/leads', {
-          campaign_id: campaignId,
+          campaign_id:          campaignId,
           skip_if_in_workspace: options.skipIfInWorkspace ?? true,
           skip_if_in_campaign:  options.skipIfInCampaign  ?? true,
-          leads: batch.map(l => ({
-            email:         l.email,
-            first_name:    l.first_name    || '',
-            last_name:     l.last_name     || '',
-            company_name:  l.company_name  || '',
-            personalization: l.personalization || '',
-            website:       l.website       || '',
-            phone:         l.phone         || '',
-            ...(l.custom_variables ? { variables: l.custom_variables } : {}),
-          })),
+          leads: batch.map(buildLeadPayload),
         }).catch(err => { throw apiError(err, 'addLeads'); });
 
+        batchFormatWorks = true;
         const result = resp.data;
-        // Instantly returns total_count, new_count, duplicate_count
-        added  += Number(result?.new_count ?? result?.added ?? batch.length);
-        skipped += Number(result?.duplicate_count ?? result?.duplicates ?? 0);
+        added   += Number(result?.new_count       ?? result?.added      ?? batch.length);
+        skipped += Number(result?.duplicate_count  ?? result?.duplicates ?? 0);
       }, `addLeads[${i}]`);
-    } catch (err) {
-      logger.warn(`[Instantly] Batch ${i}–${i + batch.length} failed: ${(err as Error).message}`);
-      failed += batch.length;
+    } catch (err: any) {
+      const msg: string = err?.message || '';
+      if (msg.toLowerCase().includes('email') && msg.toLowerCase().includes('required')) {
+        // Batch format not supported — switch permanently to per-lead calls
+        if (batchFormatWorks === null) {
+          batchFormatWorks = false;
+          logger.info('[Instantly] Batch leads format rejected — switching to per-lead mode');
+        }
+        const r = await addLeadsIndividually(campaignId, batch, options);
+        added += r.added; skipped += r.skipped; failed += r.failed;
+      } else {
+        logger.warn(`[Instantly] Batch ${i}–${i + batch.length} failed: ${msg}`);
+        failed += batch.length;
+      }
     }
 
-    // 500ms between batches to stay within rate limits
-    if (i + BATCH < leads.length) {
-      await new Promise(r => setTimeout(r, 500));
-    }
+    if (i + BATCH < valid.length) await new Promise(r => setTimeout(r, 300));
   }
 
+  return { added, skipped, failed };
+}
+
+/**
+ * Fallback: add leads one-by-one using POST /lead (single lead endpoint).
+ * Used when the batch /leads endpoint rejects the array format.
+ * Runs up to 10 in parallel to stay fast while respecting rate limits.
+ */
+async function addLeadsIndividually(
+  campaignId: string,
+  leads: InstantlyLead[],
+  options: { skipIfInWorkspace?: boolean; skipIfInCampaign?: boolean }
+): Promise<{ added: number; skipped: number; failed: number }> {
+  let added = 0; let skipped = 0; let failed = 0;
+  const CONCURRENCY = 10;
+
+  for (let i = 0; i < leads.length; i += CONCURRENCY) {
+    const slice = leads.slice(i, i + CONCURRENCY);
+    await Promise.all(slice.map(async (l) => {
+      try {
+        const resp = await getClient().post('/lead', {
+          campaign_id:          campaignId,
+          skip_if_in_workspace: options.skipIfInWorkspace ?? true,
+          skip_if_in_campaign:  options.skipIfInCampaign  ?? true,
+          ...buildLeadPayload(l),
+        }).catch(err => { throw apiError(err, 'addLead'); });
+
+        const r = resp.data;
+        if (r?.duplicate || r?.skipped) skipped++;
+        else added++;
+      } catch (err: any) {
+        const msg: string = err?.message || '';
+        if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('already')) {
+          skipped++;
+        } else {
+          failed++;
+        }
+      }
+    }));
+    // Small pause between concurrency groups
+    if (i + CONCURRENCY < leads.length) await new Promise(r => setTimeout(r, 200));
+  }
   return { added, skipped, failed };
 }
 
