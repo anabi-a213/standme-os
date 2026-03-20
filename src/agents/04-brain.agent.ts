@@ -890,7 +890,7 @@ INSIGHT: [company or person] | [type: budget|dm|preference|competitor|decision|s
           topic: `${entity} — ${factType}`,
           content: fact,
           sourceType: 'insight',
-          tags: [factType, entity.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30)],
+          tags: [factType, entity.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30)].join(','),
         });
         logger.info(`[Brain] Saved insight: ${entity} | ${factType} | ${fact.slice(0, 60)}`);
       }
