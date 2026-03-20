@@ -175,32 +175,32 @@ export async function createCampaign(
 ): Promise<string> {
   return retry(async () => {
     const sendDays = options.sendDays ?? [1, 2, 3, 4, 5];
-    // Instantly has a strict timezone enum — use only values from their whitelist.
-    // 'America/New_York' is consistently accepted; we offset send hours to match
-    // target timezone (CET = UTC+1, so 9am CET = 8am UTC ≈ 3am ET — irrelevant
-    // since Instantly respects the from/to window, not wall-clock UTC).
-    // Safest default that always passes validation:
-    const tz = options.timezone ?? 'America/New_York';
 
-    const schedule = {
-      schedules: [{
-        name: 'StandMe Default',
-        timing: {
-          from: `${String(options.startHour ?? 8).padStart(2, '0')}:00`,
-          to:   `${String(options.endHour ?? 18).padStart(2, '0')}:00`,
-        },
-        days: {
-          monday:    sendDays.includes(1),
-          tuesday:   sendDays.includes(2),
-          wednesday: sendDays.includes(3),
-          thursday:  sendDays.includes(4),
-          friday:    sendDays.includes(5),
-          saturday:  sendDays.includes(6),
-          sunday:    sendDays.includes(0),
-        },
-        timezone: tz,
-      }],
+    // NOTE: Instantly has a strict undocumented timezone enum.
+    // To avoid validation failures, we omit the timezone field entirely —
+    // Instantly will apply their account default. The error "must be equal to
+    // one of the allowed values" only fires when the field IS present with a
+    // bad value, so omitting it is the permanent fix.
+    const scheduleEntry: Record<string, any> = {
+      name: 'StandMe Default',
+      timing: {
+        from: `${String(options.startHour ?? 8).padStart(2, '0')}:00`,
+        to:   `${String(options.endHour ?? 18).padStart(2, '0')}:00`,
+      },
+      days: {
+        monday:    sendDays.includes(1),
+        tuesday:   sendDays.includes(2),
+        wednesday: sendDays.includes(3),
+        thursday:  sendDays.includes(4),
+        friday:    sendDays.includes(5),
+        saturday:  sendDays.includes(6),
+        sunday:    sendDays.includes(0),
+      },
     };
+    // Only include timezone if explicitly provided AND we want to override
+    if (options.timezone) scheduleEntry.timezone = options.timezone;
+
+    const schedule = { schedules: [scheduleEntry] };
 
     const sequences = emailSteps.length > 0 ? [{
       steps: emailSteps.map((step, i) => ({
@@ -213,15 +213,14 @@ export async function createCampaign(
     const body: any = { name, campaign_schedule: schedule };
     if (sequences.length > 0) body.sequences = sequences;
 
-    // Try primary timezone; if Instantly rejects it, fall back to 'Etc/GMT'
     let resp: any;
     try {
       resp = await getClient().post('/campaigns', body);
     } catch (err: any) {
-      const msg = err?.response?.data?.message || '';
-      if (typeof msg === 'string' && msg.includes('timezone')) {
-        // Retry with Etc/GMT which is always valid
-        (body.campaign_schedule.schedules[0] as any).timezone = 'Etc/GMT';
+      // If timezone is somehow still the issue (caller passed one), strip it and retry
+      const errMsg = err?.response?.data?.message || '';
+      if (typeof errMsg === 'string' && errMsg.includes('timezone')) {
+        delete body.campaign_schedule.schedules[0].timezone;
         resp = await getClient().post('/campaigns', body)
           .catch(e2 => { throw apiError(e2, 'createCampaign'); });
       } else {
