@@ -486,9 +486,16 @@ export class OutreachAgent extends BaseAgent {
           `Check columns E (contactEmail) and V (dmEmail) in the Leads sheet.`
         );
       } else {
+        // Show the distinct show names actually in the sheet so user knows what to type
+        const allShows = [...new Set(
+          masterRows.slice(1).map(r => r[6]).filter(Boolean)
+        )].slice(0, 15);
+        const showList = allShows.length > 0
+          ? `\n\n*Shows currently in Lead Master:*\n${allShows.map(s => `  • ${s}`).join('\n')}`
+          : '';
         await this.respond(ctx.chatId,
-          `No leads found for "*${showFilter}*" in Lead Master.\n\n` +
-          `Tip: The show name must match column G of the Leads sheet (partial match, case-insensitive).`
+          `No leads found for "*${showFilter}*" in Lead Master.${showList}\n\n` +
+          `Use any word from the show name above — partial match works (e.g. \`/bulkoutreach intersolar\`).`
         );
       }
       return { success: false, message: 'No leads found', confidence: 'HIGH' };
