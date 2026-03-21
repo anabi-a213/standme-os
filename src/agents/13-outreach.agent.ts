@@ -519,9 +519,15 @@ export class OutreachAgent extends BaseAgent {
     }
 
     // Check if Instantly has an existing campaign for this show
+    // If one is found, REUSE it — never create a duplicate for the same show.
     let campaign: InstantlyCampaign | null = null;
     try {
       campaign = await findCampaignByName(showFilter);
+      if (campaign) {
+        logger.info(`[Outreach] runBulkOutreach: reusing existing campaign "${campaign.name}" (${campaign.id}) for "${showFilter}"`);
+      } else {
+        logger.info(`[Outreach] runBulkOutreach: no existing campaign for "${showFilter}" — will create new`);
+      }
     } catch (err: any) {
       await this.respond(ctx.chatId, `⚠️ Could not connect to Instantly: ${err.message}`);
       return { success: false, message: err.message, confidence: 'LOW' };
@@ -531,6 +537,7 @@ export class OutreachAgent extends BaseAgent {
     const uniqueIndustries = [...new Set(leads.map(r => (r[10] || '').trim()).filter(Boolean))];
     await this.respond(ctx.chatId,
       `📋 Found *${leads.length}* ${showFilter} leads.\n` +
+      (campaign ? `Using existing campaign: *${campaign.name}*\n` : '') +
       `Generating email sequence for ${uniqueIndustries.length} industries...`
     );
 
@@ -549,10 +556,20 @@ export class OutreachAgent extends BaseAgent {
     const emailSequence = await this.generateEmailSequenceSteps(showDisplayName, uniqueIndustries[0] || 'trade show');
 
     // Build prospects array — sanitizeLead cleans emails, names, URLs, lengths
+    // Deduplicate by email using a Set — duplicate rows in the sheet should not
+    // result in duplicate leads being pushed to Instantly.
+    const seenEmails = new Set<string>();
     const prospects: InstantlyLead[] = [];
+    let totalScanned = 0;
+    let totalWithEmail = 0;
+    let totalDroppedDupe = 0;
+    let totalDroppedInvalid = 0;
+
     for (const r of leads) {
+      totalScanned++;
       const rawEmail = (r[21] || r[4] || '').trim();
       if (!rawEmail) continue;
+      totalWithEmail++;
 
       const dmName   = r[18] || r[3] || '';
       const parts    = dmName.trim().split(' ').filter(Boolean);
@@ -570,8 +587,23 @@ export class OutreachAgent extends BaseAgent {
         custom_variables: { title: r[19] || r[5] || '', show: r[6] || '' },
       };
       const clean = sanitizeLead(raw);
-      if (clean) prospects.push(clean);
+      if (!clean) { totalDroppedInvalid++; continue; }
+
+      // Deduplicate: skip if this email was already added in this batch
+      const emailKey = clean.email.toLowerCase();
+      if (seenEmails.has(emailKey)) { totalDroppedDupe++; continue; }
+      seenEmails.add(emailKey);
+      prospects.push(clean);
     }
+
+    // Diagnostic log — visible in Railway logs to diagnose empty or reduced batches
+    const sampleEmails = prospects.slice(0, 3).map(p => p.email);
+    logger.info(
+      `[Outreach] runBulkOutreach prospect build for "${showFilter}": ` +
+      `scanned=${totalScanned} withEmail=${totalWithEmail} ` +
+      `invalidDropped=${totalDroppedInvalid} dupeDropped=${totalDroppedDupe} ` +
+      `uniqueValid=${prospects.length} sampleEmails=${JSON.stringify(sampleEmails)}`
+    );
 
     // ── Campaign creation strategy ──────────────────────────────────────────
     // Instantly supports full API campaign creation — no manual UI needed.

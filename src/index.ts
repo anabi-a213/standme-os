@@ -14,7 +14,7 @@ import { startScheduler } from './scheduler';
 import { logger } from './utils/logger';
 import { writeSystemLog } from './utils/system-log';
 import { canApprove, getUserRole, UserRole } from './config/access';
-import { handleApproval } from './services/approvals';
+import { handleApproval, logApprovalStoreStatus } from './services/approvals';
 import { initSheets } from './services/google/sheets-init';
 import { loadRuntimeConfig } from './services/runtime-config';
 import { warmGoogleAuth } from './services/google/auth';
@@ -65,6 +65,9 @@ async function main() {
 
   // Auto-check and create any missing Google Sheets tabs
   initSheets().catch(err => logger.warn(`[Sheets Init] Failed: ${err.message}`));
+
+  // Log approval store state at startup (will always be 0 on cold start — confirms clean state)
+  logApprovalStoreStatus();
 
   // Register all agents
   const agents = [

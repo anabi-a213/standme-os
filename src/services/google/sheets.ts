@@ -2,6 +2,7 @@ import { google, sheets_v4 } from 'googleapis';
 import { getGoogleAuth } from './auth';
 import { SheetConfig } from '../../config/sheets';
 import { retry } from '../../utils/retry';
+import { logger } from '../../utils/logger';
 
 let _sheets: sheets_v4.Sheets | null = null;
 
@@ -138,4 +139,55 @@ export function sheetUrl(config: SheetConfig): string {
 /** True if the sheet is reachable — works for both SHEET_* and SPREADSHEET_ID setups */
 export function hasSheet(config: SheetConfig): boolean {
   return !!(process.env[config.envKey] || process.env.SPREADSHEET_ID);
+}
+
+/**
+ * Validate that the actual header row in a Google Sheet matches the column mapping
+ * defined in the SheetConfig.  Logs a WARNING if mismatches are found — does NOT throw.
+ *
+ * Call this at startup (or in /healthcheck) for critical sheets (e.g. LEAD_MASTER,
+ * OUTREACH_LOG) to catch manual column reorders before they silently corrupt writes.
+ *
+ * Returns true if no mismatches were found, false otherwise.
+ *
+ * Example usage:
+ *   await validateSheetHeaders(SHEETS.LEAD_MASTER);
+ */
+export async function validateSheetHeaders(config: SheetConfig): Promise<boolean> {
+  try {
+    const rows = await readSheet(config, 'A1:Z1');
+    if (!rows || rows.length === 0) {
+      logger.warn(`[Sheets] validateSheetHeaders(${config.tabName}): header row not found — sheet may be empty`);
+      return false;
+    }
+    const actualHeaders: string[] = rows[0] || [];
+    const mismatches: string[] = [];
+
+    for (const [field, col] of Object.entries(config.columns)) {
+      const colIdx = col.charCodeAt(0) - 'A'.charCodeAt(0);
+      const actualHeader = (actualHeaders[colIdx] || '').trim().toLowerCase();
+      const expectedField = field.toLowerCase();
+
+      // Allow if the actual header contains the field name or vice-versa (case-insensitive)
+      // This is a loose check — exact match is often not possible due to human-friendly headers
+      if (actualHeader && !actualHeader.includes(expectedField) && !expectedField.includes(actualHeader)) {
+        mismatches.push(`col ${col} (${field}): sheet has "${actualHeaders[colIdx] || 'empty'}" — expected field matching "${field}"`);
+      }
+    }
+
+    if (mismatches.length > 0) {
+      logger.warn(
+        `[Sheets] validateSheetHeaders(${config.tabName}): ${mismatches.length} column mismatch(es) detected!\n` +
+        mismatches.map(m => `  ⚠️  ${m}`).join('\n') + '\n' +
+        `  This may mean columns were manually reordered in the sheet. Check objectToRow() writes for this tab.`
+      );
+      return false;
+    }
+
+    logger.info(`[Sheets] validateSheetHeaders(${config.tabName}): OK — ${actualHeaders.length} headers match config`);
+    return true;
+  } catch (err: any) {
+    logger.warn(`[Sheets] validateSheetHeaders(${config.tabName}): could not read headers — ${err.message}`);
+    return false;
+  }
 }

@@ -33,13 +33,21 @@ export function registerApproval(id: string, approval: PendingApproval): void {
     if (now - val.timestamp > 86400000) pendingApprovals.delete(key);
   }
   pendingApprovals.set(id, approval);
-  logger.info(`[Approvals] Registered: ${id} — "${approval.action}" (in-memory only — lost on restart)`);
+  logger.info(`[Approvals] Registered: ${id} — "${approval.action}" (in-memory only — lost on restart) | total pending: ${pendingApprovals.size}`);
 }
 
 export async function handleApproval(id: string, approved: boolean): Promise<string | null> {
   const pending = pendingApprovals.get(id);
   if (!pending) {
-    logger.warn(`[Approvals] handleApproval(${id}): not found — callback expired (server restart?) or ID is wrong`);
+    // Distinguish between restart-loss and genuine expiry/wrong-ID:
+    // There are currently 0 pending approvals only if the server just restarted.
+    const likelyRestart = pendingApprovals.size === 0;
+    logger.warn(
+      `[Approvals] handleApproval(${id}): not found — ` +
+      (likelyRestart
+        ? 'server likely restarted (0 pending approvals in memory). Re-run the original command to get a fresh token.'
+        : `ID not in pending map (${pendingApprovals.size} other approvals present). Check ID for typos.`)
+    );
     return null;
   }
 
@@ -47,7 +55,10 @@ export async function handleApproval(id: string, approved: boolean): Promise<str
   // but guard here too so a stale entry cannot be executed after 24h)
   if (Date.now() - pending.timestamp > 86400000) {
     pendingApprovals.delete(id);
-    logger.warn(`[Approvals] handleApproval(${id}): approval expired (>24h old) — deleted`);
+    logger.warn(
+      `[Approvals] handleApproval(${id}): approval expired (>24h old) — deleted. ` +
+      `Approval "${pending.action}" expired — was this from before a restart? Re-run the command to get a fresh approval token.`
+    );
     return null;
   }
 
@@ -90,4 +101,22 @@ export function getPendingApprovals(): { id: string; action: string; timestamp: 
   return [...pendingApprovals.entries()]
     .filter(([, v]) => now - v.timestamp < 86400000)
     .map(([id, v]) => ({ id, action: v.action, timestamp: v.timestamp }));
+}
+
+/**
+ * Log the current state of the approvals store.
+ * Call this at startup so Railway logs show how many (if any) approvals
+ * were registered before the process started — normally 0 after a cold start.
+ */
+export function logApprovalStoreStatus(): void {
+  const count = pendingApprovals.size;
+  if (count === 0) {
+    logger.info('[Approvals] Startup: approval store is empty (expected after fresh start)');
+  } else {
+    // Should never happen on startup — would mean the Map survived somehow
+    const list = [...pendingApprovals.entries()]
+      .map(([id, v]) => `  • ${id}: "${v.action}"`)
+      .join('\n');
+    logger.warn(`[Approvals] Startup: ${count} approval(s) found in store:\n${list}`);
+  }
 }

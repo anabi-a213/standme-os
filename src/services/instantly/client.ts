@@ -415,11 +415,8 @@ export async function findCampaignByName(showName: string): Promise<InstantlyCam
 // ─── Lead Methods ─────────────────────────────────────────────────────────────
 
 /**
- * Add leads to a campaign in batches of 100.
- * Instantly deduplicates automatically with skip_if_in_campaign.
- */
-/**
- * Build a single lead payload (fields Instantly v2 accepts).
+ * Build the per-lead object inside the leads[] array.
+ * Keys must match the Instantly v2 bulk-add schema exactly.
  */
 function buildLeadPayload(l: InstantlyLead) {
   return {
@@ -430,16 +427,22 @@ function buildLeadPayload(l: InstantlyLead) {
     personalization: l.personalization || '',
     website:         l.website         || '',
     phone:           l.phone           || '',
-    ...(l.custom_variables ? { variables: l.custom_variables } : {}),
+    ...(l.custom_variables ? { custom_variables: l.custom_variables } : {}),
   };
 }
 
 /**
- * Add leads to a campaign.
+ * Add leads to an Instantly campaign using the v2 bulk endpoint.
  *
- * Instantly v2 API: POST /leads with ONE lead per request, email at TOP LEVEL.
- * Body: { campaign_id, email, first_name, last_name, company_name, ... }
- * There is no bulk/array endpoint — we send up to 20 concurrent requests.
+ * Instantly v2 API: POST /leads
+ * Body: { campaign_id, leads: [...], skip_if_in_workspace, skip_if_in_campaign }
+ *
+ * Leads are batched at 100 per request.  Each batch is logged before sending so
+ * the exact payload is visible in Railway logs if Instantly rejects it.
+ *
+ * Root-cause guard: any lead whose email is empty or malformed after sanitization
+ * is hard-filtered before batching — they are the most common cause of
+ * "Email is required" errors from the API.
  */
 export async function addLeads(
   campaignId: string,
@@ -447,79 +450,115 @@ export async function addLeads(
   options: { skipIfInWorkspace?: boolean; skipIfInCampaign?: boolean } = {}
 ): Promise<{ added: number; skipped: number; failed: number }> {
 
-  // Sanitize ALL leads first — strips bad emails, cleans names, normalises URLs
-  const valid: InstantlyLead[] = [];
+  // ── Step 1: sanitize ─────────────────────────────────────────────────────
+  // sanitizeLead validates email, cleans names/URLs, and returns null on bad email.
+  const sanitized: InstantlyLead[] = [];
   let dropped = 0;
   for (const l of leads) {
     const s = sanitizeLead(l);
-    if (s) valid.push(s);
+    if (s) sanitized.push(s);
     else dropped++;
   }
   if (dropped > 0) {
-    logger.warn(`[Instantly] addLeads: dropped ${dropped}/${leads.length} leads (invalid/missing email)`);
+    logger.warn(`[Instantly] addLeads: dropped ${dropped}/${leads.length} leads (invalid/missing email after sanitization)`);
   }
+
+  // ── Step 2: hard email guard (belt-and-suspenders) ───────────────────────
+  // Even after sanitizeLead, make sure no lead sneaks in with an empty email.
+  const valid = sanitized.filter(l => l.email && l.email.includes('@'));
+  const hardDropped = sanitized.length - valid.length;
+  if (hardDropped > 0) {
+    logger.warn(`[Instantly] addLeads: hard-filtered ${hardDropped} leads that passed sanitizeLead but had no @`);
+  }
+
   if (valid.length === 0) {
-    logger.warn('[Instantly] addLeads: no valid leads after sanitization — nothing sent');
+    logger.warn('[Instantly] addLeads: no valid leads after sanitization — nothing sent to Instantly');
     return { added: 0, skipped: 0, failed: 0 };
   }
 
-  logger.info(`[Instantly] addLeads: sending ${valid.length} leads to campaign ${campaignId}`);
+  // ── Step 3: pre-send diagnostic (first 3 leads) ──────────────────────────
+  // Printed to Railway logs so we can confirm email fields are populated.
+  const sample = valid.slice(0, 3).map(l => ({
+    email: l.email,
+    first_name: l.first_name,
+    company_name: l.company_name,
+  }));
+  logger.info(`[Instantly] addLeads: sending ${valid.length} leads to campaign ${campaignId} | sample: ${JSON.stringify(sample)}`);
 
   let added = 0;
   let skipped = 0;
   let failed = 0;
 
-  // Log first lead payload so we can confirm email is populated correctly in production
-  if (valid.length > 0) {
-    const firstPayload = buildLeadPayload(valid[0]);
-    logger.info(`[Instantly] addLeads first-lead diagnostic: email="${firstPayload.email}" first_name="${firstPayload.first_name}" company="${firstPayload.company_name}"`);
-  }
+  // ── Step 4: batch by 100 and POST as leads[] array ───────────────────────
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < valid.length; i += BATCH_SIZE) {
+    const batch = valid.slice(i, i + BATCH_SIZE);
 
-  // Send up to 20 concurrent requests, pause 500ms between groups
-  const CONCURRENCY = 20;
-  for (let i = 0; i < valid.length; i += CONCURRENCY) {
-    const slice = valid.slice(i, i + CONCURRENCY);
+    // Log batch header so every batch is traceable in production logs
+    logger.info(
+      `[Instantly] Sending batch ${i + 1}–${i + batch.length} of ${valid.length} leads` +
+      ` — first email: ${batch[0].email}`
+    );
 
-    await Promise.all(slice.map(async (l) => {
-      try {
-        // Instantly v2 single-lead endpoint: email at top level of body
-        const body: Record<string, unknown> = {
-          campaign_id:          campaignId,
-          skip_if_in_workspace: options.skipIfInWorkspace ?? true,
-          skip_if_in_campaign:  options.skipIfInCampaign  ?? true,
-          ...buildLeadPayload(l),
-        };
+    const body = {
+      campaign_id:          campaignId,
+      leads:                batch.map(buildLeadPayload),
+      skip_if_in_workspace: options.skipIfInWorkspace ?? true,
+      skip_if_in_campaign:  options.skipIfInCampaign  ?? true,
+    };
 
-        const resp = await getClient().post('/leads', body)
-          .catch(err => { throw apiError(err, 'addLead'); });
+    try {
+      const resp = await getClient().post('/leads', body)
+        .catch(err => { throw apiError(err, 'addLeads batch'); });
 
-        const r = resp.data;
-        // Instantly may return duplicate/skip status in various fields
-        if (r?.duplicate || r?.skipped || r?.status === 'skipped') skipped++;
-        else added++;
+      const r = resp.data;
 
-      } catch (err: any) {
-        const msg: string = err?.message || String(err);
-        if (msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('already')) {
-          skipped++;
-        } else {
-          failed++;
-          // Log every failure so root cause is visible in Railway logs — not just the first
-          logger.warn(`[Instantly] addLead failed for ${l.email}: ${msg}`);
+      // Instantly v2 bulk response shapes vary — handle all known variants:
+      //   { added: N, skipped: N, failed: N }     — standard summary
+      //   { status: 'success', count: N }          — older shape
+      //   Array of per-lead results                — some plan tiers
+      if (typeof r?.added === 'number' || typeof r?.skipped === 'number' || typeof r?.failed === 'number') {
+        added   += Number(r.added   ?? 0);
+        skipped += Number(r.skipped ?? 0);
+        failed  += Number(r.failed  ?? 0);
+      } else if (Array.isArray(r)) {
+        for (const item of r) {
+          if (item?.duplicate || item?.skipped || item?.status === 'skipped') skipped++;
+          else if (item?.error || item?.status === 'error') failed++;
+          else added++;
         }
+      } else {
+        // Unknown success shape — assume all added (Instantly returned 2xx)
+        added += batch.length;
       }
-    }));
 
-    // Log progress every 100 leads
-    if ((i + CONCURRENCY) % 100 === 0 || i + CONCURRENCY >= valid.length) {
-      const done = Math.min(i + CONCURRENCY, valid.length);
-      logger.info(`[Instantly] addLeads progress: ${done}/${valid.length} processed (added=${added} skipped=${skipped} failed=${failed})`);
+      logger.info(
+        `[Instantly] Batch ${i + 1}–${i + batch.length} complete` +
+        ` (added=${added} skipped=${skipped} failed=${failed})`
+      );
+
+    } catch (err: any) {
+      const msg: string = err?.message || String(err);
+
+      // If Instantly says "Email is required", dump the first 5 leads from the batch
+      // so we can see exactly what was sent — this is the most common failure mode.
+      if (msg.toLowerCase().includes('email') || msg.toLowerCase().includes('required')) {
+        const dump = batch.slice(0, 5).map(buildLeadPayload);
+        logger.error(
+          `[Instantly] "Email is required" error on batch ${i + 1}–${i + batch.length}.` +
+          ` First 5 lead payloads: ${JSON.stringify(dump)}`
+        );
+      } else {
+        logger.warn(`[Instantly] Batch ${i + 1}–${i + batch.length} failed: ${msg}`);
+      }
+
+      failed += batch.length;
     }
 
-    if (i + CONCURRENCY < valid.length) await new Promise(r => setTimeout(r, 500));
+    if (i + BATCH_SIZE < valid.length) await new Promise(r => setTimeout(r, 300));
   }
 
-  logger.info(`[Instantly] addLeads complete: added=${added} skipped=${skipped} failed=${failed} dropped=${dropped}`);
+  logger.info(`[Instantly] addLeads complete: added=${added} skipped=${skipped} failed=${failed} dropped=${dropped + hardDropped}`);
   return { added, skipped, failed };
 }
 
