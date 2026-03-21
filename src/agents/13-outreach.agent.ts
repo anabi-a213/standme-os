@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, updateCell, appendRow, appendRows, objectToRow } from '../services/google/sheets';
+import { readSheet, updateCell, updateRange, appendRow, appendRows, objectToRow } from '../services/google/sheets';
 import {
   listCampaigns, getCampaign, createCampaign, findCampaignByName,
   setCampaignStatus, activateCampaign,
@@ -1160,10 +1160,14 @@ export class OutreachAgent extends BaseAgent {
       const rowIdx = log.findIndex(r => r[0] === logId);
       if (rowIdx < 0) return;
       const row = rowIdx + 1;
+
+      // Columns F (status) and H (instantlyId/ref) are not adjacent — update
+      // them separately but back-to-back to minimise the half-update window.
+      // We still use two calls because updateRange requires a contiguous range.
       if (status) await updateCell(SHEETS.OUTREACH_LOG, row, 'F', status);
       if (ref)    await updateCell(SHEETS.OUTREACH_LOG, row, 'H', ref);
     } catch (err: any) {
-      logger.warn(`[Outreach] Could not update log status: ${err.message}`);
+      logger.warn(`[Outreach] Could not update log status for ${logId}: ${err.message}`);
     }
   }
 }

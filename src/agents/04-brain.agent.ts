@@ -10,6 +10,7 @@ import { formatType3, sendToTeam } from '../services/telegram/bot';
 import { buildKnowledgeContext, getKnowledgeStats, saveKnowledge } from '../services/knowledge';
 import { getAgent } from './registry';
 import { logger } from '../utils/logger';
+import { writeSystemLog } from '../utils/system-log';
 import { getStaticKnowledge } from '../config/standme-knowledge';
 
 // Conversation memory: last 15 messages per user
@@ -437,13 +438,23 @@ export class BrainAgent extends BaseAgent {
       if (pending.length === 1) {
         const p = pending[0];
         await this.respond(ctx.chatId, `✅ Executing approval: *${p.action}*...`);
+        let approvalOk = false;
         try {
           const result = await handleApproval(p.id, true);
+          approvalOk = true;
           await this.respond(ctx.chatId, result || '✅ Done.');
         } catch (err: any) {
           await this.respond(ctx.chatId, `❌ Approval failed: ${err.message}`);
         }
-        return { success: true, message: 'Natural-language approval handled', confidence: 'HIGH' };
+        // Audit trail — match the SYSTEM_LOG write that index.ts does for /approve_xxx commands
+        await writeSystemLog({
+          agent: 'Brain',
+          actionType: 'APPROVE',
+          detail: p.id,
+          result: approvalOk ? 'SUCCESS' : 'FAIL',
+          notes: 'via natural-language approval in Brain',
+        }).catch(() => {}); // never crash the main flow
+        return { success: approvalOk, message: approvalOk ? 'Natural-language approval handled' : 'Approval callback failed', confidence: 'HIGH' };
       } else if (pending.length > 1) {
         const list = pending.map((p, i) => `${i + 1}. ${p.action}\n   → \`/approve_${p.id}\``).join('\n\n');
         await this.respond(ctx.chatId,
