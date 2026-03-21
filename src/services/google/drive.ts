@@ -381,14 +381,66 @@ export async function readSlidesAsText(fileId: string): Promise<string> {
   }, 'readSlidesAsText');
 }
 
+// ---- Read Excel/CSV file downloaded from Drive ----
+
+async function readExcelOrCsvAsText(fileId: string, mimeType: string): Promise<string> {
+  return retry(async () => {
+    const isText = mimeType === 'text/csv' || mimeType === 'text/plain' || mimeType === 'text/tab-separated-values';
+    const response = await getDriveClient().files.get(
+      { fileId, alt: 'media', supportsAllDrives: true } as any,
+      { responseType: isText ? 'text' : 'arraybuffer' },
+    );
+
+    if (isText) {
+      const text = response.data as string;
+      return typeof text === 'string' ? text.slice(0, 6000) : '';
+    }
+
+    // Binary xlsx/xls — parse with xlsx library
+    // Dynamically require to avoid breaking if xlsx not installed
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const XLSX = require('xlsx');
+      const workbook  = XLSX.read(response.data as ArrayBuffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) return '';
+      const sheet  = workbook.Sheets[sheetName];
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      // Format as readable text: header row + first 20 data rows
+      const lines = rows.slice(0, 21).map((r: any[]) => r.map((c: any) => String(c ?? '')).join('\t'));
+      return lines.join('\n').slice(0, 6000);
+    } catch (xlsxErr: any) {
+      return `[Binary file — use /importleads to import this spreadsheet into Lead Master]`;
+    }
+  }, 'readExcelOrCsvAsText');
+}
+
 // ---- Read any file content based on type ----
 
 export async function readFileContent(file: DriveFile): Promise<string> {
   const mime = file.mimeType;
-  if (mime === 'application/vnd.google-apps.document') return readDocContent(file.id);
-  if (mime === 'application/vnd.google-apps.spreadsheet') return readSheetAsText(file.id);
+  if (mime === 'application/vnd.google-apps.document')     return readDocContent(file.id);
+  if (mime === 'application/vnd.google-apps.spreadsheet')  return readSheetAsText(file.id);
   if (mime === 'application/vnd.google-apps.presentation') return readSlidesAsText(file.id);
-  if (mime === 'application/pdf') return readPdfAsText(file.id);
+  if (mime === 'application/pdf')                          return readPdfAsText(file.id);
+
+  // Excel / CSV / TSV — downloaded and parsed
+  const isSpreadsheet =
+    mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || // xlsx
+    mime === 'application/vnd.ms-excel' ||                                           // xls
+    mime === 'text/csv' ||
+    mime === 'text/tab-separated-values' ||
+    mime === 'text/plain' ||
+    file.name.match(/\.(xlsx?|csv|tsv)$/i);
+
+  if (isSpreadsheet) {
+    // Try reading as native Google Sheet first (in case Drive auto-converted it)
+    const asSheet = await readSheetAsText(file.id).catch(() => '');
+    if (asSheet && asSheet.trim()) return asSheet;
+    // Fall back to binary download + xlsx parse
+    return readExcelOrCsvAsText(file.id, mime);
+  }
+
   return '';
 }
 
