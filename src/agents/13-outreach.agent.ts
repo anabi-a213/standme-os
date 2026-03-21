@@ -384,6 +384,7 @@ export class OutreachAgent extends BaseAgent {
 
     let imported = 0;
     let skipped  = 0;
+    const rowBatch: string[][] = [];
 
     for (let i = 0; i < allRecords.length; i++) {
       const rec         = allRecords[i];
@@ -391,8 +392,8 @@ export class OutreachAgent extends BaseAgent {
       if (!companyName) { skipped++; continue; }
 
       const email = (rec.contactEmail || '').trim().toLowerCase();
-      if (email && existingEmails.has(email))                     { skipped++; continue; }
-      if (existingCompanies.has(companyName.toLowerCase()))       { skipped++; continue; }
+      if (email && existingEmails.has(email))               { skipped++; continue; }
+      if (existingCompanies.has(companyName.toLowerCase())) { skipped++; continue; }
 
       const industry    = (rec.industry || '').toLowerCase();
       const coreInds    = ['solar', 'energy', 'medical', 'healthcare', 'food', 'packaging', 'technology', 'industrial'];
@@ -413,10 +414,10 @@ export class OutreachAgent extends BaseAgent {
         rec.phone       ? `Phone: ${rec.phone}`       : '',
       ].filter(Boolean).join(' | ');
 
-      await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
+      rowBatch.push(objectToRow(SHEETS.LEAD_MASTER, {
         id: leadId, timestamp: new Date().toISOString(),
         companyName, contactName: rec.contactName || '',
-        contactEmail: email,          // col E
+        contactEmail: email,
         contactTitle: rec.contactTitle || '',
         showName: showValidation.match?.name || showName,
         showCity: showValidation.match?.city || '',
@@ -431,7 +432,7 @@ export class OutreachAgent extends BaseAgent {
         dmName: rec.contactName || '',
         dmTitle: rec.contactTitle || '',
         dmLinkedIn: '',
-        dmEmail: email,               // col V — also here so /bulkoutreach finds it immediately
+        dmEmail: email,  // col V — so /bulkoutreach finds it immediately
         outreachReadiness: email ? '7' : '3',
         language: 'en', notes,
       }));
@@ -439,11 +440,12 @@ export class OutreachAgent extends BaseAgent {
       existingEmails.add(email || `_noemail_${leadId}`);
       existingCompanies.add(companyName.toLowerCase());
       imported++;
+    }
 
-      if (imported % 50 === 0) {
-        await this.respond(ctx.chatId, `⏳ Imported ${imported} so far...`);
-        await new Promise(r => setTimeout(r, 1000));
-      }
+    // Write ALL rows in a single batch — avoids Sheets 60-writes/min quota
+    if (rowBatch.length > 0) {
+      await this.respond(ctx.chatId, `⏳ Writing ${rowBatch.length} records to Lead Master...`);
+      await appendRows(SHEETS.LEAD_MASTER, rowBatch);
     }
 
     await this.respond(ctx.chatId,

@@ -434,10 +434,12 @@ export async function readFileContent(file: DriveFile): Promise<string> {
     file.name.match(/\.(xlsx?|csv|tsv)$/i);
 
   if (isSpreadsheet) {
-    // Try reading as native Google Sheet first (in case Drive auto-converted it)
-    const asSheet = await readSheetAsText(file.id).catch(() => '');
-    if (asSheet && asSheet.trim()) return asSheet;
-    // Fall back to binary download + xlsx parse
+    // For native Google Sheets only — files.export fails on uploaded xlsx files
+    if (mime === 'application/vnd.google-apps.spreadsheet') {
+      const asSheet = await readSheetAsText(file.id).catch(() => '');
+      if (asSheet && asSheet.trim()) return asSheet;
+    }
+    // Binary download + parse (handles uploaded xlsx, xls, csv, tsv)
     return readExcelOrCsvAsText(file.id, mime);
   }
 

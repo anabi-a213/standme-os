@@ -572,62 +572,55 @@ export async function removeLead(campaignId: string, email: string): Promise<voi
 
 // ─── Campaign Analytics ───────────────────────────────────────────────────────
 
+/** Parse stats from any Instantly response shape */
+function parseStats(d: any, fallbackId = '', fallbackName = ''): InstantlyCampaignSummary {
+  const sent    = Number(d?.emails_sent    ?? d?.total_sent     ?? d?.sent      ?? 0);
+  const opened  = Number(d?.total_opened   ?? d?.opened         ?? d?.opens     ?? 0);
+  const replied = Number(d?.total_replied  ?? d?.replied        ?? d?.replies   ?? 0);
+  const bounced = Number(d?.total_bounced  ?? d?.bounced        ?? 0);
+  return {
+    campaign_id:   String(d?.campaign_id   ?? d?.id  ?? fallbackId),
+    campaign_name: String(d?.campaign_name ?? d?.name ?? fallbackName),
+    total_leads:   Number(d?.total_leads   ?? d?.leads_count ?? 0),
+    emails_sent:   sent, opened, replied, bounced,
+    unsubscribed:  Number(d?.total_unsubscribed ?? d?.unsubscribed ?? 0),
+    open_rate:   sent > 0 ? Math.round((opened  / sent) * 100) : 0,
+    reply_rate:  sent > 0 ? Math.round((replied / sent) * 100) : 0,
+    bounce_rate: sent > 0 ? Math.round((bounced / sent) * 100) : 0,
+  };
+}
+
+/** Zero summary returned when analytics are unavailable */
+function emptySummary(campaignId: string, campaignName = ''): InstantlyCampaignSummary {
+  return { campaign_id: campaignId, campaign_name: campaignName, total_leads: 0,
+    emails_sent: 0, opened: 0, replied: 0, bounced: 0, unsubscribed: 0,
+    open_rate: 0, reply_rate: 0, bounce_rate: 0 };
+}
+
 export async function getCampaignSummary(
   campaignId: string
 ): Promise<InstantlyCampaignSummary> {
-  return retry(async () => {
-    const resp = await getClient().post('/analytics/campaigns/summary', {
-      campaign_ids: [campaignId],
-    }).catch(err => { throw apiError(err, 'getCampaignSummary'); });
-
-    const data: any[] = Array.isArray(resp.data) ? resp.data : [resp.data].filter(Boolean);
-    const d = data[0] ?? {};
-    const sent    = Number(d?.emails_sent    ?? d?.total_sent  ?? 0);
-    const opened  = Number(d?.total_opened  ?? d?.opened       ?? 0);
-    const replied = Number(d?.total_replied ?? d?.replied      ?? 0);
-    const bounced = Number(d?.total_bounced ?? d?.bounced      ?? 0);
-    return {
-      campaign_id:   campaignId,
-      campaign_name: String(d?.campaign_name ?? ''),
-      total_leads:   Number(d?.total_leads   ?? 0),
-      emails_sent:   sent,
-      opened, replied, bounced,
-      unsubscribed:  Number(d?.total_unsubscribed ?? d?.unsubscribed ?? 0),
-      open_rate:   sent > 0 ? Math.round((opened  / sent) * 100) : 0,
-      reply_rate:  sent > 0 ? Math.round((replied / sent) * 100) : 0,
-      bounce_rate: sent > 0 ? Math.round((bounced / sent) * 100) : 0,
-    };
-  }, 'getCampaignSummary');
+  // Try the campaign GET endpoint — Instantly v2 embeds stats in the campaign object
+  // The POST /analytics/campaigns/summary endpoint was removed in v2 (returns 404)
+  try {
+    const resp = await getClient().get(`/campaigns/${campaignId}`)
+      .catch(err => { throw apiError(err, 'getCampaignSummary'); });
+    const d = resp.data ?? {};
+    return parseStats(d, campaignId, d.name ?? '');
+  } catch {
+    return emptySummary(campaignId);
+  }
 }
 
 export async function getAllCampaignSummaries(
   campaignIds: string[]
 ): Promise<InstantlyCampaignSummary[]> {
   if (!campaignIds.length) return [];
-  return retry(async () => {
-    const resp = await getClient().post('/analytics/campaigns/summary', {
-      campaign_ids: campaignIds,
-    }).catch(err => { throw apiError(err, 'getAllCampaignSummaries'); });
-
-    const data: any[] = Array.isArray(resp.data) ? resp.data : [resp.data].filter(Boolean);
-    return data.map(d => {
-      const sent    = Number(d?.emails_sent    ?? d?.total_sent  ?? 0);
-      const opened  = Number(d?.total_opened  ?? d?.opened       ?? 0);
-      const replied = Number(d?.total_replied ?? d?.replied      ?? 0);
-      const bounced = Number(d?.total_bounced ?? d?.bounced      ?? 0);
-      return {
-        campaign_id:   String(d?.campaign_id   ?? ''),
-        campaign_name: String(d?.campaign_name ?? ''),
-        total_leads:   Number(d?.total_leads   ?? 0),
-        emails_sent:   sent,
-        opened, replied, bounced,
-        unsubscribed:  Number(d?.total_unsubscribed ?? d?.unsubscribed ?? 0),
-        open_rate:   sent > 0 ? Math.round((opened  / sent) * 100) : 0,
-        reply_rate:  sent > 0 ? Math.round((replied / sent) * 100) : 0,
-        bounce_rate: sent > 0 ? Math.round((bounced / sent) * 100) : 0,
-      };
-    });
-  }, 'getAllCampaignSummaries');
+  // Fetch each campaign individually — no bulk analytics endpoint in v2
+  const results = await Promise.all(
+    campaignIds.map(id => getCampaignSummary(id))
+  );
+  return results;
 }
 
 // ─── Sending Accounts (Inboxes) ───────────────────────────────────────────────
