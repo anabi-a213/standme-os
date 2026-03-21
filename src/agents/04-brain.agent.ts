@@ -134,6 +134,12 @@ NEVER invent, guess, or hallucinate a command that is not in this list.
 If someone types a command that is not in this list (e.g. /woodpecker, /indexwoodpecker, /testlead), tell them clearly: "That command doesn't exist. Here are the real commands available: ..." — then show the relevant section below.
 If you are unsure whether a command exists — it does NOT exist. Do not suggest it.
 
+⚡ EXECUTION RULES — READ CAREFULLY:
+1. NEVER write "[TRIGGER: ...]" — that tag does not exist. The only valid tag is [ACTION: /command args].
+2. NEVER write "I'll trigger...", "I'm going to run...", "Let me execute...", "I will launch...". Just DO it — append [ACTION: /command args] and give ONE short confirmation line. The system executes silently; the user sees the result.
+3. If the user explicitly asks to run a command (e.g. "run bulkoutreach for intersolar", "do bulk outreach intersolar"), your ENTIRE response is ONE line: "On it — running /bulkoutreach intersolar now." followed by [ACTION: /bulkoutreach intersolar]. Nothing else.
+4. Do NOT explain what the command does before running it. Do NOT describe what will happen. Just run it.
+
 When the user wants an action, end your response with [ACTION: /command args]:
 - /newlead — add new lead. EXACT FORMAT (pipe-separated, this order): CompanyName | ContactName | ContactEmail | ShowName | StandSizeSqm | Budget | Industry  (e.g. /newlead Solar GmbH | Hans Müller | hans@solar.de | Intersolar Munich 2025 | 36 | €50k | Solar/Energy)
 - /enrich — enrich leads with decision maker info
@@ -319,6 +325,81 @@ export class BrainAgent extends BaseAgent {
     }
 
     const message = ctx.args || ctx.command;
+
+    // ── Direct Command Router ──────────────────────────────────────────────────
+    // When the user's message is clearly a request to run a specific command,
+    // route directly to that agent WITHOUT going through the AI chat.
+    // This prevents verbose "I'm going to do X" responses and [TRIGGER:...] fakes.
+    //
+    // Pattern: explicit command /cmd or natural language that maps 1:1 to a command.
+    const directRoutes: Array<{
+      pattern: RegExp;
+      command: string;
+      extractArgs: (m: RegExpMatchArray) => string;
+    }> = [
+      // /bulkoutreach [show]  — "bulk outreach intersolar", "do bulkoutreach for gulfood", etc.
+      {
+        pattern: /^(?:\/bulkoutreach\s+|(?:do\s+)?bulk[\s-]?outreach\s+(?:for\s+)?|push.*leads.*?for\s+|send.*outreach.*?for\s+)(.+)$/i,
+        command: '/bulkoutreach',
+        extractArgs: m => m[1].trim(),
+      },
+      // /importleads [show]
+      {
+        pattern: /^(?:\/importleads\s+|import\s+leads?\s+(?:for\s+)?|load\s+leads?\s+(?:for\s+)?)(.+)$/i,
+        command: '/importleads',
+        extractArgs: m => m[1].trim(),
+      },
+      // /replies [show]
+      {
+        pattern: /^(?:\/replies\s+|(?:check|get|show)\s+replies?\s+(?:for\s+)?)(.+)$/i,
+        command: '/replies',
+        extractArgs: m => m[1].trim(),
+      },
+      // /campaigns — "list campaigns", "show campaigns", "my campaigns"
+      {
+        pattern: /^(?:\/campaigns|(?:list|show|get|check)\s+campaigns?)$/i,
+        command: '/campaigns',
+        extractArgs: () => '',
+      },
+      // /outreachstatus
+      {
+        pattern: /^(?:\/outreachstatus|outreach\s+status|check\s+outreach)$/i,
+        command: '/outreachstatus',
+        extractArgs: () => '',
+      },
+      // /instantlyverify
+      {
+        pattern: /^(?:\/instantlyverify|verify\s+instantly|test\s+instantly|instantly\s+(?:test|check|verify))$/i,
+        command: '/instantlyverify',
+        extractArgs: () => '',
+      },
+      // /status
+      {
+        pattern: /^(?:\/status|project\s+status|show\s+status|status\s+update)$/i,
+        command: '/status',
+        extractArgs: () => '',
+      },
+      // /deadlines
+      {
+        pattern: /^(?:\/deadlines|(?:show|check|list)\s+deadlines?)$/i,
+        command: '/deadlines',
+        extractArgs: () => '',
+      },
+    ];
+
+    for (const route of directRoutes) {
+      const m = message.trim().match(route.pattern);
+      if (m) {
+        const agent = getAgent(route.command);
+        if (agent) {
+          const args = route.extractArgs(m);
+          logger.info(`[Brain] Direct route → ${route.command} ${args}`);
+          const routeCtx: AgentContext = { ...ctx, command: route.command, args };
+          return agent.run(routeCtx);
+        }
+      }
+    }
+    // ── End Direct Command Router ──────────────────────────────────────────────
 
     // Approval/rejection commands are handled upstream:
     // - Telegram: caught by index.ts handler before Brain is called
