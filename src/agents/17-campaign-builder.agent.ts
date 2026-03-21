@@ -470,7 +470,7 @@ export class CampaignBuilderAgent extends BaseAgent {
           companyName:    exhibitor.companyName,
           contactName:    contact.name,
           contactEmail:   contact.email,
-          woodpeckerId:   String(wpId || ''),
+          instantlyId:   String(wpId || ''),
           status:         'SENT',
           classification: '',
           standSize: '', budget: '', showDates: '', phone: '', requirements: '',
@@ -774,7 +774,7 @@ export class CampaignBuilderAgent extends BaseAgent {
                 companyName: target.companyName,
                 contactName: target.contactName,
                 contactEmail: target.contactEmail,
-                woodpeckerId: String(wpId || ''),
+                instantlyId: String(wpId || ''),
                 status: 'SENT',
                 classification: '',
                 standSize: '', budget: '', showDates: '', phone: '', requirements: '',
@@ -1241,7 +1241,7 @@ export class CampaignBuilderAgent extends BaseAgent {
       'Test Company Ltd',      // D — companyName
       'Test Contact',          // E — contactName
       contactEmail,            // F — contactEmail
-      '',                      // G — woodpeckerId
+      '',                      // G — instantlyId
       'REPLIED',               // H — status (so /salesreplies picks it up)
       '',                      // I — classification
       '18sqm',                 // J — standSize

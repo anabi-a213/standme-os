@@ -68,7 +68,7 @@ export const SHEETS: Record<string, SheetConfig> = {
       sentDate: 'E',
       status: 'F', // OPENED/CLICKED/REPLIED/BOUNCED
       replyClassification: 'G',
-      woodpeckerId: 'H',
+      instantlyId: 'H',
       notes: 'I',
     },
     headerRow: 1,
@@ -210,7 +210,7 @@ export const SHEETS: Record<string, SheetConfig> = {
       companyName: 'D',
       contactName: 'E',
       contactEmail: 'F',
-      woodpeckerId: 'G',     // Woodpecker prospect ID
+      instantlyId: 'G',      // Instantly lead/campaign ID
       status: 'H',           // SENT | OPENED | REPLIED | INTERESTED | NOT_INTERESTED | QUALIFIED | LOST
       classification: 'I',   // AI classification of last reply
       standSize: 'J',        // collected during sales loop
