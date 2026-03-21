@@ -693,12 +693,28 @@ export async function getReplies(options: {
   limit?: number;
 } = {}): Promise<InstantlyReply[]> {
   return retry(async () => {
-    const params: Record<string, any> = { limit: options.limit ?? 100 };
+    // Instantly v2 unified emails endpoint — /emails/reply-emails was removed.
+    // Filter for reply emails with email_type=reply; fall back to unfiltered
+    // if the API rejects the filter (plan/version differences).
+    const params: Record<string, any> = {
+      limit: options.limit ?? 100,
+      email_type: 'reply',
+    };
     if (options.campaignId) params.campaign_id = options.campaignId;
-    if (options.since) params.after = options.since.toISOString();
+    // v2 uses min_timestamp_created instead of `after`
+    if (options.since) params.min_timestamp_created = options.since.toISOString();
 
-    const resp = await getClient().get('/emails/reply-emails', { params })
-      .catch(err => { throw apiError(err, 'getReplies'); });
+    let resp = await getClient().get('/emails', { params })
+      .catch(async (err) => {
+        // If email_type filter is rejected, retry without it
+        if (err?.response?.status === 400) {
+          const fallbackParams = { ...params };
+          delete fallbackParams.email_type;
+          return getClient().get('/emails', { params: fallbackParams })
+            .catch(err2 => { throw apiError(err2, 'getReplies'); });
+        }
+        throw apiError(err, 'getReplies');
+      });
 
     const items: any[] = Array.isArray(resp.data?.items) ? resp.data.items
       : Array.isArray(resp.data) ? resp.data : [];
@@ -708,10 +724,10 @@ export async function getReplies(options: {
       from_email:  String(r.from_email ?? r.from ?? ''),
       from_name:   String(r.from_name  ?? ''),
       subject:     String(r.subject    ?? ''),
-      body:        String(r.body       ?? r.text ?? ''),
-      timestamp:   String(r.timestamp  ?? r.created_at ?? ''),
+      body:        String(r.body       ?? r.text ?? r.body_plain ?? ''),
+      timestamp:   String(r.timestamp  ?? r.created_at ?? r.timestamp_created ?? ''),
       campaign_id: String(r.campaign_id ?? ''),
-      lead_email:  String(r.lead_email ?? r.from_email ?? ''),
+      lead_email:  String(r.lead_email ?? r.from_email ?? r.from ?? ''),
     }));
   }, 'getReplies');
 }
