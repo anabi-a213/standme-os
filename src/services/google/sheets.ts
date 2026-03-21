@@ -111,7 +111,14 @@ export function rowToObject(config: SheetConfig, row: string[]): Record<string, 
 
 // Convert object to row array using column mapping
 export function objectToRow(config: SheetConfig, obj: Record<string, string>): string[] {
-  const maxCol = Math.max(...Object.values(config.columns).map(c => c.charCodeAt(0) - 'A'.charCodeAt(0)));
+  const colEntries = Object.values(config.columns);
+  if (colEntries.length === 0) {
+    throw new Error(`objectToRow: sheet config "${config.tabName}" has no column mappings — cannot build row`);
+  }
+  const maxCol = Math.max(...colEntries.map(c => c.charCodeAt(0) - 'A'.charCodeAt(0)));
+  if (!isFinite(maxCol) || maxCol < 0) {
+    throw new Error(`objectToRow: sheet config "${config.tabName}" produced invalid column index (${maxCol}) — check column letters`);
+  }
   const row = new Array(maxCol + 1).fill('');
   for (const [field, col] of Object.entries(config.columns)) {
     const idx = col.charCodeAt(0) - 'A'.charCodeAt(0);

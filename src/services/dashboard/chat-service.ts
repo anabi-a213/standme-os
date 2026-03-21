@@ -21,7 +21,7 @@ function getConnectionStatus(): string {
     { name: 'Trello', ok: !!(process.env.TRELLO_API_KEY && process.env.TRELLO_TOKEN), missing: 'TRELLO_API_KEY, TRELLO_TOKEN' },
     { name: 'Claude AI', ok: !!process.env.ANTHROPIC_API_KEY, missing: 'ANTHROPIC_API_KEY' },
     { name: 'Telegram Bot', ok: !!process.env.TELEGRAM_BOT_TOKEN, missing: 'TELEGRAM_BOT_TOKEN' },
-    { name: 'Woodpecker', ok: !!process.env.WOODPECKER_API_KEY, missing: 'WOODPECKER_API_KEY' },
+    { name: 'Instantly (outreach)', ok: !!process.env.INSTANTLY_API_KEY, missing: 'INSTANTLY_API_KEY' },
   ];
   return checks.map(c => `  ${c.ok ? '✅' : `❌ ${c.name} — add ${c.missing} to Railway`}`
     .replace('✅', `✅ ${c.name}`)).join('\n');

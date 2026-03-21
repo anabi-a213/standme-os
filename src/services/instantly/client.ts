@@ -468,7 +468,12 @@ export async function addLeads(
   let added = 0;
   let skipped = 0;
   let failed = 0;
-  let firstError = '';   // log just the first unique error for diagnosis
+
+  // Log first lead payload so we can confirm email is populated correctly in production
+  if (valid.length > 0) {
+    const firstPayload = buildLeadPayload(valid[0]);
+    logger.info(`[Instantly] addLeads first-lead diagnostic: email="${firstPayload.email}" first_name="${firstPayload.first_name}" company="${firstPayload.company_name}"`);
+  }
 
   // Send up to 20 concurrent requests, pause 500ms between groups
   const CONCURRENCY = 20;
@@ -499,10 +504,8 @@ export async function addLeads(
           skipped++;
         } else {
           failed++;
-          if (!firstError) {
-            firstError = msg;
-            logger.warn(`[Instantly] addLead error (first of batch starting ${i}): ${msg}`);
-          }
+          // Log every failure so root cause is visible in Railway logs — not just the first
+          logger.warn(`[Instantly] addLead failed for ${l.email}: ${msg}`);
         }
       }
     }));

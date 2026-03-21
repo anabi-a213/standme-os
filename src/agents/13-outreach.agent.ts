@@ -111,19 +111,21 @@ export class OutreachAgent extends BaseAgent {
         const result   = await addLeads(campaign.id, prospects);
         const logDate  = new Date().toISOString();
 
-        for (const p of prospects) {
-          await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
-            id:          `OL-AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            leadId:      '',
-            companyName: p.company_name || '',
-            emailType:   'AUTO_PUSH',
-            sentDate:    logDate,
-            status:      'SENT',
-            replyClassification: '',
-            instantlyId: '',
-            notes: `Auto-push → Instantly campaign ${campaign.id} (${campaign.name})`,
-          })).catch(() => {});
-        }
+        // Batch-write all log rows in a single Sheets API call to avoid quota exhaustion
+        const logRows = prospects.map(p => objectToRow(SHEETS.OUTREACH_LOG, {
+          id:          `OL-AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          leadId:      '',
+          companyName: p.company_name || '',
+          emailType:   'AUTO_PUSH',
+          sentDate:    logDate,
+          status:      'SENT',
+          replyClassification: '',
+          instantlyId: '',
+          notes: `Auto-push → Instantly campaign ${campaign.id} (${campaign.name})`,
+        }));
+        await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
+          logger.warn(`[Outreach] OUTREACH_LOG batch write failed (non-fatal): ${err.message}`)
+        );
 
         results.push(`✅ *${campaign.name}*: pushed *${result.added}* new leads (${result.skipped} skipped dupes)`);
       } catch (err: any) {
@@ -475,11 +477,23 @@ export class OutreachAgent extends BaseAgent {
     await this.respond(ctx.chatId, `🔍 Scanning Lead Master for *${showFilter}* leads...`);
 
     const masterRows = await readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]);
+    let droppedBadEmail = 0;
     const leads = masterRows.slice(1).filter(r => {
       const show  = (r[6] || '').toLowerCase();
-      const email = r[21] || r[4];
-      return show.includes(showFilter) && !!email;
+      if (!show.includes(showFilter)) return false;
+      const email = (r[21] || r[4] || '').trim();
+      if (!email) return false;
+      // Require at least one @ with a dot in the domain — sanitizeLead will do full validation later
+      const parts = email.split('@');
+      if (parts.length !== 2 || !parts[0] || !parts[1] || !parts[1].includes('.')) {
+        droppedBadEmail++;
+        return false;
+      }
+      return true;
     });
+    if (droppedBadEmail > 0) {
+      logger.warn(`[Outreach] runBulkOutreach: dropped ${droppedBadEmail} ${showFilter} leads with malformed emails at pre-filter`);
+    }
 
     if (!leads.length) {
       const showOnly = masterRows.slice(1).filter(r => (r[6] || '').toLowerCase().includes(showFilter));
@@ -1143,13 +1157,16 @@ export async function reconstructBulkApproval(approvalId: string): Promise<strin
       if (!email || !email.includes('@')) continue;
       const dmName = r[18] || r[3] || '';
       const parts  = dmName.trim().split(' ').filter(Boolean);
-      prospects.push({
+      const raw: InstantlyLead = {
         email,
         first_name: parts[0] || 'Team',
         last_name:  parts.slice(1).join(' ') || '',
         company_name: r[2]  || '',
         personalization: r[10] || 'your upcoming trade show stand',
-      });
+      };
+      // Always sanitize before pushing — strips BOM, control chars, validates email format
+      const clean = sanitizeLead(raw);
+      if (clean) prospects.push(clean);
     }
 
     if (!prospects.length) return null;
@@ -1166,19 +1183,21 @@ export async function reconstructBulkApproval(approvalId: string): Promise<strin
     const result   = await addLeads(campaignId, prospects);
     const logDate  = new Date().toISOString();
 
-    for (const p of prospects) {
-      await appendRow(SHEETS.OUTREACH_LOG, objectToRow(SHEETS.OUTREACH_LOG, {
-        id:                 `OL-BULK-R-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        leadId:             '',
-        companyName:        p.company_name || '',
-        emailType:          'BULK_EMAIL_1',
-        sentDate:           logDate,
-        status:             'SENT',
-        replyClassification: '',
-        instantlyId:       '',
-        notes:              `Bulk reconstruct → Instantly campaign ${campaignId} (${campaignName}) | ${showFilter}`,
-      })).catch(() => {});
-    }
+    // Batch-write all log rows in a single Sheets API call to avoid quota exhaustion
+    const logRows = prospects.map(p => objectToRow(SHEETS.OUTREACH_LOG, {
+      id:                 `OL-BULK-R-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      leadId:             '',
+      companyName:        p.company_name || '',
+      emailType:          'BULK_EMAIL_1',
+      sentDate:           logDate,
+      status:             'SENT',
+      replyClassification: '',
+      instantlyId:       '',
+      notes:              `Bulk reconstruct → Instantly campaign ${campaignId} (${campaignName}) | ${showFilter}`,
+    }));
+    await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
+      logger.warn(`[Outreach] reconstructBulkApproval OUTREACH_LOG write failed (non-fatal): ${err.message}`)
+    );
 
     // Activate campaign if it was just created
     await activateCampaign(campaignId).catch(() => {});
