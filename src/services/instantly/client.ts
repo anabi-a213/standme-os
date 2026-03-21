@@ -114,6 +114,90 @@ export function resetInstantlyClient(): void {
   _client = null;
 }
 
+// ─── Data Sanitization ────────────────────────────────────────────────────────
+//
+// ALL data passes through here before touching Instantly's API.
+// Handles: whitespace, BOM/zero-width chars, encoding, length limits,
+// email validation, URL normalisation, unsafe characters in names.
+
+/** Strip BOM, zero-width spaces, non-printable chars, and trim */
+function cleanStr(s: unknown, maxLen = 255): string {
+  if (s == null) return '';
+  return String(s)
+    .replace(/^\uFEFF/, '')            // BOM
+    .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '') // zero-width / soft hyphen
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') // control chars
+    .trim()
+    .slice(0, maxLen);
+}
+
+/** Validate and normalise an email address.
+ *  Returns the cleaned email, or '' if it looks invalid. */
+function cleanEmail(raw: unknown): string {
+  const s = cleanStr(raw, 320).toLowerCase();
+  if (!s) return '';
+  // Must contain exactly one @, with non-empty local and domain parts
+  const parts = s.split('@');
+  if (parts.length !== 2) return '';
+  const [local, domain] = parts;
+  if (!local || !domain || !domain.includes('.')) return '';
+  // Strip any stray whitespace, quotes, angle-brackets that some sheets have
+  const clean = s.replace(/[<>"';\s]/g, '');
+  // Basic sanity: only allow chars valid in email addresses
+  if (!/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/i.test(clean)) return '';
+  return clean;
+}
+
+/** Normalise a name: remove numbers-only strings, limit to 100 chars */
+function cleanName(raw: unknown): string {
+  const s = cleanStr(raw, 100);
+  // Drop values that are obviously not names (pure numbers, IDs)
+  if (/^\d+$/.test(s)) return '';
+  return s;
+}
+
+/** Normalise a URL — add https:// if missing, return '' if clearly invalid */
+function cleanWebsite(raw: unknown): string {
+  let s = cleanStr(raw, 2048);
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  try { new URL(s); return s; } catch { return ''; }
+}
+
+/** Sanitize a complete InstantlyLead before sending to the API.
+ *  Returns null if the lead has no valid email (must be dropped). */
+export function sanitizeLead(raw: InstantlyLead): InstantlyLead | null {
+  const email = cleanEmail(raw.email);
+  if (!email) return null;   // no valid email → skip
+
+  const firstName = cleanName(raw.first_name) || 'Team';
+  const lastName  = cleanName(raw.last_name);
+
+  // Personalization capped at 500 chars (Instantly limit observed in practice)
+  const personalization = cleanStr(raw.personalization, 500);
+
+  // Clean custom_variables: ensure all keys/values are safe strings
+  const custom_variables: Record<string, string> | undefined = raw.custom_variables
+    ? Object.fromEntries(
+        Object.entries(raw.custom_variables).map(([k, v]) => [
+          cleanStr(k, 50),
+          cleanStr(v, 255),
+        ])
+      )
+    : undefined;
+
+  return {
+    email,
+    first_name:      firstName,
+    last_name:       lastName,
+    company_name:    cleanStr(raw.company_name, 200),
+    personalization,
+    website:         cleanWebsite(raw.website),
+    phone:           cleanStr(raw.phone, 30),
+    ...(custom_variables ? { custom_variables } : {}),
+  };
+}
+
 // ─── Status constants ──────────────────────────────────────────────────────────
 
 export const CAMPAIGN_STATUS = {
@@ -356,10 +440,20 @@ export async function addLeads(
   options: { skipIfInWorkspace?: boolean; skipIfInCampaign?: boolean } = {}
 ): Promise<{ added: number; skipped: number; failed: number }> {
 
-  // Pre-filter: drop any lead with no email so we never send bad data
-  const valid = leads.filter(l => l.email && l.email.trim());
-  if (valid.length < leads.length) {
-    logger.warn(`[Instantly] addLeads: filtered out ${leads.length - valid.length} leads with no email`);
+  // Sanitize ALL leads — strip bad emails, clean names, normalise URLs etc.
+  const valid: InstantlyLead[] = [];
+  let dropped = 0;
+  for (const l of leads) {
+    const s = sanitizeLead(l);
+    if (s) valid.push(s);
+    else dropped++;
+  }
+  if (dropped > 0) {
+    logger.warn(`[Instantly] addLeads: dropped ${dropped}/${leads.length} leads (missing/invalid email)`);
+  }
+  if (valid.length === 0) {
+    logger.warn('[Instantly] addLeads: no valid leads to send after sanitization');
+    return { added: 0, skipped: 0, failed: 0 };
   }
 
   let added = 0;

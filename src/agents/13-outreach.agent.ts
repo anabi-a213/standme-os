@@ -8,7 +8,7 @@ import {
   setCampaignStatus, activateCampaign,
   addLeads, getReplies, getCampaignSummary, getAllCampaignSummaries,
   listAccounts, getDailyCapacity, testConnection, isInstantlyConfigured,
-  campaignStatusLabel, CAMPAIGN_STATUS,
+  campaignStatusLabel, CAMPAIGN_STATUS, sanitizeLead,
   InstantlyLead, InstantlyCampaign, InstantlyEmailStep,
 } from '../services/instantly/client';
 import { findExhibitorFiles, parseExhibitorFile } from '../services/drive-exhibitor';
@@ -91,18 +91,21 @@ export class OutreachAgent extends BaseAgent {
 
       if (!leads.length) continue;
 
-      const prospects: InstantlyLead[] = leads.map(r => {
+      const prospects: InstantlyLead[] = leads.reduce<InstantlyLead[]>((acc, r) => {
         const dmName = r[18] || r[3] || '';
         const parts  = dmName.trim().split(' ').filter(Boolean);
-        return {
-          email:          r[21] || r[4],
-          first_name:     parts[0] || 'Team',
-          last_name:      parts.slice(1).join(' ') || '',
-          company_name:   r[2]  || '',
+        const raw: InstantlyLead = {
+          email:           (r[21] || r[4] || '').trim(),
+          first_name:      parts[0] || 'Team',
+          last_name:       parts.slice(1).join(' ') || '',
+          company_name:    r[2]  || '',
           personalization: r[10] || 'your upcoming trade show stand',
-          website:        '',
+          website:         '',
         };
-      });
+        const clean = sanitizeLead(raw);
+        if (clean) acc.push(clean);
+        return acc;
+      }, []);
 
       try {
         const result   = await addLeads(campaign.id, prospects);
@@ -531,27 +534,29 @@ export class OutreachAgent extends BaseAgent {
     const showDisplayName = showValidation.match?.name || showFilter;
     const emailSequence = await this.generateEmailSequenceSteps(showDisplayName, uniqueIndustries[0] || 'trade show');
 
-    // Build prospects array
+    // Build prospects array — sanitizeLead cleans emails, names, URLs, lengths
     const prospects: InstantlyLead[] = [];
     for (const r of leads) {
-      const email = r[21] || r[4];
-      if (!email) continue;
+      const rawEmail = (r[21] || r[4] || '').trim();
+      if (!rawEmail) continue;
 
-      const dmName  = r[18] || r[3] || '';
-      const parts   = dmName.trim().split(' ').filter(Boolean);
+      const dmName   = r[18] || r[3] || '';
+      const parts    = dmName.trim().split(' ').filter(Boolean);
       const industry = r[10] || '';
-      const notes   = r[24] || '';
-      const wm      = notes.match(/Website:\s*([^|]+)/i);
+      const notes    = r[24] || '';
+      const wm       = notes.match(/Website:\s*([^|]+)/i);
 
-      prospects.push({
-        email,
-        first_name:     parts[0] || 'Team',
-        last_name:      parts.slice(1).join(' ') || '',
-        company_name:   r[2]  || '',
-        personalization: industryHooks.get(industry.toLowerCase()) || industry || 'your upcoming trade show stand',
-        website:        wm ? wm[1].trim() : '',
+      const raw: InstantlyLead = {
+        email:            rawEmail,
+        first_name:       parts[0] || 'Team',
+        last_name:        parts.slice(1).join(' ') || '',
+        company_name:     r[2]  || '',
+        personalization:  industryHooks.get(industry.toLowerCase()) || industry || 'your upcoming trade show stand',
+        website:          wm ? wm[1].trim() : '',
         custom_variables: { title: r[19] || r[5] || '', show: r[6] || '' },
-      });
+      };
+      const clean = sanitizeLead(raw);
+      if (clean) prospects.push(clean);
     }
 
     // ── Campaign creation strategy ──────────────────────────────────────────
