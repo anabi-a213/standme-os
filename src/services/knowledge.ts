@@ -194,6 +194,32 @@ export async function sourceExistsInKnowledge(source: string): Promise<boolean> 
 }
 
 // ──────────────────────────────────────────────────────────────
+// Read: get a single entry by exact source match
+// Used by reconstructBulkApproval to avoid fuzzy search ambiguity.
+// ──────────────────────────────────────────────────────────────
+
+export async function getKnowledgeBySource(source: string): Promise<KnowledgeEntry | null> {
+  try {
+    const rows = await getCachedRows();
+    const s = source.toLowerCase();
+    const row = rows.slice(1).find(r => (r[1] || '').toLowerCase() === s);
+    if (!row) return null;
+    return {
+      id:          row[0] || '',
+      source:      row[1] || '',
+      sourceType:  row[2] || '',
+      topic:       row[3] || '',
+      tags:        row[4] || '',
+      content:     row[5] || '',
+      lastUpdated: row[6] || '',
+    };
+  } catch (err: any) {
+    logger.warn(`[Knowledge] getBySource failed for "${source}": ${err.message}`);
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
 // Read: get all entries for a topic
 // ──────────────────────────────────────────────────────────────
 

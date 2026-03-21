@@ -301,7 +301,7 @@ export class BrainAgent extends BaseAgent {
     name: 'StandMe Brain',
     id: 'agent-04',
     description: 'Central intelligence — answers any question, connects all agents',
-    commands: ['/brain', '/ask', '/seedknowledge', '/kbstats', '/healthcheck', '/sheetssetup'],
+    commands: ['/brain', '/ask', '/seedknowledge', '/kbstats', '/healthcheck', '/sheetssetup', '/systemstatus'],
     schedule: '0 8 * * *',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -329,6 +329,11 @@ export class BrainAgent extends BaseAgent {
     // Knowledge base stats: entry count, types, recent entries
     if (ctx.command === '/kbstats') {
       return this.showKbStats(ctx);
+    }
+
+    // System status: pending approvals, sessions, scheduler, Instantly state
+    if (ctx.command === '/systemstatus') {
+      return this.runSystemStatus(ctx);
     }
 
     const message = ctx.args || ctx.command;
@@ -1023,5 +1028,62 @@ INSIGHT: [company or person] | [type: budget|dm|preference|competitor|decision|s
     // Keep last 20 exchanges (40 messages)
     while (history.length > 40) history.shift();
     conversations.set(userId, history);
+
+    // Cap the number of tracked users to prevent unbounded memory growth.
+    // In a small-team deployment this should never trigger, but guards
+    // against a long-lived process accumulating thousands of ghost sessions.
+    const MAX_CONVERSATION_USERS = 200;
+    if (conversations.size > MAX_CONVERSATION_USERS) {
+      const firstKey = conversations.keys().next().value;
+      if (firstKey !== undefined) conversations.delete(firstKey);
+    }
+  }
+
+  // ── /systemstatus — live view of OS state for Mo ─────────────────────────
+  async runSystemStatus(ctx: AgentContext): Promise<AgentResponse> {
+    const lines: string[] = ['*🖥 StandMe OS — System Status*\n'];
+
+    // Pending approvals
+    const { getPendingApprovals } = await import('../services/approvals');
+    const pending = getPendingApprovals();
+    if (pending.length === 0) {
+      lines.push('*Pending Approvals:* none');
+    } else {
+      lines.push(`*Pending Approvals (${pending.length}):*`);
+      for (const p of pending) {
+        const ageMin = Math.round((Date.now() - p.timestamp) / 60000);
+        const age = ageMin < 60 ? `${ageMin}m ago` : `${Math.round(ageMin / 60)}h ago`;
+        lines.push(`  • ${p.action} _(${age})_ → \`/approve_${p.id}\``);
+      }
+    }
+
+    // Active Brain sessions
+    lines.push(`\n*Active Brain Sessions:* ${conversations.size} user(s)`);
+
+    // Scheduler info
+    const { getScheduledAgents } = await import('./registry');
+    const scheduled = getScheduledAgents();
+    lines.push(`\n*Scheduled Agents (${scheduled.length}):*`);
+    for (const a of scheduled) {
+      lines.push(`  • ${a.config.name} — \`${a.config.schedule}\``);
+    }
+
+    // KB stats (lightweight — uses cache)
+    try {
+      const stats = await getKnowledgeStats();
+      lines.push(`\n*Knowledge Base:* ${stats.total} entries (${Object.keys(stats.byType).length} types)`);
+    } catch {
+      lines.push(`\n*Knowledge Base:* unavailable`);
+    }
+
+    // Instantly status
+    const { isInstantlyConfigured } = await import('../services/instantly/client');
+    lines.push(`\n*Instantly.ai:* ${isInstantlyConfigured() ? '✅ API key set' : '❌ INSTANTLY_API_KEY missing'}`);
+
+    // Uptime proxy — process start time isn't tracked but we can show current time
+    lines.push(`\n_Status as of ${new Date().toISOString()}_`);
+
+    await this.respond(ctx.chatId, lines.join('\n'));
+    return { success: true, message: 'System status shown', confidence: 'HIGH' };
   }
 }
