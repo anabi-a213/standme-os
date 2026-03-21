@@ -120,7 +120,7 @@ export class OutreachAgent extends BaseAgent {
           sentDate:    logDate,
           status:      'SENT',
           replyClassification: '',
-          instantlyId: '',
+          woodpeckerId: '',
           notes: `Auto-push → Instantly campaign ${campaign.id} (${campaign.name})`,
         }));
         await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
@@ -273,7 +273,7 @@ export class OutreachAgent extends BaseAgent {
         id: logId, leadId, companyName: company,
         emailType: 'EMAIL_1', sentDate: new Date().toISOString(),
         status: 'PENDING_APPROVAL', replyClassification: '',
-        instantlyId: '',
+        woodpeckerId: '',
         notes: `To: ${dmEmail} | Subject: ${email.subject}`,
       }));
 
@@ -686,7 +686,7 @@ export class OutreachAgent extends BaseAgent {
             sentDate:            logDate,
             status:              'SENT',
             replyClassification: '',
-            instantlyId:         targetCampaign.id,
+            woodpeckerId:        targetCampaign.id,
             notes:               `Bulk → Instantly campaign ${targetCampaign.id} (${targetCampaign.name}) | ${showFilter}`,
           }));
           await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
@@ -1258,7 +1258,7 @@ export async function reconstructBulkApproval(approvalId: string): Promise<strin
       sentDate:           logDate,
       status:             'SENT',
       replyClassification: '',
-      instantlyId:        campaignId,
+      woodpeckerId:       campaignId,
       notes:              `Bulk reconstruct → Instantly campaign ${campaignId} (${campaignName}) | ${showFilter}`,
     }));
     await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
