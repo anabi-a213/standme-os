@@ -13,6 +13,9 @@ import { logger } from '../utils/logger';
 import { writeSystemLog } from '../utils/system-log';
 import { getStaticKnowledge } from '../config/standme-knowledge';
 
+// Track when the process started for uptime display in /systemstatus
+const PROCESS_START = Date.now();
+
 // Conversation memory: last 15 messages per user
 const conversations = new Map<string, { role: 'user' | 'assistant'; content: string }[]>();
 
@@ -698,6 +701,29 @@ export class BrainAgent extends BaseAgent {
       issues.push(`Deadlines sheet: ${err.message}`);
     }
 
+    // Pending approvals — Mo needs to know if something is waiting for their decision
+    try {
+      const { getPendingApprovals } = await import('../services/approvals');
+      const pending = getPendingApprovals();
+      if (pending.length > 0) {
+        lines.push(`\nPENDING APPROVALS (${pending.length}):`);
+        for (const p of pending) {
+          const ageMin = Math.round((Date.now() - p.timestamp) / 60000);
+          lines.push(`  /approve_${p.id} — ${p.action} (${ageMin}m ago)`);
+        }
+      }
+    } catch { /* non-fatal — approval service may not be initialised yet */ }
+
+    // Outreach queue — leads staged and waiting for bulk push
+    try {
+      const queue = await readSheet(SHEETS.OUTREACH_QUEUE);
+      const ready = queue.slice(1).filter(r => (r[7] || '').toUpperCase() === 'READY');
+      if (ready.length > 0) {
+        const shows = [...new Set(ready.map(r => r[5]).filter(Boolean))];
+        lines.push(`\nOUTREACH QUEUE: ${ready.length} leads ready${shows.length ? ` (${shows.join(', ')})` : ''} — run /bulkoutreach to push`);
+      }
+    } catch { /* non-fatal */ }
+
     return {
       data: lines.length > 0 ? lines.join('\n') : 'No live data available.',
       issues,
@@ -1091,8 +1117,27 @@ INSIGHT: [company or person] | [type: budget|dm|preference|competitor|decision|s
     const { isInstantlyConfigured } = await import('../services/instantly/client');
     lines.push(`\n*Instantly.ai:* ${isInstantlyConfigured() ? '✅ API key set' : '❌ INSTANTLY_API_KEY missing'}`);
 
-    // Uptime proxy — process start time isn't tracked but we can show current time
-    lines.push(`\n_Status as of ${new Date().toISOString()}_`);
+    // Recent SYSTEM_LOG failures — surface errors Mo may not have seen
+    try {
+      const sysLog = await readSheet(SHEETS.SYSTEM_LOG);
+      const failures = sysLog.slice(1).filter(r => (r[5] || '').toUpperCase() === 'FAIL').slice(-5);
+      if (failures.length > 0) {
+        lines.push(`\n*Recent Failures (${failures.length}):*`);
+        for (const f of failures.slice().reverse()) {
+          const ts = f[0] ? new Date(f[0]).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '?';
+          lines.push(`  • [${ts}] ${f[1] || '?'}: ${(f[4] || '').slice(0, 70)}`);
+        }
+      } else {
+        lines.push(`\n*Recent Failures:* none ✓`);
+      }
+    } catch { lines.push(`\n*Recent Failures:* unavailable`); }
+
+    // Uptime
+    const uptimeMs = Date.now() - PROCESS_START;
+    const uptimeH  = Math.floor(uptimeMs / 3600000);
+    const uptimeM  = Math.round((uptimeMs % 3600000) / 60000);
+    lines.push(`\n*Uptime:* ${uptimeH}h ${uptimeM}m`);
+    lines.push(`_Status as of ${new Date().toISOString()}_`);
 
     await this.respond(ctx.chatId, lines.join('\n'));
     return { success: true, message: 'System status shown', confidence: 'HIGH' };

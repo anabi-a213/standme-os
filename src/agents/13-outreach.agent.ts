@@ -1054,7 +1054,9 @@ export class OutreachAgent extends BaseAgent {
       const active = all.filter(c => c.status === CAMPAIGN_STATUS.ACTIVE);
 
       if (showFilter) {
-        const match = all.find(c => c.name.toLowerCase().includes(showFilter));
+        // Use the strict matcher (exact / starts-with / whole-word, ≥4 chars) so a
+        // short or ambiguous filter never silently returns the wrong campaign.
+        const match = await findCampaignByName(showFilter);
         if (match) return match;
       }
 
