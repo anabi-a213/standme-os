@@ -508,7 +508,7 @@ export async function addLeads(
     };
 
     try {
-      const resp = await getClient().post('/leads', body)
+      const resp = await getClient().post('/leads/add', body)
         .catch(err => { throw apiError(err, 'addLeads batch'); });
 
       const r = resp.data;
