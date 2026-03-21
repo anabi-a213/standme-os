@@ -500,19 +500,37 @@ export class OutreachAgent extends BaseAgent {
       if (showOnly.length > 0) {
         await this.respond(ctx.chatId,
           `⚠️ Found *${showOnly.length}* ${showFilter} leads but none have email addresses.\n\n` +
-          `Check columns E (contactEmail) and V (dmEmail) in the Leads sheet.`
+          `Run \`/enrich ${showFilter}\` to find DM emails, then retry.`
+        );
+        return { success: false, message: 'Leads found but no emails', confidence: 'HIGH' };
+      }
+
+      // No leads at all — check Drive for importable files before giving up
+      await this.respond(ctx.chatId,
+        `No leads found for "*${showFilter}*" in Lead Master.\n\n` +
+        `🔍 Checking Google Drive for exhibitor files...`
+      );
+
+      let driveFiles: Awaited<ReturnType<typeof findExhibitorFiles>> = [];
+      try {
+        driveFiles = await findExhibitorFiles(showFilter);
+      } catch { /* ignore Drive errors here */ }
+
+      if (driveFiles.length > 0) {
+        const fileList = driveFiles.map(f => `  📄 ${f.name}`).join('\n');
+        await this.respond(ctx.chatId,
+          `Found *${driveFiles.length}* exhibitor file(s) in Drive for *${showFilter}*:\n${fileList}\n\n` +
+          `Run this to import them into Lead Master first:\n\`/importleads ${showFilter}\`\n\n` +
+          `Then run \`/bulkoutreach ${showFilter}\` again.`
         );
       } else {
-        // Show the distinct show names actually in the sheet so user knows what to type
-        const allShows = [...new Set(
-          masterRows.slice(1).map(r => r[6]).filter(Boolean)
-        )].slice(0, 15);
+        const allShows = [...new Set(masterRows.slice(1).map(r => r[6]).filter(Boolean))].slice(0, 15);
         const showList = allShows.length > 0
           ? `\n\n*Shows currently in Lead Master:*\n${allShows.map(s => `  • ${s}`).join('\n')}`
           : '';
         await this.respond(ctx.chatId,
-          `No leads found for "*${showFilter}*" in Lead Master.${showList}\n\n` +
-          `Use any word from the show name above — partial match works (e.g. \`/bulkoutreach intersolar\`).`
+          `No leads found for "*${showFilter}*" in Lead Master, and no Drive files found either.${showList}\n\n` +
+          `Upload an exhibitor list (xlsx/csv) to Google Drive with "${showFilter}" in the filename, then run \`/importleads ${showFilter}\`.`
         );
       }
       return { success: false, message: 'No leads found', confidence: 'HIGH' };

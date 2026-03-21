@@ -189,19 +189,56 @@ export async function findExhibitorFile(showName: string): Promise<DriveFile | n
 
 /**
  * Find ALL exhibitor files for a given show (e.g. multiple xlsx files for the same show).
- * Returns every file whose name matches the show name keywords.
+ *
+ * Strategy:
+ *  1. Search the designated exhibitor folder first (fast, curated)
+ *  2. If nothing found there, search ALL of Drive by filename (broader fallback)
+ *
+ * Matching: case-insensitive, partial keyword match on filename.
  */
 export async function findExhibitorFiles(showName: string): Promise<DriveFile[]> {
-  const files  = await listExhibitorFiles();
   const needle = showName.toLowerCase().replace(/\s+/g, '');
   const words  = showName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
 
-  return files.filter(f => {
+  const matchesName = (f: DriveFile): boolean => {
     const base  = f.name.toLowerCase().replace(/\s+/g, '').replace(/\.(xlsx?|csv|gsheet)$/, '');
     const fname = f.name.toLowerCase();
-    // Partial needle match OR all significant words present
     return base.includes(needle) || needle.includes(base) || words.every(w => fname.includes(w));
-  });
+  };
+
+  // Step 1 — search designated exhibitor folder
+  try {
+    const folderFiles = await listExhibitorFiles();
+    const folderMatches = folderFiles.filter(matchesName);
+    if (folderMatches.length > 0) {
+      logger.info(`[DriveExhibitor] Found ${folderMatches.length} file(s) for "${showName}" in exhibitor folder`);
+      return folderMatches;
+    }
+    logger.info(`[DriveExhibitor] No files for "${showName}" in exhibitor folder — searching all Drive...`);
+  } catch (err: any) {
+    logger.warn(`[DriveExhibitor] Exhibitor folder search failed: ${err.message} — falling back to full Drive search`);
+  }
+
+  // Step 2 — search ALL of Drive by filename using Drive API query
+  // Use the first significant keyword as the name filter for efficiency
+  const keyword = words[0] || showName.split(/\s+/)[0] || showName;
+  try {
+    const allFiles = await listFiles(undefined, `name contains '${keyword.replace(/'/g, "\\'")}'`);
+    // Filter to spreadsheet/csv types only
+    const spreadsheetMimes = [GOOGLE_SHEET_MIME, EXCEL_MIME, EXCEL_OLD_MIME, CSV_MIME, TEXT_MIME];
+    const matched = allFiles.filter(f =>
+      matchesName(f) && (spreadsheetMimes.includes(f.mimeType) || f.name.match(/\.(xlsx?|csv|gsheet|tsv)$/i))
+    );
+    if (matched.length > 0) {
+      logger.info(`[DriveExhibitor] Found ${matched.length} file(s) for "${showName}" in full Drive search`);
+    } else {
+      logger.info(`[DriveExhibitor] No files found for "${showName}" anywhere in Drive`);
+    }
+    return matched;
+  } catch (err: any) {
+    logger.warn(`[DriveExhibitor] Full Drive search failed: ${err.message}`);
+    return [];
+  }
 }
 
 /**

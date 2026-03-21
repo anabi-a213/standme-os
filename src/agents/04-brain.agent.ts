@@ -135,10 +135,17 @@ If someone types a command that is not in this list (e.g. /woodpecker, /indexwoo
 If you are unsure whether a command exists — it does NOT exist. Do not suggest it.
 
 ⚡ EXECUTION RULES — READ CAREFULLY:
-1. NEVER write "[TRIGGER: ...]" — that tag does not exist. The only valid tag is [ACTION: /command args].
-2. NEVER write "I'll trigger...", "I'm going to run...", "Let me execute...", "I will launch...". Just DO it — append [ACTION: /command args] and give ONE short confirmation line. The system executes silently; the user sees the result.
-3. If the user explicitly asks to run a command (e.g. "run bulkoutreach for intersolar", "do bulk outreach intersolar"), your ENTIRE response is ONE line: "On it — running /bulkoutreach intersolar now." followed by [ACTION: /bulkoutreach intersolar]. Nothing else.
-4. Do NOT explain what the command does before running it. Do NOT describe what will happen. Just run it.
+1. NEVER write "[TRIGGER: ...]" — that tag does NOT exist. Using it does NOTHING. The system IGNORES it.
+2. The ONLY valid action tag is [ACTION: /command args] — placed at the END of your response on its own line.
+3. NEVER write "I'll trigger...", "Let me execute...", "I will launch...", "I'm going to run..." — these are FAKE. Either run it with [ACTION:] or don't.
+4. If the user asks to run a command: ONE line response + [ACTION: /command args]. Nothing else. No explanation.
+5. NEVER fake success or describe what will happen. Let the actual command result speak.
+
+MULTI-STEP FLOW RULES:
+- "search drive for intersolar leads" → [ACTION: /importleads intersolar]
+- "import leads and push outreach" → [ACTION: /importleads intersolar] (do import first, bulkoutreach second after confirmation)
+- NEVER chain two [ACTION:] tags. Do ONE action, then the next step shows after the result.
+- When /bulkoutreach finds no leads, the system will tell the user to run /importleads first — don't preempt it.
 
 When the user wants an action, end your response with [ACTION: /command args]:
 - /newlead — add new lead. EXACT FORMAT (pipe-separated, this order): CompanyName | ContactName | ContactEmail | ShowName | StandSizeSqm | Budget | Industry  (e.g. /newlead Solar GmbH | Hans Müller | hans@solar.de | Intersolar Munich 2025 | 36 | €50k | Solar/Energy)
@@ -343,9 +350,9 @@ export class BrainAgent extends BaseAgent {
         command: '/bulkoutreach',
         extractArgs: m => m[1].trim(),
       },
-      // /importleads [show]
+      // /importleads [show] — also catches "search drive for intersolar", "find intersolar leads", etc.
       {
-        pattern: /^(?:\/importleads\s+|import\s+leads?\s+(?:for\s+)?|load\s+leads?\s+(?:for\s+)?)(.+)$/i,
+        pattern: /^(?:\/importleads\s+|import\s+leads?\s+(?:for\s+|from\s+(?:drive|file|sheet|excel|xlsx)?\s*(?:for\s+)?)?|load\s+leads?\s+(?:for\s+)?|search\s+(?:drive\s+)?(?:for\s+)?(?:leads?\s+(?:for\s+)?|list\s+)?|find\s+(?:leads?\s+(?:for\s+)?|exhibitor\s+(?:list\s+)?(?:for\s+)?)|get\s+leads?\s+(?:for\s+)?|add\s+leads?\s+(?:from\s+(?:drive|file|sheet|excel)?\s*(?:to\s+(?:master\s+)?sheet\s+)?(?:for\s+)?)?)(.+?)(?:\s+(?:and\s+.+|to\s+master\s+sheet|from\s+drive.*))?$/i,
         command: '/importleads',
         extractArgs: m => m[1].trim(),
       },
