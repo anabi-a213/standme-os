@@ -296,6 +296,9 @@ Return ONLY the JSON object. No explanation.`;
     });
 
     registerApproval(approvalId, {
+      action: `Create lead from Gmail: ${d.companyName}`,
+      data: { emailId: pending.emailId, contactEmail: d.contactEmail },
+      timestamp: Date.now(),
       onApprove: async () => {
         const result = await this.createLeadFromEmail(d, showValidation);
         return result;
