@@ -40,6 +40,7 @@ import { MarketingContentAgent } from './agents/15-marketing-content.agent';
 import { CardManagerAgent } from './agents/08-card-manager.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
 import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
+import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
 
 
 async function main() {
@@ -102,6 +103,7 @@ async function main() {
     new DriveIndexerAgent(),
     new MarketingContentAgent(),
     new CrossBoardAgent(),
+    new GmailLeadMonitorAgent(),
   ];
 
   for (const agent of agents) {
@@ -163,6 +165,8 @@ async function main() {
         `/ask [question] — Ask the Brain\n` +
         `/healthcheck — Check all system services\n` +
         `/systemstatus — Pending approvals, sessions, scheduler state\n` +
+        `/checkemails — Scan inbox for new stand request emails\n` +
+        `/emailstatus — Gmail lead monitor status\n` +
         `/help — Show this menu`,
         { parse_mode: 'Markdown' }
       );
@@ -172,7 +176,7 @@ async function main() {
     if (text === '/help') {
       await bot.sendMessage(msg.chat.id,
         `*StandMe OS Help*\n\n` +
-        `17 agents running. All actions require Mo's approval.\n` +
+        `18 agents running. All actions require Mo's approval.\n` +
         `Type any command or ask a question with /ask.\n\n` +
         `Your role: ${ctx.role}`,
         { parse_mode: 'Markdown' }
