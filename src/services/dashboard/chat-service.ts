@@ -63,60 +63,76 @@ function detectLanguage(text: string): 'ar' | 'en' {
   return /[\u0600-\u06FF]/.test(text) ? 'ar' : 'en';
 }
 
-/** Pull live Trello + Sheets data — same context Brain agent injects */
+// 60-second cache so repeated dashboard messages don't hammer the APIs
+let liveDataCache: { value: string; expiresAt: number } | null = null;
+
+/** Pull live Trello + Sheets data in parallel with a 60s cache */
 async function buildLiveDataContext(): Promise<string> {
+  // Return cached value if still fresh
+  if (liveDataCache && Date.now() < liveDataCache.expiresAt) {
+    return liveDataCache.value;
+  }
+
+  const { getBoardCardsWithListNames } = await import('../../services/trello/client');
+  const { readSheet } = await import('../../services/google/sheets');
+  const { SHEETS } = await import('../../config/sheets');
+
+  const salesBoardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+
+  // Run all 3 fetches in parallel — each wrapped in its own per-call timeout
+  const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
+    Promise.race([p, new Promise<null>(resolve => setTimeout(() => resolve(null), ms))]);
+
+  const [trelloCards, leadsRows, deadlinesRows] = await Promise.all([
+    salesBoardId ? withTimeout(getBoardCardsWithListNames(salesBoardId), 7000) : Promise.resolve(null),
+    withTimeout(readSheet(SHEETS.LEAD_MASTER), 7000),
+    withTimeout(readSheet(SHEETS.TECHNICAL_DEADLINES), 7000),
+  ]);
+
   const lines: string[] = [];
 
   // Trello pipeline snapshot
-  try {
-    const { getBoardCardsWithListNames } = await import('../../services/trello/client');
-    const salesBoardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
-    if (salesBoardId) {
-      const cards = await getBoardCardsWithListNames(salesBoardId);
-      const byStage = new Map<string, number>();
-      const now = new Date();
-      const overdue: string[] = [];
-      for (const card of cards) {
-        const stage = card.listName || 'Unknown';
-        byStage.set(stage, (byStage.get(stage) || 0) + 1);
-        if (card.due && new Date(card.due) < now) overdue.push(`${card.name} (${stage})`);
-      }
-      lines.push(`SALES PIPELINE (${cards.length} cards):`);
-      for (const [stage, count] of byStage) lines.push(`  ${stage}: ${count}`);
-      if (overdue.length > 0) lines.push(`  ⚠️ OVERDUE: ${overdue.join(', ')}`);
+  if (trelloCards) {
+    const byStage = new Map<string, number>();
+    const now = new Date();
+    const overdue: string[] = [];
+    for (const card of trelloCards as any[]) {
+      const stage = card.listName || 'Unknown';
+      byStage.set(stage, (byStage.get(stage) || 0) + 1);
+      if (card.due && new Date(card.due) < now) overdue.push(`${card.name} (${stage})`);
     }
-  } catch (err: any) {
-    lines.push(`Trello: ${err.message}`);
+    lines.push(`SALES PIPELINE (${(trelloCards as any[]).length} cards):`);
+    for (const [stage, count] of byStage) lines.push(`  ${stage}: ${count}`);
+    if (overdue.length > 0) lines.push(`  ⚠️ OVERDUE: ${overdue.join(', ')}`);
   }
 
   // Recent leads from Sheets
-  try {
-    const { readSheet } = await import('../../services/google/sheets');
-    const { SHEETS } = await import('../../config/sheets');
-    const leads = await readSheet(SHEETS.LEAD_MASTER);
-    const dataRows = leads.slice(1).filter((r: string[]) => r[2]);
+  if (leadsRows) {
+    const dataRows = (leadsRows as string[][]).slice(1).filter(r => r[2]);
     if (dataRows.length > 0) {
       lines.push(`\nRECENT LEADS (${dataRows.length} total):`);
-      dataRows.slice(-5).forEach((r: string[]) => {
+      dataRows.slice(-5).forEach(r => {
         lines.push(`  ${r[2] || '?'} | ${r[6] || 'no show'} | Score:${r[12] || '?'} | ${r[15] || '?'}`);
       });
     }
-  } catch { /* silent */ }
+  }
 
   // Upcoming deadlines
-  try {
-    const { readSheet } = await import('../../services/google/sheets');
-    const { SHEETS } = await import('../../config/sheets');
-    const deadlines = await readSheet(SHEETS.TECHNICAL_DEADLINES);
+  if (deadlinesRows) {
     const now = new Date();
-    const upcoming = deadlines.slice(1).filter((r: string[]) => {
+    const upcoming = (deadlinesRows as string[][]).slice(1).filter(r => {
       const dates = [r[3], r[4], r[5], r[6], r[7], r[8], r[9]].filter(Boolean);
       return dates.some(d => { const diff = (new Date(d).getTime() - now.getTime()) / 86400000; return diff >= 0 && diff <= 21; });
     });
-    if (upcoming.length > 0) lines.push(`\nDEADLINES NEXT 21 DAYS: ${upcoming.map((r: string[]) => r[1]).join(', ')}`);
-  } catch { /* silent */ }
+    if (upcoming.length > 0) lines.push(`\nDEADLINES NEXT 21 DAYS: ${upcoming.map(r => r[1]).join(', ')}`);
+  }
 
-  return lines.length > 0 ? lines.join('\n') : '';
+  const result = lines.length > 0 ? lines.join('\n') : '';
+
+  // Cache for 60 seconds
+  liveDataCache = { value: result, expiresAt: Date.now() + 60_000 };
+
+  return result;
 }
 
 function buildSystemPrompt(liveData = ''): string {
@@ -294,12 +310,12 @@ export async function processChat(
     }
   } catch { /* silent — KB is optional context */ }
 
-  // Fetch live data with 6s timeout (same as Brain agent approach)
+  // Fetch live data — parallel calls inside, 9s outer safety net
   let liveData = '';
   try {
     liveData = await Promise.race([
       buildLiveDataContext(),
-      new Promise<string>(resolve => setTimeout(() => resolve(''), 6000)),
+      new Promise<string>(resolve => setTimeout(() => resolve(''), 9000)),
     ]);
   } catch { /* silent */ }
 
