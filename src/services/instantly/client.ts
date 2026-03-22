@@ -405,11 +405,34 @@ export async function pauseCampaign(campaignId: string): Promise<void> {
   await setCampaignStatus(campaignId, CAMPAIGN_STATUS.PAUSED);
 }
 
-/** Find campaign by name (case-insensitive partial match) */
+/**
+ * Find campaign by show name.
+ *
+ * Matching rules (stricter than a simple substring to prevent wrong reuse):
+ *   1. Exact normalised match — "intersolar" === "intersolar"
+ *   2. Campaign name STARTS WITH the show filter — "intersolar..." matches "intersolar"
+ *   3. Show filter is a whole word in the campaign name — avoids "sol" matching "Intersolar"
+ *
+ * All comparisons are case-insensitive with non-alphanumeric chars stripped.
+ * The minimum match length is 4 characters to guard against accidental short matches.
+ */
 export async function findCampaignByName(showName: string): Promise<InstantlyCampaign | null> {
-  const all = await listCampaigns();
   const norm = showName.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return all.find(c => c.name.toLowerCase().replace(/[^a-z0-9]/g, '').includes(norm)) || null;
+  if (norm.length < 4) return null; // too short to match reliably
+
+  const all = await listCampaigns();
+
+  return all.find(c => {
+    const cNorm = c.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Rule 1: exact match
+    if (cNorm === norm) return true;
+    // Rule 2: campaign name starts with the show filter (e.g. "intersolar2026standme".startsWith("intersolar"))
+    if (cNorm.startsWith(norm)) return true;
+    // Rule 3: show filter appears as a whole "word" when re-splitting on spaces
+    // Use the original lowercased campaign name to check word boundaries
+    const words = c.name.toLowerCase().split(/[\s\-_\/]+/).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+    return words.some(w => w === norm);
+  }) || null;
 }
 
 // ─── Lead Methods ─────────────────────────────────────────────────────────────
@@ -449,6 +472,11 @@ export async function addLeads(
   leads: InstantlyLead[],
   options: { skipIfInWorkspace?: boolean; skipIfInCampaign?: boolean } = {}
 ): Promise<{ added: number; skipped: number; failed: number }> {
+  // Guard: an empty campaign ID would send leads to the wrong place — fail fast.
+  if (!campaignId || !campaignId.trim()) {
+    logger.error('[Instantly] addLeads called with empty campaignId — refusing to send leads');
+    return { added: 0, skipped: 0, failed: leads.length };
+  }
 
   // ── Step 1: sanitize ─────────────────────────────────────────────────────
   // sanitizeLead validates email, cleans names/URLs, and returns null on bad email.
@@ -528,7 +556,15 @@ export async function addLeads(
           else added++;
         }
       } else {
-        // Unknown success shape — assume all added (Instantly returned 2xx)
+        // Unknown 2xx response shape — we cannot confirm how many were added.
+        // Log the shape for diagnostics and count as added to avoid under-reporting
+        // (Instantly returned success but with an unrecognised body).
+        // This is a best-effort count — real confirmation requires checking the campaign.
+        logger.warn(
+          `[Instantly] Batch ${i + 1}–${i + batch.length}: unrecognised 2xx response shape` +
+          ` — body: ${JSON.stringify(r).slice(0, 200)}` +
+          ` — treating ${batch.length} leads as added (unconfirmed)`
+        );
         added += batch.length;
       }
 
@@ -657,12 +693,28 @@ export async function getReplies(options: {
   limit?: number;
 } = {}): Promise<InstantlyReply[]> {
   return retry(async () => {
-    const params: Record<string, any> = { limit: options.limit ?? 100 };
+    // Instantly v2 unified emails endpoint — /emails/reply-emails was removed.
+    // Filter for reply emails with email_type=reply; fall back to unfiltered
+    // if the API rejects the filter (plan/version differences).
+    const params: Record<string, any> = {
+      limit: options.limit ?? 100,
+      email_type: 'reply',
+    };
     if (options.campaignId) params.campaign_id = options.campaignId;
-    if (options.since) params.after = options.since.toISOString();
+    // v2 uses min_timestamp_created instead of `after`
+    if (options.since) params.min_timestamp_created = options.since.toISOString();
 
-    const resp = await getClient().get('/emails/reply-emails', { params })
-      .catch(err => { throw apiError(err, 'getReplies'); });
+    let resp = await getClient().get('/emails', { params })
+      .catch(async (err) => {
+        // If email_type filter is rejected, retry without it
+        if (err?.response?.status === 400) {
+          const fallbackParams = { ...params };
+          delete fallbackParams.email_type;
+          return getClient().get('/emails', { params: fallbackParams })
+            .catch(err2 => { throw apiError(err2, 'getReplies'); });
+        }
+        throw apiError(err, 'getReplies');
+      });
 
     const items: any[] = Array.isArray(resp.data?.items) ? resp.data.items
       : Array.isArray(resp.data) ? resp.data : [];
@@ -672,10 +724,10 @@ export async function getReplies(options: {
       from_email:  String(r.from_email ?? r.from ?? ''),
       from_name:   String(r.from_name  ?? ''),
       subject:     String(r.subject    ?? ''),
-      body:        String(r.body       ?? r.text ?? ''),
-      timestamp:   String(r.timestamp  ?? r.created_at ?? ''),
+      body:        String(r.body       ?? r.text ?? r.body_plain ?? ''),
+      timestamp:   String(r.timestamp  ?? r.created_at ?? r.timestamp_created ?? ''),
       campaign_id: String(r.campaign_id ?? ''),
-      lead_email:  String(r.lead_email ?? r.from_email ?? ''),
+      lead_email:  String(r.lead_email ?? r.from_email ?? r.from ?? ''),
     }));
   }, 'getReplies');
 }

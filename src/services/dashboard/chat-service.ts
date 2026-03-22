@@ -393,6 +393,29 @@ export async function processChat(
     }
   }
 
+  // ── MIRROR DASHBOARD AI RESPONSE TO TELEGRAM ─────────────────────────────
+  // So Mo sees dashboard chat on his phone too (Telegram = mobile view)
+  const moId = process.env.MO_TELEGRAM_ID;
+  if (moId && fullResponse.trim().length > 20) {
+    try {
+      const { sendToMo } = await import('../telegram/bot');
+      // Convert dashboard markdown (**bold**) to Telegram markdown (*bold*),
+      // strip trigger markers (agent results are sent separately via agent.run()),
+      // and truncate to Telegram's 4096 char limit.
+      const telegramText = fullResponse
+        .replace(/\[TRIGGER:\s*[^\]]+\]/g, '')
+        .replace(/\*\*(.*?)\*\*/g, '*$1*')
+        .replace(/^#{1,3}\s+(.+)$/gm, '*$1*')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+        .substring(0, 3800);
+      if (telegramText.length > 20) {
+        await sendToMo(`💻 *Dashboard:*\n\n${telegramText}`);
+      }
+    } catch { /* silent — Telegram failure never breaks dashboard chat */ }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Save final response to history
   session.history.push({
     role: 'assistant',

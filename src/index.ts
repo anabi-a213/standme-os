@@ -16,6 +16,8 @@ import { writeSystemLog } from './utils/system-log';
 import { canApprove, getUserRole, UserRole } from './config/access';
 import { handleApproval, logApprovalStoreStatus } from './services/approvals';
 import { initSheets } from './services/google/sheets-init';
+import { validateSheetHeaders } from './services/google/sheets';
+import { SHEETS } from './config/sheets';
 import { loadRuntimeConfig } from './services/runtime-config';
 import { warmGoogleAuth } from './services/google/auth';
 
@@ -65,6 +67,18 @@ async function main() {
 
   // Auto-check and create any missing Google Sheets tabs
   initSheets().catch(err => logger.warn(`[Sheets Init] Failed: ${err.message}`));
+
+  // Validate critical sheet column headers at startup — catches manual reorders
+  // before they silently corrupt writes. Runs non-blocking (async, no await).
+  Promise.all([
+    validateSheetHeaders(SHEETS.LEAD_MASTER),
+    validateSheetHeaders(SHEETS.OUTREACH_LOG),
+    validateSheetHeaders(SHEETS.SYSTEM_LOG),
+  ]).then(([leads, outreach, syslog]) => {
+    if (!leads || !outreach || !syslog) {
+      logger.warn('[Startup] One or more critical sheet headers do not match config — check logs above');
+    }
+  }).catch(() => { /* non-blocking — sheets may not exist yet */ });
 
   // Log approval store state at startup (will always be 0 on cold start — confirms clean state)
   logApprovalStoreStatus();
@@ -148,6 +162,7 @@ async function main() {
         `/contentplan — Weekly content plan\n` +
         `/ask [question] — Ask the Brain\n` +
         `/healthcheck — Check all system services\n` +
+        `/systemstatus — Pending approvals, sessions, scheduler state\n` +
         `/help — Show this menu`,
         { parse_mode: 'Markdown' }
       );
@@ -253,9 +268,27 @@ async function main() {
   // Dashboard routes (served at /dashboard)
   app.use('/dashboard', dashboardRouter);
 
+  // Simple in-memory rate limiter for the Instantly webhook.
+  // Prevents spam/abuse — max 60 requests per minute per IP.
+  const webhookHits = new Map<string, number[]>();
+  const WEBHOOK_RATE_MAX = 60;
+  const WEBHOOK_RATE_WINDOW_MS = 60_000;
+
   // POST /webhook/instantly — receives reply/open/bounce events from Instantly.ai
   // Configure in Instantly: Settings → Integrations → Webhooks → point to this URL
   app.post('/webhook/instantly', async (req, res) => {
+    // Rate limiting: reject if IP exceeds WEBHOOK_RATE_MAX requests in the window
+    const ip  = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+    const now = Date.now();
+    const hits = (webhookHits.get(ip) || []).filter(t => now - t < WEBHOOK_RATE_WINDOW_MS);
+    hits.push(now);
+    webhookHits.set(ip, hits);
+    if (hits.length > WEBHOOK_RATE_MAX) {
+      logger.warn(`[Webhook] Rate limit exceeded for ${ip} (${hits.length} req/min)`);
+      res.sendStatus(429);
+      return;
+    }
+
     res.sendStatus(200);
 
     const secret = process.env.INSTANTLY_WEBHOOK_SECRET;

@@ -10,7 +10,11 @@ import { formatType3, sendToTeam } from '../services/telegram/bot';
 import { buildKnowledgeContext, getKnowledgeStats, saveKnowledge } from '../services/knowledge';
 import { getAgent } from './registry';
 import { logger } from '../utils/logger';
+import { writeSystemLog } from '../utils/system-log';
 import { getStaticKnowledge } from '../config/standme-knowledge';
+
+// Track when the process started for uptime display in /systemstatus
+const PROCESS_START = Date.now();
 
 // Conversation memory: last 15 messages per user
 const conversations = new Map<string, { role: 'user' | 'assistant'; content: string }[]>();
@@ -301,7 +305,7 @@ export class BrainAgent extends BaseAgent {
     name: 'StandMe Brain',
     id: 'agent-04',
     description: 'Central intelligence — answers any question, connects all agents',
-    commands: ['/brain', '/ask', '/seedknowledge', '/kbstats', '/healthcheck', '/sheetssetup'],
+    commands: ['/brain', '/ask', '/seedknowledge', '/kbstats', '/healthcheck', '/sheetssetup', '/systemstatus'],
     schedule: '0 8 * * *',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -329,6 +333,11 @@ export class BrainAgent extends BaseAgent {
     // Knowledge base stats: entry count, types, recent entries
     if (ctx.command === '/kbstats') {
       return this.showKbStats(ctx);
+    }
+
+    // System status: pending approvals, sessions, scheduler, Instantly state
+    if (ctx.command === '/systemstatus') {
+      return this.runSystemStatus(ctx);
     }
 
     const message = ctx.args || ctx.command;
@@ -432,13 +441,23 @@ export class BrainAgent extends BaseAgent {
       if (pending.length === 1) {
         const p = pending[0];
         await this.respond(ctx.chatId, `✅ Executing approval: *${p.action}*...`);
+        let approvalOk = false;
         try {
           const result = await handleApproval(p.id, true);
+          approvalOk = true;
           await this.respond(ctx.chatId, result || '✅ Done.');
         } catch (err: any) {
           await this.respond(ctx.chatId, `❌ Approval failed: ${err.message}`);
         }
-        return { success: true, message: 'Natural-language approval handled', confidence: 'HIGH' };
+        // Audit trail — match the SYSTEM_LOG write that index.ts does for /approve_xxx commands
+        await writeSystemLog({
+          agent: 'Brain',
+          actionType: 'APPROVE',
+          detail: p.id,
+          result: approvalOk ? 'SUCCESS' : 'FAIL',
+          notes: 'via natural-language approval in Brain',
+        }).catch(() => {}); // never crash the main flow
+        return { success: approvalOk, message: approvalOk ? 'Natural-language approval handled' : 'Approval callback failed', confidence: 'HIGH' };
       } else if (pending.length > 1) {
         const list = pending.map((p, i) => `${i + 1}. ${p.action}\n   → \`/approve_${p.id}\``).join('\n\n');
         await this.respond(ctx.chatId,
@@ -681,6 +700,29 @@ export class BrainAgent extends BaseAgent {
     } catch (err: any) {
       issues.push(`Deadlines sheet: ${err.message}`);
     }
+
+    // Pending approvals — Mo needs to know if something is waiting for their decision
+    try {
+      const { getPendingApprovals } = await import('../services/approvals');
+      const pending = getPendingApprovals();
+      if (pending.length > 0) {
+        lines.push(`\nPENDING APPROVALS (${pending.length}):`);
+        for (const p of pending) {
+          const ageMin = Math.round((Date.now() - p.timestamp) / 60000);
+          lines.push(`  /approve_${p.id} — ${p.action} (${ageMin}m ago)`);
+        }
+      }
+    } catch { /* non-fatal — approval service may not be initialised yet */ }
+
+    // Outreach queue — leads staged and waiting for bulk push
+    try {
+      const queue = await readSheet(SHEETS.OUTREACH_QUEUE);
+      const ready = queue.slice(1).filter(r => (r[7] || '').toUpperCase() === 'READY');
+      if (ready.length > 0) {
+        const shows = [...new Set(ready.map(r => r[5]).filter(Boolean))];
+        lines.push(`\nOUTREACH QUEUE: ${ready.length} leads ready${shows.length ? ` (${shows.join(', ')})` : ''} — run /bulkoutreach to push`);
+      }
+    } catch { /* non-fatal */ }
 
     return {
       data: lines.length > 0 ? lines.join('\n') : 'No live data available.',
@@ -1023,5 +1065,81 @@ INSIGHT: [company or person] | [type: budget|dm|preference|competitor|decision|s
     // Keep last 20 exchanges (40 messages)
     while (history.length > 40) history.shift();
     conversations.set(userId, history);
+
+    // Cap the number of tracked users to prevent unbounded memory growth.
+    // In a small-team deployment this should never trigger, but guards
+    // against a long-lived process accumulating thousands of ghost sessions.
+    const MAX_CONVERSATION_USERS = 200;
+    if (conversations.size > MAX_CONVERSATION_USERS) {
+      const firstKey = conversations.keys().next().value;
+      if (firstKey !== undefined) conversations.delete(firstKey);
+    }
+  }
+
+  // ── /systemstatus — live view of OS state for Mo ─────────────────────────
+  async runSystemStatus(ctx: AgentContext): Promise<AgentResponse> {
+    const lines: string[] = ['*🖥 StandMe OS — System Status*\n'];
+
+    // Pending approvals
+    const { getPendingApprovals } = await import('../services/approvals');
+    const pending = getPendingApprovals();
+    if (pending.length === 0) {
+      lines.push('*Pending Approvals:* none');
+    } else {
+      lines.push(`*Pending Approvals (${pending.length}):*`);
+      for (const p of pending) {
+        const ageMin = Math.round((Date.now() - p.timestamp) / 60000);
+        const age = ageMin < 60 ? `${ageMin}m ago` : `${Math.round(ageMin / 60)}h ago`;
+        lines.push(`  • ${p.action} _(${age})_ → \`/approve_${p.id}\``);
+      }
+    }
+
+    // Active Brain sessions
+    lines.push(`\n*Active Brain Sessions:* ${conversations.size} user(s)`);
+
+    // Scheduler info
+    const { getScheduledAgents } = await import('./registry');
+    const scheduled = getScheduledAgents();
+    lines.push(`\n*Scheduled Agents (${scheduled.length}):*`);
+    for (const a of scheduled) {
+      lines.push(`  • ${a.config.name} — \`${a.config.schedule}\``);
+    }
+
+    // KB stats (lightweight — uses cache)
+    try {
+      const stats = await getKnowledgeStats();
+      lines.push(`\n*Knowledge Base:* ${stats.total} entries (${Object.keys(stats.byType).length} types)`);
+    } catch {
+      lines.push(`\n*Knowledge Base:* unavailable`);
+    }
+
+    // Instantly status
+    const { isInstantlyConfigured } = await import('../services/instantly/client');
+    lines.push(`\n*Instantly.ai:* ${isInstantlyConfigured() ? '✅ API key set' : '❌ INSTANTLY_API_KEY missing'}`);
+
+    // Recent SYSTEM_LOG failures — surface errors Mo may not have seen
+    try {
+      const sysLog = await readSheet(SHEETS.SYSTEM_LOG);
+      const failures = sysLog.slice(1).filter(r => (r[5] || '').toUpperCase() === 'FAIL').slice(-5);
+      if (failures.length > 0) {
+        lines.push(`\n*Recent Failures (${failures.length}):*`);
+        for (const f of failures.slice().reverse()) {
+          const ts = f[0] ? new Date(f[0]).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '?';
+          lines.push(`  • [${ts}] ${f[1] || '?'}: ${(f[4] || '').slice(0, 70)}`);
+        }
+      } else {
+        lines.push(`\n*Recent Failures:* none ✓`);
+      }
+    } catch { lines.push(`\n*Recent Failures:* unavailable`); }
+
+    // Uptime
+    const uptimeMs = Date.now() - PROCESS_START;
+    const uptimeH  = Math.floor(uptimeMs / 3600000);
+    const uptimeM  = Math.round((uptimeMs % 3600000) / 60000);
+    lines.push(`\n*Uptime:* ${uptimeH}h ${uptimeM}m`);
+    lines.push(`_Status as of ${new Date().toISOString()}_`);
+
+    await this.respond(ctx.chatId, lines.join('\n'));
+    return { success: true, message: 'System status shown', confidence: 'HIGH' };
   }
 }

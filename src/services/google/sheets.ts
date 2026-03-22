@@ -167,10 +167,15 @@ export async function validateSheetHeaders(config: SheetConfig): Promise<boolean
       const colIdx = col.charCodeAt(0) - 'A'.charCodeAt(0);
       const actualHeader = (actualHeaders[colIdx] || '').trim().toLowerCase();
       const expectedField = field.toLowerCase();
+      // Convert camelCase to space-separated words: contactName → contact name
+      const humanizedField = field.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
 
-      // Allow if the actual header contains the field name or vice-versa (case-insensitive)
-      // This is a loose check — exact match is often not possible due to human-friendly headers
-      if (actualHeader && !actualHeader.includes(expectedField) && !expectedField.includes(actualHeader)) {
+      // Allow if actual header matches either the raw field name or the humanized (spaced) form
+      const matches =
+        actualHeader.includes(expectedField) || expectedField.includes(actualHeader) ||
+        actualHeader.includes(humanizedField) || humanizedField.includes(actualHeader);
+
+      if (actualHeader && !matches) {
         mismatches.push(`col ${col} (${field}): sheet has "${actualHeaders[colIdx] || 'empty'}" — expected field matching "${field}"`);
       }
     }

@@ -68,7 +68,7 @@ export const SHEETS: Record<string, SheetConfig> = {
       sentDate: 'E',
       status: 'F', // OPENED/CLICKED/REPLIED/BOUNCED
       replyClassification: 'G',
-      instantlyId: 'H',
+      woodpeckerId: 'H',
       notes: 'I',
     },
     headerRow: 1,

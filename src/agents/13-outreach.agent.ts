@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, updateCell, appendRow, appendRows, objectToRow } from '../services/google/sheets';
+import { readSheet, updateCell, updateRange, appendRow, appendRows, objectToRow } from '../services/google/sheets';
 import {
   listCampaigns, getCampaign, createCampaign, findCampaignByName,
   setCampaignStatus, activateCampaign,
@@ -14,7 +14,7 @@ import {
 import { findExhibitorFiles, parseExhibitorFile } from '../services/drive-exhibitor';
 import { validateShow } from '../config/shows';
 import { generateOutreachEmail, generateText } from '../services/ai/client';
-import { saveKnowledge, buildKnowledgeContext, searchKnowledge } from '../services/knowledge';
+import { saveKnowledge, buildKnowledgeContext, searchKnowledge, getKnowledgeBySource } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
@@ -120,7 +120,7 @@ export class OutreachAgent extends BaseAgent {
           sentDate:    logDate,
           status:      'SENT',
           replyClassification: '',
-          instantlyId: '',
+          woodpeckerId: '',
           notes: `Auto-push → Instantly campaign ${campaign.id} (${campaign.name})`,
         }));
         await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
@@ -273,7 +273,7 @@ export class OutreachAgent extends BaseAgent {
         id: logId, leadId, companyName: company,
         emailType: 'EMAIL_1', sentDate: new Date().toISOString(),
         status: 'PENDING_APPROVAL', replyClassification: '',
-        instantlyId: '',
+        woodpeckerId: '',
         notes: `To: ${dmEmail} | Subject: ${email.subject}`,
       }));
 
@@ -666,10 +666,14 @@ export class OutreachAgent extends BaseAgent {
           const result = await addLeads(targetCampaign.id, prospects);
 
           // Activate campaign automatically if it was just created or is DRAFT
+          let activationWarning = '';
           if (targetCampaign.status === CAMPAIGN_STATUS.DRAFT) {
-            await activateCampaign(targetCampaign.id).catch(err =>
-              logger.warn(`[Outreach] Could not activate campaign: ${err.message}`)
-            );
+            try {
+              await activateCampaign(targetCampaign.id);
+            } catch (err: any) {
+              logger.warn(`[Outreach] Could not activate campaign: ${err.message}`);
+              activationWarning = `\n⚠️ Campaign activation failed: ${err.message}\nActivate it manually in the Instantly dashboard.`;
+            }
           }
 
           // Log to OUTREACH_LOG — single batch write to avoid Google Sheets quota
@@ -682,7 +686,7 @@ export class OutreachAgent extends BaseAgent {
             sentDate:            logDate,
             status:              'SENT',
             replyClassification: '',
-            instantlyId:        '',
+            woodpeckerId:        targetCampaign.id,
             notes:               `Bulk → Instantly campaign ${targetCampaign.id} (${targetCampaign.name}) | ${showFilter}`,
           }));
           await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
@@ -695,6 +699,7 @@ export class OutreachAgent extends BaseAgent {
             `Pushed: *${result.added}* leads\n` +
             (result.skipped > 0 ? `Skipped: ${result.skipped} (dupes)\n` : '') +
             (result.failed  > 0 ? `Failed: ${result.failed}\n` : '') +
+            activationWarning +
             `\n📧 Instantly is sending emails per the campaign schedule. Check Instantly dashboard for live stats.`
           );
         } catch (err: any) {
@@ -1049,7 +1054,9 @@ export class OutreachAgent extends BaseAgent {
       const active = all.filter(c => c.status === CAMPAIGN_STATUS.ACTIVE);
 
       if (showFilter) {
-        const match = all.find(c => c.name.toLowerCase().includes(showFilter));
+        // Use the strict matcher (exact / starts-with / whole-word, ≥4 chars) so a
+        // short or ambiguous filter never silently returns the wrong campaign.
+        const match = await findCampaignByName(showFilter);
         if (match) return match;
       }
 
@@ -1155,10 +1162,14 @@ export class OutreachAgent extends BaseAgent {
       const rowIdx = log.findIndex(r => r[0] === logId);
       if (rowIdx < 0) return;
       const row = rowIdx + 1;
+
+      // Columns F (status) and H (instantlyId/ref) are not adjacent — update
+      // them separately but back-to-back to minimise the half-update window.
+      // We still use two calls because updateRange requires a contiguous range.
       if (status) await updateCell(SHEETS.OUTREACH_LOG, row, 'F', status);
       if (ref)    await updateCell(SHEETS.OUTREACH_LOG, row, 'H', ref);
     } catch (err: any) {
-      logger.warn(`[Outreach] Could not update log status: ${err.message}`);
+      logger.warn(`[Outreach] Could not update log status for ${logId}: ${err.message}`);
     }
   }
 }
@@ -1169,8 +1180,11 @@ export class OutreachAgent extends BaseAgent {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function reconstructBulkApproval(approvalId: string): Promise<string | null> {
   try {
-    const entries = await searchKnowledge(`bulk-approval-${approvalId}`, 1).catch(() => []);
-    if (!entries.length) return null;
+    // Use exact source lookup — avoids fuzzy search returning the wrong approval
+    // when multiple bulk outreach approvals are pending simultaneously.
+    const entry = await getKnowledgeBySource(`bulk-approval-${approvalId}`).catch(() => null);
+    if (!entry) return null;
+    const entries = [entry];
 
     let params: {
       showFilter: string;
@@ -1244,21 +1258,28 @@ export async function reconstructBulkApproval(approvalId: string): Promise<strin
       sentDate:           logDate,
       status:             'SENT',
       replyClassification: '',
-      instantlyId:       '',
+      woodpeckerId:       campaignId,
       notes:              `Bulk reconstruct → Instantly campaign ${campaignId} (${campaignName}) | ${showFilter}`,
     }));
     await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
       logger.warn(`[Outreach] reconstructBulkApproval OUTREACH_LOG write failed (non-fatal): ${err.message}`)
     );
 
-    // Activate campaign if it was just created
-    await activateCampaign(campaignId).catch(() => {});
+    // Activate campaign if it was just created — surface any failure clearly
+    let reconstructActivationWarning = '';
+    try {
+      await activateCampaign(campaignId);
+    } catch (err: any) {
+      logger.warn(`[Outreach] reconstructBulkApproval: could not activate campaign: ${err.message}`);
+      reconstructActivationWarning = `\n⚠️ Campaign activation failed: ${err.message}\nActivate it manually in the Instantly dashboard.`;
+    }
 
     return (
       `✅ *Bulk push complete (reconstructed after redeploy)*\n\n` +
       `Campaign: *${campaignName}*\n` +
       `Pushed: *${result.added}* ${showFilter} leads\n` +
       (result.skipped > 0 ? `Skipped: ${result.skipped} (dupes)\n` : '') +
+      reconstructActivationWarning +
       `\n📧 Instantly is sending emails per campaign schedule.`
     );
   } catch (err: any) {

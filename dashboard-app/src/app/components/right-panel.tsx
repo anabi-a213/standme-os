@@ -13,10 +13,25 @@ interface RightPanelProps {
 
 const suggestedQuestions = [
   "What's overdue?",
-  "How are leads doing?",
-  "Run a status check",
+  "How are my leads doing?",
   "Any approvals pending?",
-  "Show deadlines this week"
+  "Show deadlines this week",
+  "Summarise last week's activity",
+];
+
+const SUGGESTED_COMMANDS = [
+  { label: 'Status',      cmd: '/status',      icon: '📊' },
+  { label: 'New Lead',    cmd: '/newlead',     icon: '➕' },
+  { label: 'Deadlines',   cmd: '/deadlines',   icon: '⏰' },
+  { label: 'Outreach',    cmd: '/outreach',    icon: '📧' },
+  { label: 'Brief',       cmd: '/brief',       icon: '🎨' },
+  { label: 'Ask Brain',   cmd: '/ask ',        icon: '🧠' },
+  { label: 'Enrich',      cmd: '/enrich',      icon: '🔍' },
+  { label: 'Campaigns',   cmd: '/campaigns',   icon: '🚀' },
+  { label: 'Reminders',   cmd: '/reminders',   icon: '🔔' },
+  { label: 'Deal Report', cmd: '/dealanalysis',icon: '📈' },
+  { label: 'Post',        cmd: '/post ',       icon: '📱' },
+  { label: 'Contractors', cmd: '/contractors', icon: '👷' },
 ];
 
 function renderMessageContent(content: string, streaming?: boolean): React.ReactNode {
@@ -280,6 +295,19 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
 
           {/* Mobile input */}
           <div className="border-t border-[var(--border-subtle)] bg-[var(--surface)] p-3 shrink-0 mobile-safe-bottom">
+            {/* Command chips — horizontal scroll */}
+            <div className="mb-2 flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {SUGGESTED_COMMANDS.map(({ label, cmd, icon }) => (
+                <button
+                  key={cmd}
+                  onClick={() => { setMessage(cmd); textareaRef.current?.focus(); }}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--gold)]/60 hover:text-[var(--gold)] active:bg-[var(--gold-dim)]"
+                >
+                  <span>{icon}</span>
+                  <span className="font-medium">{label}</span>
+                </button>
+              ))}
+            </div>
             <div className="flex items-end gap-2">
               <textarea
                 ref={textareaRef}
@@ -468,6 +496,21 @@ export function RightPanel({ isMobile, isOpen, onClose }: RightPanelProps = {}) 
 
           {/* Chat Input */}
           <div className="border-t border-[var(--border-subtle)] p-4 shrink-0">
+            {/* Command chips — horizontal scroll */}
+            <div className="mb-2 flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {SUGGESTED_COMMANDS.map(({ label, cmd, icon }) => (
+                <motion.button
+                  key={cmd}
+                  onClick={() => { setMessage(cmd); textareaRef.current?.focus(); }}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--gold)]/60 hover:text-[var(--gold)] hover:bg-[var(--gold-dim)]"
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  <span>{icon}</span>
+                  <span className="font-medium">{label}</span>
+                </motion.button>
+              ))}
+            </div>
             <div className={`relative rounded-xl border bg-[var(--surface-2)] transition-all focus-within:border-[var(--gold)] ${
               isRTL ? 'border-[var(--gold)]/30' : 'border-[var(--border)]'
             }`}>
