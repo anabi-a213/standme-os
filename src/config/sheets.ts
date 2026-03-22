@@ -248,4 +248,27 @@ export const SHEETS: Record<string, SheetConfig> = {
     },
     headerRow: 1,
   },
+
+  EMAIL_FUNNEL: {
+    envKey: 'SPREADSHEET_ID',  // lives in the master spreadsheet
+    tabName: 'EmailFunnel',
+    columns: {
+      id: 'A',             // EF-timestamp
+      leadId: 'B',         // FK to LEAD_MASTER id
+      companyName: 'C',
+      contactName: 'D',
+      contactEmail: 'E',
+      gmailThreadId: 'F',  // Gmail thread ID — keeps all replies in one thread
+      lastMessageId: 'G',  // Message-ID of last email (for In-Reply-To header)
+      funnelStage: 'H',    // NEW_INQUIRY | WELCOMED | REPLIED | QUALIFYING | BRIEFED | PROPOSAL | WON | LOST
+      lastContact: 'I',    // ISO timestamp of last email (either direction)
+      sentCount: 'J',      // how many emails we've sent
+      showName: 'K',
+      standSize: 'L',
+      budget: 'M',
+      notes: 'N',          // key info extracted from conversation
+      conversationLog: 'O', // JSON [{direction:'in'|'out', date, subject, summary}]
+    },
+    headerRow: 1,
+  },
 };

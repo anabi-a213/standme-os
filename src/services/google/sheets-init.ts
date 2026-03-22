@@ -129,6 +129,15 @@ const REQUIRED_TABS: TabConfig[] = [
       'Status', 'Started At', 'Completed At', 'Steps', 'Notes',
     ],
   },
+  {
+    envKey: 'SPREADSHEET_ID',
+    tabName: 'EmailFunnel',
+    headers: [
+      'ID', 'Lead ID', 'Company', 'Contact Name', 'Contact Email',
+      'Gmail Thread ID', 'Last Message ID', 'Funnel Stage', 'Last Contact',
+      'Sent Count', 'Show Name', 'Stand Size', 'Budget', 'Notes', 'Conversation Log',
+    ],
+  },
 ];
 
 // ── Step 1: Find or auto-create the master spreadsheet ─────────────────────────

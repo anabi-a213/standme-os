@@ -41,6 +41,7 @@ import { CardManagerAgent } from './agents/08-card-manager.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
 import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
 import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
+import { EmailFunnelAgent } from './agents/19-email-funnel.agent';
 import { initWorkflowEngine } from './services/workflow-engine';
 
 
@@ -105,6 +106,7 @@ async function main() {
     new MarketingContentAgent(),
     new CrossBoardAgent(),
     new GmailLeadMonitorAgent(),
+    new EmailFunnelAgent(),
   ];
 
   for (const agent of agents) {
@@ -172,6 +174,10 @@ async function main() {
         `/systemstatus — Pending approvals, sessions, scheduler state\n` +
         `/checkemails — Scan inbox for new stand request emails\n` +
         `/emailstatus — Gmail lead monitor status\n` +
+        `/emailfunnel — Email funnel dashboard (all inbound lead conversations)\n` +
+        `/emailthread [company] — Full conversation thread\n` +
+        `/emaildraft [company] — AI drafts a reply for your approval\n` +
+        `/emailreply [company] | [message] — Send a reply from info@standme.de\n` +
         `/help — Show this menu`,
         { parse_mode: 'Markdown' }
       );

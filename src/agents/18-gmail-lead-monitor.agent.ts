@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { validateShow } from '../config/shows';
 import { SHEETS } from '../config/sheets';
-import { appendRow, readSheet, objectToRow, findRowByValue } from '../services/google/sheets';
+import { appendRow, readSheet, objectToRow, findRowByValue, updateCell } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import { searchEmailsByQuery, sendEmail } from '../services/google/gmail';
 import { generateText, detectLanguage } from '../services/ai/client';
@@ -97,6 +97,15 @@ export class GmailLeadMonitorAgent extends BaseAgent {
       const isReply = subjectLower.startsWith('re:');
 
       if (isReply) {
+        // First: check if this is a reply from an existing EMAIL_FUNNEL lead
+        const funnelHandled = await this.handleFunnelReply(email);
+        if (funnelHandled) {
+          completedReplies.push(email.from);
+          await this.markProcessed(email.id, `funnel-reply from ${this.extractEmailFromHeader(email.from)}`);
+          continue;
+        }
+
+        // Then: check if it's a reply to a pending info-request
         const handled = await this.handleInfoReply(email);
         if (handled) {
           completedReplies.push(email.from);
@@ -264,6 +273,73 @@ Return ONLY the JSON object. No explanation.`;
 
   // ─── Request Lead Approval from Mo ─────────────────────────────────────
 
+  /** Save or update an EMAIL_FUNNEL record for this contact */
+  async saveFunnelRecord(params: {
+    leadId: string;
+    companyName: string;
+    contactName: string;
+    contactEmail: string;
+    gmailThreadId: string;
+    lastMessageId: string;
+    funnelStage: string;
+    showName?: string;
+    standSize?: string;
+    budget?: string;
+    notes?: string;
+    direction: 'in' | 'out';
+    subject: string;
+    summary: string;
+  }): Promise<void> {
+    try {
+      // Check for existing funnel record for this contact
+      const rows = await readSheet(SHEETS.EMAIL_FUNNEL).catch(() => [] as string[][]);
+      let existingRow = -1;
+      for (let i = 1; i < rows.length; i++) {
+        if ((rows[i][4] || '').toLowerCase() === params.contactEmail.toLowerCase()) {
+          existingRow = i + 1; // 1-indexed
+          break;
+        }
+      }
+
+      const logEntry = { direction: params.direction, date: new Date().toISOString(), subject: params.subject, summary: params.summary };
+
+      if (existingRow > 0) {
+        // Update existing record
+        const existingLog = JSON.parse(rows[existingRow - 1][14] || '[]').concat(logEntry);
+        const sentCount = parseInt(rows[existingRow - 1][9] || '0') + (params.direction === 'out' ? 1 : 0);
+        await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'H', params.funnelStage);
+        await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'I', new Date().toISOString());
+        await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'J', sentCount.toString());
+        await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'G', params.lastMessageId);
+        if (params.showName) await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'K', params.showName);
+        if (params.standSize) await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'L', params.standSize);
+        if (params.budget) await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'M', params.budget);
+        await updateCell(SHEETS.EMAIL_FUNNEL, existingRow, 'O', JSON.stringify(existingLog).substring(0, 2000));
+      } else {
+        // Create new funnel record
+        await appendRow(SHEETS.EMAIL_FUNNEL, objectToRow(SHEETS.EMAIL_FUNNEL, {
+          id: `EF-${Date.now()}`,
+          leadId: params.leadId,
+          companyName: params.companyName,
+          contactName: params.contactName,
+          contactEmail: params.contactEmail,
+          gmailThreadId: params.gmailThreadId,
+          lastMessageId: params.lastMessageId,
+          funnelStage: params.funnelStage,
+          lastContact: new Date().toISOString(),
+          sentCount: params.direction === 'out' ? '1' : '0',
+          showName: params.showName || '',
+          standSize: params.standSize || '',
+          budget: params.budget || '',
+          notes: params.notes || '',
+          conversationLog: JSON.stringify([logEntry]),
+        }));
+      }
+    } catch (err: any) {
+      // Non-fatal — lead was still created
+    }
+  }
+
   private async requestLeadApproval(pending: PendingEmailLead, chatId: number): Promise<void> {
     const { extractedData: d } = pending;
     const approvalId = `gmail-lead-${pending.emailId}`;
@@ -416,7 +492,26 @@ Return ONLY the JSON object. No explanation.`;
     });
 
     // Send welcome email immediately (no budget mention)
+    const welcomeSubject = `Your ${d.showName || 'Exhibition Stand'} Request — We're On It`;
     await this.sendWelcomeEmail(d, leadId).catch(() => null);
+
+    // Save EMAIL_FUNNEL record — tracks the full conversation thread
+    await this.saveFunnelRecord({
+      leadId,
+      companyName: d.companyName,
+      contactName: d.contactName,
+      contactEmail: d.contactEmail,
+      gmailThreadId: '',  // will be updated when Gmail reply arrives (Agent-18 scan)
+      lastMessageId: '',
+      funnelStage: 'WELCOMED',
+      showName: d.showName,
+      standSize: d.standSize,
+      budget: d.budget,
+      notes: d.notes,
+      direction: 'out',
+      subject: welcomeSubject,
+      summary: `Welcome email sent. Missing: ${[!d.showName && 'show', !d.standSize && 'size', !d.budget && 'budget'].filter(Boolean).join(', ') || 'nothing — full data'}`,
+    }).catch(() => null);
 
     // Notify Mo with clear next-step instructions — no auto-triggering downstream agents.
     // Email leads already have the contact's email. Enrichment (AI DM research) adds little
@@ -531,6 +626,72 @@ Write a friendly, helpful email (max 150 words). Do not use placeholders. Do not
       `Info Requested: ${d.companyName || d.contactEmail}`,
       `Email from *${d.contactEmail}* is missing: ${missingFields.join(', ')}.\nInfo-request reply sent automatically. Will create lead when they respond.`
     ));
+  }
+
+  // ─── Handle Reply from an EMAIL_FUNNEL lead ─────────────────────────────
+
+  private async handleFunnelReply(email: { id: string; from: string; subject: string; body: string; threadId?: string; messageId?: string }): Promise<boolean> {
+    const senderEmail = this.extractEmailFromHeader(email.from);
+    const rows = await readSheet(SHEETS.EMAIL_FUNNEL).catch(() => [] as string[][]);
+
+    let funnelRow = -1;
+    let funnelData: string[] = [];
+    for (let i = 1; i < rows.length; i++) {
+      if ((rows[i][4] || '').toLowerCase() === senderEmail.toLowerCase()) {
+        funnelRow = i + 1;
+        funnelData = rows[i];
+        break;
+      }
+    }
+    if (funnelRow < 0) return false; // Not a known funnel contact
+
+    const companyName = funnelData[2] || senderEmail;
+    const contactName = funnelData[3] || '';
+
+    // Update funnel record with the incoming reply
+    const existingLog = JSON.parse(funnelData[14] || '[]');
+    const newEntry = {
+      direction: 'in',
+      date: new Date().toISOString(),
+      subject: email.subject,
+      summary: email.body.substring(0, 300),
+    };
+    existingLog.push(newEntry);
+
+    await updateCell(SHEETS.EMAIL_FUNNEL, funnelRow, 'H', 'REPLIED');
+    await updateCell(SHEETS.EMAIL_FUNNEL, funnelRow, 'I', new Date().toISOString());
+    await updateCell(SHEETS.EMAIL_FUNNEL, funnelRow, 'G', email.messageId || '');
+    if (email.threadId) await updateCell(SHEETS.EMAIL_FUNNEL, funnelRow, 'F', email.threadId);
+    await updateCell(SHEETS.EMAIL_FUNNEL, funnelRow, 'O', JSON.stringify(existingLog).substring(0, 2000));
+
+    // Build conversation context for AI draft
+    const historyText = existingLog.map((e: any) =>
+      `[${e.direction === 'out' ? 'StandMe' : companyName}] ${e.date.substring(0, 10)}: ${e.summary}`
+    ).join('\n');
+
+    // Generate AI reply draft
+    const aiDraft = await generateText(
+      `You are drafting a reply email from StandMe (info@standme.de) to ${contactName || companyName}.\n\n` +
+      `CONVERSATION SO FAR:\n${historyText}\n\n` +
+      `THEIR LATEST REPLY:\n${email.body.substring(0, 1000)}\n\n` +
+      `Rules:\n- NEVER mention pricing or budget\n- Under 150 words\n- Move them toward confirming: show name, stand size, and a call/meeting\n- Sign off: Mohammed Anabi | StandMe | www.standme.de`,
+      'You write concise, professional sales emails for an exhibition stand design company.',
+      300
+    ).catch(() => '');
+
+    // Notify Mo with context + AI draft + quick reply options
+    const approvalId = `funnel-reply-${funnelRow}-${Date.now()}`;
+    await sendToMo(formatType2(
+      `Reply from ${companyName}`,
+      `*${contactName || companyName}* (${senderEmail}) replied:\n\n` +
+      `_"${email.body.substring(0, 200)}${email.body.length > 200 ? '...' : ''}"_\n\n` +
+      `*AI Draft Reply:*\n${aiDraft}\n\n` +
+      `To send this draft:\n\`/emailreply ${companyName} | SEND_DRAFT\`\n\n` +
+      `To write your own:\n\`/emailreply ${companyName} | Your message here\`\n\n` +
+      `To see full thread:\n\`/emailthread ${companyName}\``
+    ));
+
+    return true;
   }
 
   // ─── Handle Reply to Our Info-Request ──────────────────────────────────
