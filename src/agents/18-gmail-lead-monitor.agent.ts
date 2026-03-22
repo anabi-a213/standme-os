@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { validateShow } from '../config/shows';
 import { SHEETS } from '../config/sheets';
-import { appendRow, readSheet, objectToRow } from '../services/google/sheets';
+import { appendRow, readSheet, objectToRow, findRowByValue } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import { searchEmailsByQuery, sendEmail } from '../services/google/gmail';
 import { generateText, detectLanguage } from '../services/ai/client';
@@ -16,6 +16,7 @@ import {
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
 import { registerApproval } from '../services/approvals';
 import { agentEventBus } from '../services/agent-event-bus';
+import { conflictGuard } from '../services/conflict-guard';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -363,7 +364,22 @@ Return ONLY the JSON object. No explanation.`;
       notes: `Source: Website/Email. Website: ${d.website || 'not provided'}. ${d.notes || ''}`.trim(),
     };
 
-    await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
+    // Duplicate check — same company + same show = don't create a second lead
+    const lockKey = `lead:${d.companyName.toLowerCase().replace(/\s+/g, '-')}`;
+    if (!conflictGuard.acquire(lockKey, this.config.id)) {
+      return `⚠️ Lead for "${d.companyName}" is already being created — skipped duplicate.`;
+    }
+    const existingLead = await findRowByValue(SHEETS.LEAD_MASTER, 'C', d.companyName).catch(() => null);
+    if (existingLead) {
+      conflictGuard.release(lockKey);
+      return `⚠️ Lead for *${d.companyName}* already exists in Lead Master (row ${existingLead.row}). Skipped duplicate — update the existing lead instead.`;
+    }
+
+    try {
+      await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
+    } finally {
+      conflictGuard.release(lockKey);
+    }
 
     // Always create Trello card — every approved lead enters the pipeline
     let trelloCardId = '';

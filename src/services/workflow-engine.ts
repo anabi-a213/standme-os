@@ -102,7 +102,10 @@ function systemCtx(command: string, args = '') {
 
 async function w1_autoEnrich(event: AgentEvent): Promise<void> {
   const status = ((event.data.status as string) || '').toUpperCase();
+  // Only auto-enrich HOT/WARM manual leads. QUALIFYING = email lead — Mo decides when to enrich.
   if (status !== 'HOT' && status !== 'WARM') return;
+  // Don't auto-enrich email/website leads — they already have the contact, enrichment adds little
+  if ((event.data.source as string) === 'website') return;
   if (!guardStart('W1', event.entityId)) return;
 
   const startedAt = new Date().toISOString();

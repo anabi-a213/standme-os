@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, objectToRow } from '../services/google/sheets';
-import { getBoardCardsWithListNames, addComment } from '../services/trello/client';
+import { getBoardCardsWithListNames } from '../services/trello/client';
 import { sendToTeam, formatType3 } from '../services/telegram/bot';
 
 export class CrossBoardAgent extends BaseAgent {
@@ -12,7 +12,7 @@ export class CrossBoardAgent extends BaseAgent {
     id: 'agent-16',
     description: 'Monitor health across all 4 Trello boards',
     commands: ['/crossboard'],
-    schedule: '30 8 * * *', // 8:30am daily
+    // No schedule — run manually via /crossboard. Agent-05 already covers daily deadline alerts.
     requiredRole: UserRole.OPS_LEAD,
   };
 
@@ -74,11 +74,7 @@ export class CrossBoardAgent extends BaseAgent {
       if (salesEntry && salesEntry.listName.includes('Won')) {
         if (!boards.includes('Operation') && !boards.includes('Production')) {
           flags.push(`⚠️ ${salesEntry.card.name} — WON but no Operation/Production cards`);
-
-          // Add comment on Sales card (never create cards on other boards)
-          try {
-            await addComment(salesEntry.card.id, `[Cross-Board Check] Won but no matching Operation/Production card found — ${new Date().toISOString().split('T')[0]}`);
-          } catch { /* non-critical */ }
+          // No auto-commenting — Mo reviews flags in Telegram report and acts manually
         }
       }
 

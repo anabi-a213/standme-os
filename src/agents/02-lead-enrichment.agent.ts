@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, updateCell, appendRow, objectToRow, sheetUrl, findRowByValue } from '../services/google/sheets';
+import { readSheet, updateCell, sheetUrl } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
 import { saveKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '../services/knowledge';
@@ -115,28 +115,10 @@ export class LeadEnrichmentAgent extends BaseAgent {
           });
         }
 
-        // If readiness 5+, add to outreach queue — but only if not already queued
-        if (readiness >= 5) {
-          const alreadyQueued = await findRowByValue(SHEETS.OUTREACH_QUEUE, 'B', lead.data[0]).catch(() => null);
-          if (alreadyQueued) {
-            logger.info(`[Enrichment] Lead ${lead.data[0]} already in OUTREACH_QUEUE — skipping duplicate`);
-          } else {
-            await appendRow(SHEETS.OUTREACH_QUEUE, objectToRow(SHEETS.OUTREACH_QUEUE, {
-              id: `OQ-${Date.now()}`,
-              leadId: lead.data[0],
-              companyName: companyName,
-              dmName: dmName,
-              dmEmail: dmEmail,
-              showName: lead.data[6],
-              readinessScore: readiness.toString(),
-              sequenceStatus: 'READY',
-              addedDate: new Date().toISOString(),
-              lastAction: '',
-            }));
-          }
-        }
-
         // Publish lead.enriched — Workflow Engine W4 notifies Mo if readiness≥7
+        // NOTE: Agent-02 no longer auto-adds to OUTREACH_QUEUE.
+        // Mo explicitly runs /outreach [company] or /bulkoutreach [show] when ready.
+        // This prevents leads entering cold email campaigns without Mo's explicit decision.
         agentEventBus.publish('lead.enriched', {
           agentId: this.config.id,
           entityId: leadId,
