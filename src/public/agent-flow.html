@@ -2,15 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>StandMe OS — Agent Flow (n8n Style)</title>
+<title>StandMe OS — Agent Flow</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;font-size:12px;overflow:hidden}
-
-/* grid background */
 #bg{position:fixed;inset:0;background-image:radial-gradient(circle,#2d2d4a 1.5px,transparent 1.5px);background-size:30px 30px;pointer-events:none;z-index:0}
-
-/* topbar */
 #bar{position:fixed;top:0;left:0;right:0;height:48px;background:#0f0f1a;border-bottom:1px solid #2d2d4a;display:flex;align-items:center;gap:10px;padding:0 16px;z-index:200}
 #bar h1{font-size:14px;color:#7c3aed;white-space:nowrap;font-weight:700}
 #bar h1 span{color:#10b981}
@@ -25,35 +21,21 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
 .zbtn{width:28px;height:28px;border-radius:6px;border:1px solid #374151;background:transparent;color:#9ca3af;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .zbtn:hover{background:#374151;color:#fff}
 #hint{font-size:10px;color:#4b5563;white-space:nowrap;margin-left:6px}
-
-/* canvas */
 #cw{position:fixed;top:48px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab}
 #cw.drag{cursor:grabbing}
-#cv{position:absolute;top:0;left:0;transform-origin:0 0;width:9000px;height:7000px}
-
-/* SVG arrows */
-#arrows{position:absolute;top:0;left:0;width:9000px;height:7000px;pointer-events:none;z-index:1;overflow:visible}
-
-/* swim lane backgrounds */
+#cv{position:absolute;top:0;left:0;transform-origin:0 0;width:9000px;height:8000px}
+#arrows{position:absolute;top:0;left:0;width:9000px;height:8000px;pointer-events:none;z-index:1;overflow:visible}
 .lane{position:absolute;border-radius:12px;border:1px solid;z-index:0}
-
-/* section labels */
 .slbl{position:absolute;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;z-index:2;opacity:.35}
-
-/* ── NODE base ── */
 .node{position:absolute;width:270px;border-radius:10px;background:#1e1e35;border:1.5px solid #374151;z-index:10;transition:box-shadow .15s,transform .15s;cursor:move}
 .node:hover{box-shadow:0 0 0 2px #7c3aed88,0 12px 40px #00000088;transform:translateY(-2px);z-index:30}
-
 .node-head{padding:10px 12px 8px;border-radius:9px 9px 0 0;display:flex;align-items:flex-start;gap:8px}
 .node-ico{font-size:20px;flex-shrink:0;margin-top:1px}
 .node-titlewrap{}
 .node-id{font-size:9px;font-weight:700;letter-spacing:1.5px;opacity:.55;margin-bottom:1px}
 .node-name{font-size:13px;font-weight:700;line-height:1.2}
 .node-cmd{font-family:monospace;font-size:10px;opacity:.5;margin-top:2px}
-
 .node-body{padding:8px 12px 10px;display:flex;flex-direction:column;gap:7px}
-
-.ns{/* node section */}
 .ns-lbl{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;opacity:.4;margin-bottom:3px}
 .ns-items{display:flex;flex-direction:column;gap:2px}
 .ni{font-size:11px;line-height:1.4;padding:3px 7px 3px 9px;border-radius:4px;background:rgba(255,255,255,.04);position:relative}
@@ -65,63 +47,43 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
 .ni.env::before{background:#8b5cf6}
 .ni code{font-family:monospace;background:rgba(255,255,255,.1);padding:0 3px;border-radius:3px;font-size:10px}
 .ni b{font-weight:700}
-
 .node-foot{padding:5px 12px 8px;font-size:10px;opacity:.4;font-style:italic;border-top:1px solid rgba(255,255,255,.05)}
-
-/* port dots */
 .port{position:absolute;width:10px;height:10px;border-radius:50%;border:2px solid;cursor:crosshair;z-index:40;transition:.1s}
 .port:hover{transform:scale(1.4)}
 .port-in{left:-5px;background:#1e1e35;border-color:#6b7280}
 .port-out{right:-5px;background:#1e1e35;border-color:#6b7280}
-
-/* conflict badge */
 .cbadge{position:absolute;top:-8px;right:-8px;background:#dc2626;color:#fff;font-size:8px;font-weight:700;padding:2px 6px;border-radius:6px;letter-spacing:.5px;z-index:50}
-.fbadge{position:absolute;top:-8px;right:-8px;background:#059669;color:#fff;font-size:8px;font-weight:700;padding:2px 6px;border-radius:6px;letter-spacing:.5px;z-index:50}
 .cbadge2{position:absolute;top:-8px;left:10px;background:#d97706;color:#000;font-size:8px;font-weight:700;padding:2px 6px;border-radius:6px;letter-spacing:.5px;z-index:50}
-
-/* entry / trigger nodes */
 .tnode{position:absolute;border-radius:8px;border:1.5px dashed #374151;background:#12121f;padding:10px 14px;z-index:10;cursor:move;text-align:center;min-width:140px}
 .tnode .ti{font-size:22px;display:block;margin-bottom:4px}
 .tnode .tn{font-weight:700;color:#e2e8f0;font-size:12px}
 .tnode .ts{font-size:10px;color:#6b7280;margin-top:2px}
 .tnode .port-out{right:-5px;top:50%;transform:translateY(-50%)}
-
-/* workflow/event box */
-.wbox{position:absolute;border-radius:8px;border:1.5px solid #d97706;background:#1a1200;padding:10px 14px;z-index:10;min-width:180px}
-.wbox .wt{font-weight:700;color:#fcd34d;font-size:12px;margin-bottom:4px}
-.wbox .ws{font-size:11px;color:#9ca3af;line-height:1.5}
+.wbox{position:absolute;border-radius:8px;border:1.5px solid #d97706;background:#1a1200;padding:12px 14px;z-index:10;min-width:180px;cursor:move}
+.wbox .wt{font-weight:700;color:#fcd34d;font-size:12px;margin-bottom:6px}
+.wbox .ws{font-size:11px;color:#9ca3af;line-height:1.6}
 .wbox .port-in{left:-5px;top:50%;transform:translateY(-50%)}
 .wbox .port-out{right:-5px;top:50%;transform:translateY(-50%)}
-
-/* data store nodes */
 .snode{position:absolute;border-radius:8px;border:1px solid #374151;background:#12121f;padding:10px 14px;min-width:160px;z-index:10;text-align:center;cursor:move}
 .snode .si{font-size:18px}
 .snode .sn{font-weight:700;font-size:12px;margin:4px 0 2px;color:#e2e8f0}
 .snode .sd{font-size:10px;color:#4b5563;line-height:1.4}
 .snode .port-in{left:-5px;top:50%;transform:translateY(-50%)}
-
-/* path colours */
 .p-manual .node-head{background:linear-gradient(135deg,#1e3a5f,#1e2a4a)}
 .p-manual .node-name{color:#93c5fd}
 .p-manual .port-out{border-color:#2563eb}
-
 .p-email .node-head{background:linear-gradient(135deg,#3d2000,#2a1a00)}
 .p-email .node-name{color:#fcd34d}
 .p-email .port-out{border-color:#d97706}
-
 .p-outreach .node-head{background:linear-gradient(135deg,#052e16,#0a1a0a)}
 .p-outreach .node-name{color:#6ee7b7}
 .p-outreach .port-out{border-color:#059669}
-
 .p-ops .node-head{background:linear-gradient(135deg,#2e1065,#1a0a3a)}
 .p-ops .node-name{color:#c4b5fd}
 .p-ops .port-out{border-color:#7c3aed}
-
 .p-brain .node-head{background:linear-gradient(135deg,#0c2a3a,#0a1a2a)}
 .p-brain .node-name{color:#7dd3fc}
 .p-brain .port-out{border-color:#0284c7}
-
-/* detail panel */
 #dp{position:fixed;right:0;top:48px;bottom:0;width:360px;background:#0f0f1a;border-left:1px solid #1e1e35;overflow-y:auto;transform:translateX(100%);transition:transform .25s;z-index:300;padding:20px}
 #dp.open{transform:translateX(0)}
 #dp-close{position:absolute;top:14px;right:14px;background:none;border:none;color:#6b7280;font-size:18px;cursor:pointer}
@@ -137,17 +99,13 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
 #dp-body .box{border-radius:6px;padding:8px 10px;margin-top:6px;font-size:11px;line-height:1.5}
 #dp-body .box.warn{background:#2d1900;border:1px solid #d97706;color:#fcd34d}
 #dp-body .box.ok{background:#052e16;border:1px solid #059669;color:#6ee7b7}
-#dp-body .box.bad{background:#1c0000;border:1px solid #dc2626;color:#fca5a5}
 #dp-body .box.info{background:#0c1a2e;border:1px solid #0284c7;color:#7dd3fc}
-
-/* mini-map */
 #mm{position:fixed;bottom:16px;right:16px;width:180px;height:110px;background:#0f0f1aee;border:1px solid #2d2d4a;border-radius:8px;z-index:150;overflow:hidden}
 #mm-vp{position:absolute;border:1.5px solid #7c3aed;border-radius:3px;opacity:.7;pointer-events:none}
 </style>
 </head>
 <body>
 <div id="bg"></div>
-
 <div id="bar">
   <h1>StandMe OS — <span>Agent Flow</span></h1>
   <button class="fbtn on" onclick="filter('all',this)">All</button>
@@ -168,23 +126,23 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
 <div id="cv">
 <svg id="arrows"></svg>
 
-<!-- ══ SWIM LANE BACKGROUNDS ══ -->
-<div class="lane" style="left:60px;top:70px;width:310px;height:1760px;border-color:#2563eb22;background:#2563eb06"></div>
-<div class="lane" style="left:400px;top:70px;width:310px;height:1300px;border-color:#d9770622;background:#d9770606"></div>
-<div class="lane" style="left:740px;top:70px;width:310px;height:1460px;border-color:#05966922;background:#05966906"></div>
-<div class="lane" style="left:1100px;top:70px;width:950px;height:1200px;border-color:#7c3aed22;background:#7c3aed06"></div>
-<div class="lane" style="left:2100px;top:70px;width:660px;height:1600px;border-color:#0284c722;background:#0284c706"></div>
+<!-- ══ SWIM LANES ══ -->
+<div class="lane" style="left:60px;top:70px;width:320px;height:2500px;border-color:#2563eb22;background:#2563eb06"></div>
+<div class="lane" style="left:410px;top:70px;width:320px;height:1760px;border-color:#d9770622;background:#d9770606"></div>
+<div class="lane" style="left:760px;top:70px;width:320px;height:1900px;border-color:#05966922;background:#05966906"></div>
+<div class="lane" style="left:1110px;top:70px;width:1000px;height:1760px;border-color:#7c3aed22;background:#7c3aed06"></div>
+<div class="lane" style="left:2150px;top:70px;width:720px;height:2100px;border-color:#0284c722;background:#0284c706"></div>
 
 <!-- ══ LANE LABELS ══ -->
-<div class="slbl" style="left:180px;top:76px;color:#2563eb">MANUAL LEAD PATH</div>
-<div class="slbl" style="left:490px;top:76px;color:#d97706">EMAIL FUNNEL PATH</div>
-<div class="slbl" style="left:810px;top:76px;color:#059669">COLD OUTREACH PATH</div>
-<div class="slbl" style="left:1360px;top:76px;color:#7c3aed">OPERATIONS AGENTS</div>
-<div class="slbl" style="left:2300px;top:76px;color:#0284c7">BRAIN / AI / DATA</div>
+<div class="slbl" style="left:185px;top:76px;color:#2563eb">MANUAL LEAD PATH</div>
+<div class="slbl" style="left:515px;top:76px;color:#d97706">EMAIL FUNNEL</div>
+<div class="slbl" style="left:855px;top:76px;color:#059669">COLD OUTREACH</div>
+<div class="slbl" style="left:1390px;top:76px;color:#7c3aed">OPERATIONS AGENTS</div>
+<div class="slbl" style="left:2370px;top:76px;color:#0284c7">BRAIN / AI / DATA</div>
 
-<!-- ══════════════════════════════════════════ -->
-<!-- TRIGGER NODES (row 0, y=100) -->
-<!-- ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  TRIGGER NODES  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
 <div class="tnode" id="tg-telegram" style="left:110px;top:100px">
   <span class="ti">📱</span>
@@ -193,47 +151,47 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<div class="tnode" id="tg-gmail" style="left:450px;top:100px">
+<div class="tnode" id="tg-gmail" style="left:460px;top:100px">
   <span class="ti">📧</span>
   <div class="tn">Gmail Inbox</div>
-  <div class="ts">info@standme.de<br>Scanned every 15min</div>
+  <div class="ts">info@standme.de<br>Scanned every 15 min</div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<div class="tnode" id="tg-instantly" style="left:760px;top:100px">
+<div class="tnode" id="tg-instantly" style="left:810px;top:100px">
   <span class="ti">🔗</span>
   <div class="tn">Instantly Webhook</div>
   <div class="ts">POST /webhook/instantly<br>reply · open · bounce</div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<div class="tnode" id="tg-wp-wh" style="left:760px;top:240px">
+<div class="tnode" id="tg-wp-wh" style="left:810px;top:270px">
   <span class="ti">🔗</span>
   <div class="tn">Woodpecker Webhook</div>
   <div class="ts">POST /webhook/woodpecker<br>reply events only</div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<div class="tnode" id="tg-cron" style="left:2160px;top:100px">
+<div class="tnode" id="tg-cron" style="left:2210px;top:100px">
   <span class="ti">⏰</span>
   <div class="tn">Cron Scheduler</div>
-  <div class="ts">Europe/Berlin timezone<br>Overlap guard per agent</div>
+  <div class="ts">Europe/Berlin timezone<br>Per-agent overlap guard</div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<div class="tnode" id="tg-anytext" style="left:2160px;top:240px">
+<div class="tnode" id="tg-anytext" style="left:2210px;top:280px">
   <span class="ti">💬</span>
   <div class="tn">Any Unrecognised Text</div>
   <div class="ts">Falls through to Brain<br>Arabic · English · Mixed</div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- ══════════════════════════════════════════ -->
-<!-- MANUAL LEAD PATH -->
-<!-- ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  MANUAL LEAD PATH  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
 <!-- Agent-01 -->
-<div class="node p-manual" id="a01" style="left:75px;top:330px" data-d='a01'>
+<div class="node p-manual" id="a01" style="left:80px;top:350px" data-d="a01">
   <div class="node-head">
     <div class="node-ico">📋</div>
     <div class="node-titlewrap">
@@ -244,54 +202,41 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">📱 Telegram: <code>/newlead Company | Contact | Email | Show | Size | Budget</code></div>
-      <div class="ni trg">📱 Natural language: <code>/newlead "Pharma GmbH is joining Arab Health with a 60sqm stand"</code></div>
+      <div class="ni trg">📱 <code>/newlead Company | Contact | Email | Show | Size | Budget</code></div>
+      <div class="ni trg">📱 Natural language: <code>/newlead "Pharma GmbH joins Arab Health 60sqm"</code></div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs / Reads</div><div class="ns-items">
-      <div class="ni inp">Company name (required — everything else optional)</div>
-      <div class="ni inp">Pipe-separated args OR free-text (Claude parses it)</div>
-      <div class="ni env">🔑 ANTHROPIC_API_KEY (for natural language parsing)</div>
-      <div class="ni env">🔑 SHEET_LEAD_MASTER, TRELLO_BOARD_SALES_PIPELINE</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚙️ Does (step by step)</div><div class="ns-items">
-      <div class="ni inp">1. Detects pipe | vs natural language in args</div>
-      <div class="ni inp">2. If natural lang → Claude extracts: company, contact, email, show, size, budget</div>
-      <div class="ni inp">3. Validates required fields (company at minimum)</div>
-      <div class="ni inp">4. Generates unique ID: <code>LD-{timestamp}</code></div>
-      <div class="ni inp">5. appendRow() → LEAD_MASTER sheet (25 columns)</div>
-      <div class="ni inp">6. Agent-08 creates Trello card → <code>01 New Inquiry</code> list</div>
-      <div class="ni inp">7. Fires <code>lead.created</code> event with company name</div>
+    <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
+      <div class="ni inp">Pipe-separated OR Claude parses free text</div>
+      <div class="ni inp">Generates ID: <code>LD-{timestamp}</code></div>
+      <div class="ni inp">appendRow() → LEAD_MASTER (25 cols)</div>
+      <div class="ni inp">Agent-08 creates Trello card → <code>01 New Inquiry</code></div>
+      <div class="ni inp">Fires <code>lead.created</code> event → W1</div>
+      <div class="ni inp">pipelineRunner.start() for HOT/WARM leads</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">✅ LEAD_MASTER row (ID: LD-xxx, status: PENDING)</div>
-      <div class="ni out">✅ Trello card in <code>01 New Inquiry</code></div>
-      <div class="ni out">⚡ <b>lead.created</b> event → W1 Workflow → Agent-02</div>
-      <div class="ni out">📱 Confirmation message to Mo</div>
+      <div class="ni out">✅ LEAD_MASTER row · Trello card · pipeline started</div>
     </div></div>
   </div>
-  <div class="node-foot">Source = 'manual'. W1 will trigger enrichment for this company only.</div>
+  <div class="node-foot">source='manual' — W1 triggers scoped enrichment</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
-  <div class="port port-out" style="top:50%;transform:translateY(-50%)" id="a01-out"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- W1 box -->
-<div class="wbox" id="w1" style="left:120px;top:760px">
-  <div class="cbadge2">⚡ EVENT · FIXED</div>
-  <div class="wt">W1 — lead.created Workflow</div>
+<!-- W1 workflow event -->
+<div class="wbox" id="w1" style="left:130px;top:870px">
+  <div class="cbadge2">⚡ W1 EVENT</div>
+  <div class="wt">W1 — lead.created</div>
   <div class="ws">
     Fires when Agent-01 creates a manual lead<br>
-    <span style="color:#10b981">✓ FIX: Skips source=email AND source=website</span><br>
-    Previously only skipped website → email leads were auto-enriched (wrong)<br>
-    Calls: <code>/enrich "CompanyName"</code> — scoped to ONE company only<br>
-    Also starts PipelineRunner for HOT/WARM leads
+    Skips <code>source=email</code> and <code>source=website</code><br>
+    Calls <code>/enrich "CompanyName"</code> — scoped to ONE company
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-02 -->
-<div class="node p-manual" id="a02" style="left:75px;top:910px" data-d='a02'>
-  <div class="fbadge">FIXED</div>
+<div class="node p-manual" id="a02" style="left:80px;top:1040px" data-d="a02">
   <div class="node-head">
     <div class="node-ico">🔍</div>
     <div class="node-titlewrap">
@@ -302,40 +247,41 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">⚡ W1 passes: <code>/enrich "ExactCompanyName"</code> — enriches ONE company</div>
-      <div class="ni trg">📱 Manual: <code>/enrich</code> with no arg — enriches ALL PENDING leads</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs / Reads</div><div class="ns-items">
-      <div class="ni inp">LEAD_MASTER row(s) with status=PENDING</div>
-      <div class="ni inp">Company name (targetCompany filter — critical fix)</div>
-      <div class="ni env">🔑 ANTHROPIC_API_KEY (DM extraction via Claude)</div>
-      <div class="ni env">🔑 SHEET_LEAD_MASTER (read + update)</div>
+      <div class="ni trg">⚡ W1 passes <code>/enrich "Company"</code> — enriches ONE company</div>
+      <div class="ni trg">📱 Manual <code>/enrich</code> — enriches ALL PENDING leads</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
-      <div class="ni inp">1. Reads LEAD_MASTER — filters to targetCompany if provided</div>
-      <div class="ni inp">2. Web search for decision maker (Apollo.io / LinkedIn signals)</div>
-      <div class="ni inp">3. Claude extracts: DM name, title, email, LinkedIn URL</div>
-      <div class="ni inp">4. Scores lead 0–10 (show tier + size + budget signals)</div>
-      <div class="ni inp">5. Writes DM data to columns S–V in LEAD_MASTER</div>
-      <div class="ni inp">6. Sets enrichmentStatus = ENRICHED, score + breakdown</div>
-      <div class="ni inp">7. Fires <code>lead.enriched</code> event → W2 → Mo notified</div>
+      <div class="ni inp">Filters LEAD_MASTER to targetCompany if provided</div>
+      <div class="ni inp">Web search → Claude extracts DM name, title, email, LinkedIn</div>
+      <div class="ni inp">Scores lead 0–10 (show tier + size + budget)</div>
+      <div class="ni inp">Updates cols S–V in LEAD_MASTER</div>
+      <div class="ni inp">Fires <code>lead.enriched</code> event → W2</div>
+      <div class="ni inp">pipelineRunner.advance() after enrichment</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">✅ LEAD_MASTER updated (DM + score + enrichmentStatus)</div>
-      <div class="ni out">⚡ <b>lead.enriched</b> event → W2 → Mo gets Telegram notification</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚠️ Was Broken — Fixed</div><div class="ns-items">
-      <div class="ni bad">Previously: no targetCompany filter → enriched ALL pending when W1 called for one company</div>
-      <div class="ni bad">Previously: auto-added leads to OUTREACH_QUEUE (removed — Mo decides manually)</div>
+      <div class="ni out">✅ LEAD_MASTER: DM data + score + enrichmentStatus=ENRICHED</div>
     </div></div>
   </div>
-  <div class="node-foot">Does NOT auto-add to OUTREACH_QUEUE. Mo queues for outreach manually.</div>
+  <div class="node-foot">Does NOT auto-add to OUTREACH_QUEUE. Mo queues manually.</div>
+  <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
+</div>
+
+<!-- W2 workflow event -->
+<div class="wbox" id="w2" style="left:130px;top:1660px">
+  <div class="cbadge2">⚡ W2 EVENT</div>
+  <div class="wt">W2 — lead.enriched</div>
+  <div class="ws">
+    Fires when Agent-02 completes enrichment<br>
+    Notifies Mo on Telegram: lead score + DM info<br>
+    Mo then decides: run <code>/brief</code> when ready
+  </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-03 -->
-<div class="node p-manual" id="a03" style="left:75px;top:1390px" data-d='a03'>
+<div class="node p-manual" id="a03" style="left:80px;top:1800px" data-d="a03">
   <div class="node-head">
     <div class="node-ico">📐</div>
     <div class="node-titlewrap">
@@ -346,194 +292,162 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">📱 Mo runs: <code>/brief CompanyName</code> (after enrichment done)</div>
-      <div class="ni trg">Partial names work: <code>/brief pharma</code> finds "PharmaCorp GmbH"</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs / Reads</div><div class="ns-items">
-      <div class="ni inp">Client name — fuzzy matched (3 passes: exact → partial → word-level)</div>
-      <div class="ni inp">LEAD_MASTER: show name, stand size, budget, industry, contact</div>
-      <div class="ni inp">KNOWLEDGE_BASE: past lessons for similar shows / clients</div>
-      <div class="ni inp">standme-knowledge.ts: pricing guide, design philosophy, show database</div>
-      <div class="ni env">🔑 ANTHROPIC_API_KEY (Claude generates the brief)</div>
+      <div class="ni trg">📱 Mo runs: <code>/brief CompanyName</code></div>
+      <div class="ni trg">Partial names work: <code>/brief pharma</code> → finds "PharmaCorp GmbH"</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
-      <div class="ni inp">1. fuzzyFindLead(): exact → contains → word-by-word match</div>
-      <div class="ni inp">2. Reads all lead data from LEAD_MASTER row</div>
-      <div class="ni inp">3. searchKnowledge() for relevant past projects</div>
-      <div class="ni inp">4. Claude generates: space design, materials, key features, timeline</div>
-      <div class="ni inp">5. Agent-08 moves/creates Trello card to <code>03 Concept Brief</code></div>
+      <div class="ni inp">3-pass fuzzy search: exact → partial → word-level</div>
+      <div class="ni inp">Reads: show name, stand size, budget, industry from LEAD_MASTER</div>
+      <div class="ni inp">searchKnowledge() for past similar projects</div>
+      <div class="ni inp">Claude generates design brief (space, materials, timeline)</div>
+      <div class="ni inp">Creates Google Doc in Drive → Drive Index</div>
+      <div class="ni inp">DataValidator checks required fields first</div>
+      <div class="ni inp">pipelineRunner.advance() on success / block() if fields missing</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">📱 Full design brief → Mo on Telegram</div>
-      <div class="ni out">✅ Trello card → <code>03 Concept Brief</code> list</div>
+      <div class="ni out">📄 Google Doc brief · Trello → <code>03 Concept Brief</code></div>
+      <div class="ni out">📱 TYPE 1 approval message → Mo with doc URL</div>
     </div></div>
   </div>
-  <div class="node-foot">Fuzzy search — partial company names work fine.</div>
+  <div class="node-foot">If fields missing → pipelineRunner.block() + info request email to client</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-12 -->
-<div class="node p-manual" id="a12" style="left:75px;top:1780px" data-d='a12'>
+<div class="node p-manual" id="a12" style="left:80px;top:2310px" data-d="a12">
   <div class="node-head">
     <div class="node-ico">📊</div>
     <div class="node-titlewrap">
-      <div class="node-id">AGENT-12 · ANALYSIS ONLY</div>
+      <div class="node-id">AGENT-12 · MANUAL / ANALYSIS</div>
       <div class="node-name">Deal Analyser</div>
-      <div class="node-cmd">/score · /pipeline · /qualify</div>
+      <div class="node-cmd">/score · /qualify · /pipeline</div>
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">All LEAD_MASTER rows (read-only)</div>
-      <div class="ni inp">Trello sales board cards (for stage context)</div>
+    <div class="ns"><div class="ns-lbl">📥 Reads</div><div class="ns-items">
+      <div class="ni inp">LEAD_MASTER all rows · Trello sales board cards</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">📱 Pipeline health report → Telegram (no data changes)</div>
-      <div class="ni out">Score breakdown per lead · overdue alerts · next-action suggestions</div>
+      <div class="ni out">📱 Pipeline health report → Telegram (read-only, no writes)</div>
     </div></div>
   </div>
-  <div class="node-foot">Read-only. No writes. Analysis and recommendations only.</div>
+  <div class="node-foot">Analysis only. Suggests next actions per lead.</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- ══════════════════════════════════════════ -->
-<!-- EMAIL FUNNEL PATH -->
-<!-- ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  EMAIL FUNNEL PATH  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
 <!-- Agent-18 -->
-<div class="node p-email" id="a18" style="left:415px;top:330px" data-d='a18'>
+<div class="node p-email" id="a18" style="left:430px;top:350px" data-d="a18">
   <div class="cbadge2">⏰ 15min</div>
-  <div class="fbadge">FIXED</div>
   <div class="node-head">
     <div class="node-ico">📬</div>
     <div class="node-titlewrap">
-      <div class="node-id">AGENT-18 · AUTO + MANUAL</div>
+      <div class="node-id">AGENT-18 · AUTO CRON + MANUAL</div>
       <div class="node-name">Gmail Lead Monitor</div>
       <div class="node-cmd">/checkemails</div>
     </div>
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">⏰ Cron: every 15 minutes automatically</div>
+      <div class="ni trg">⏰ Cron: every 15 minutes</div>
       <div class="ni trg">📱 Manual: <code>/checkemails</code></div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs / Reads</div><div class="ns-items">
-      <div class="ni inp">Gmail API: info@standme.de inbox (unread since last check)</div>
-      <div class="ni inp">EMAIL_FUNNEL sheet (to detect if email is a reply to known conversation)</div>
-      <div class="ni inp">LEAD_MASTER sheet (deduplication check — is company already a lead?)</div>
-      <div class="ni inp">conflictGuard mutex (prevents overlap between two 15min cycles)</div>
-      <div class="ni env">🔑 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (Gmail OAuth)</div>
-      <div class="ni env">🔑 ANTHROPIC_API_KEY (email intent classification)</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚙️ Does — Decision tree per email</div><div class="ns-items">
-      <div class="ni inp">1. Fetch unread emails from info@standme.de</div>
-      <div class="ni inp">2. For each email — is sender in EMAIL_FUNNEL? → handleFunnelReply()</div>
-      <div class="ni inp">   → Updates EMAIL_FUNNEL stage to REPLIED</div>
-      <div class="ni inp">   → Notifies Mo with AI-drafted reply suggestion</div>
-      <div class="ni inp">3. If new email — conflictGuard.acquire(company)</div>
-      <div class="ni inp">4. findRowByValue(LEAD_MASTER, email/company) → skip if duplicate</div>
-      <div class="ni inp">5. Claude classifies intent (genuine inquiry vs spam)</div>
-      <div class="ni inp">6. appendRow() → LEAD_MASTER (source: 'email')</div>
-      <div class="ni inp">7. sendEmail() → welcome email via Gmail API</div>
-      <div class="ni inp">8. saveFunnelRecord() → EMAIL_FUNNEL row (stage: WELCOMED, saves threadId + lastMessageId)</div>
-      <div class="ni inp">9. Notifies Mo on Telegram</div>
+    <div class="ns"><div class="ns-lbl">⚙️ Decision tree per email</div><div class="ns-items">
+      <div class="ni inp">1. Fetch unread from info@standme.de</div>
+      <div class="ni inp">2. Is sender in EMAIL_FUNNEL? → handleFunnelReply() → stage=REPLIED + AI draft for Mo</div>
+      <div class="ni inp">3. New email: conflictGuard.acquire() (prevents duplicate rows)</div>
+      <div class="ni inp">4. findRowByValue() dedup check</div>
+      <div class="ni inp">5. Claude classifies intent (inquiry vs spam)</div>
+      <div class="ni inp">6. appendRow() → LEAD_MASTER (source: email)</div>
+      <div class="ni inp">7. Send welcome email via Gmail API</div>
+      <div class="ni inp">8. saveFunnelRecord() → EMAIL_FUNNEL (stage: WELCOMED, saves threadId)</div>
+      <div class="ni inp">9. pipelineRunner.start() for the new lead</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">✅ LEAD_MASTER row (source: email, enrichmentStatus: PENDING)</div>
-      <div class="ni out">✅ EMAIL_FUNNEL row (stage: WELCOMED, threadId saved)</div>
-      <div class="ni out">📧 Welcome email sent via Gmail (in new thread)</div>
-      <div class="ni out">📱 Mo notified: lead summary + "run /brief" suggestion</div>
-      <div class="ni out">OR: replies → EMAIL_FUNNEL stage=REPLIED + AI draft for Mo</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚠️ Was Broken — Fixed</div><div class="ns-items">
-      <div class="ni bad">Had setTimeout(2min → /enrich ALL) + setTimeout(3min → /brief ALL) — caused triple-trigger chaos</div>
-      <div class="ni bad">No dedup check → duplicate LEAD_MASTER rows on fast scans</div>
-      <div class="ni bad">W1 also fired for email leads → double enrichment</div>
+      <div class="ni out">✅ LEAD_MASTER row (source: email) · EMAIL_FUNNEL row · pipeline started</div>
+      <div class="ni out">📧 Welcome email sent · 📱 Mo notified</div>
     </div></div>
   </div>
-  <div class="node-foot">saveFunnelRecord() is critical — Agent-19 depends on this row existing.</div>
+  <div class="node-foot">saveFunnelRecord() is critical — Agent-19 depends on this row.</div>
+  <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
+</div>
+
+<!-- W4 workflow event -->
+<div class="wbox" id="w4" style="left:480px;top:970px">
+  <div class="cbadge2">⚡ W4 EVENT</div>
+  <div class="wt">W4 — email.lead.received</div>
+  <div class="ws">
+    Fires after Agent-18 creates an email lead<br>
+    Logs to WORKFLOW_LOG<br>
+    Mo notified: "<em>Company emailed — run /brief</em>"
+  </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-19 -->
-<div class="node p-email" id="a19" style="left:415px;top:970px" data-d='a19'>
+<div class="node p-email" id="a19" style="left:430px;top:1140px" data-d="a19">
   <div class="node-head">
     <div class="node-ico">💬</div>
     <div class="node-titlewrap">
       <div class="node-id">AGENT-19 · MANUAL (Mo-driven)</div>
       <div class="node-name">Email Funnel Manager</div>
-      <div class="node-cmd">/emailfunnel · /emailthread · /emaildraft · /emailreply</div>
+      <div class="node-cmd">/emailfunnel · /emaildraft · /emailreply</div>
     </div>
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">📱 After Agent-18 notifies Mo of a new reply</div>
-      <div class="ni trg">📱 <code>/emailfunnel</code> — see all conversations grouped by stage</div>
+      <div class="ni trg">📱 <code>/emailfunnel</code> — all conversations by stage</div>
       <div class="ni trg">📱 <code>/emaildraft Company</code> — AI writes a reply</div>
       <div class="ni trg">📱 <code>/emailreply Company | message</code> — send reply</div>
-      <div class="ni trg">📱 <code>/emailreply Company | SEND_DRAFT</code> — send stored AI draft</div>
+      <div class="ni trg">📱 <code>/emailreply Company | SEND_DRAFT</code> — send stored draft</div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs / Reads</div><div class="ns-items">
-      <div class="ni inp">EMAIL_FUNNEL row for the company (MUST exist — created by Agent-18)</div>
-      <div class="ni inp">lastMessageId from EMAIL_FUNNEL col G (for Gmail In-Reply-To header)</div>
-      <div class="ni inp">gmailThreadId from EMAIL_FUNNEL col F (keeps replies in same thread)</div>
-      <div class="ni inp">conversationLog JSON from EMAIL_FUNNEL col O (full history)</div>
-      <div class="ni inp">Funnel stage from col H (determines AI draft goal)</div>
-      <div class="ni env">🔑 GOOGLE_CLIENT_ID (Gmail send via info@standme.de)</div>
-      <div class="ni env">🔑 ANTHROPIC_API_KEY (draft generation)</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚙️ Does per command</div><div class="ns-items">
-      <div class="ni inp"><b>/emaildraft:</b> builds history context → Claude generates stage-aware reply → stores as <code>DRAFT::</code> prefix in notes col N</div>
-      <div class="ni inp"><b>/emailreply … SEND_DRAFT:</b> reads DRAFT:: from col N → sends via Gmail</div>
-      <div class="ni inp"><b>/emailreply … message:</b> sends custom message directly via Gmail</div>
-      <div class="ni inp"><b>On send:</b> appends to conversationLog, increments sentCount, advances funnelStage, updates lastContact + lastMessageId</div>
+    <div class="ns"><div class="ns-lbl">📥 Needs (from EMAIL_FUNNEL)</div><div class="ns-items">
+      <div class="ni inp">gmailThreadId (keeps reply in same Gmail thread)</div>
+      <div class="ni inp">lastMessageId (In-Reply-To header for proper threading)</div>
+      <div class="ni inp">conversationLog JSON (full history)</div>
+      <div class="ni inp">funnelStage (determines AI draft goal)</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">📧 Gmail reply sent (In-Reply-To: lastMessageId — stays in same thread)</div>
-      <div class="ni out">✅ EMAIL_FUNNEL updated: stage advanced, log appended, sentCount++</div>
-      <div class="ni out">📱 Confirmation to Mo with new stage</div>
+      <div class="ni out">📧 Gmail reply (In-Reply-To: lastMessageId — same thread)</div>
+      <div class="ni out">✅ EMAIL_FUNNEL: stage advanced, log appended, sentCount++</div>
     </div></div>
   </div>
-  <div class="node-foot">Stage goal: WELCOMED→get show details · QUALIFYING→confirm budget · BRIEFED→push proposal</div>
+  <div class="node-foot">Stage flow: WELCOMED → QUALIFYING → BRIEFED → PROPOSAL → WON/LOST</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- ══════════════════════════════════════════ -->
-<!-- COLD OUTREACH PATH -->
-<!-- ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  COLD OUTREACH PATH  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
 <!-- Agent-17 -->
-<div class="node p-outreach" id="a17" style="left:755px;top:390px" data-d='a17'>
+<div class="node p-outreach" id="a17" style="left:780px;top:420px" data-d="a17">
   <div class="node-head">
     <div class="node-ico">📡</div>
     <div class="node-titlewrap">
       <div class="node-id">AGENT-17 · WEBHOOK + MANUAL</div>
       <div class="node-name">Campaign Builder</div>
-      <div class="node-cmd">/newcampaign · /salesreplies · /campaignstatus</div>
+      <div class="node-cmd">/newcampaign · /salesreplies</div>
     </div>
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">🔗 POST /webhook/instantly (Instantly.ai reply/open/bounce events)</div>
+      <div class="ni trg">🔗 POST /webhook/instantly (reply/open/bounce events)</div>
       <div class="ni trg">📱 <code>/newcampaign ShowName</code></div>
-      <div class="ni trg">📱 <code>/salesreplies</code> — show recent reply classifications</div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">Instantly.ai webhook: email, event type, campaign_id, reply_message body</div>
-      <div class="ni inp">CAMPAIGN_SALES sheet (read + write)</div>
-      <div class="ni env">🔑 INSTANTLY_API_KEY · SHEET_CAMPAIGN_SALES</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
-      <div class="ni inp">Webhook: receives reply → Claude classifies (INTERESTED / NOT_INTERESTED / INFO_REQUEST)</div>
-      <div class="ni inp">Updates CAMPAIGN_SALES row with classification + reply date</div>
-      <div class="ni inp">If INTERESTED → alerts Mo on Telegram immediately</div>
-      <div class="ni inp">/newcampaign: generates prospect data for Woodpecker UI (API can't create campaigns)</div>
+    <div class="ns"><div class="ns-lbl">⚙️ Webhook flow</div><div class="ns-items">
+      <div class="ni inp">Claude classifies reply: INTERESTED / NOT_INTERESTED / INFO_REQUEST</div>
+      <div class="ni inp">Updates CAMPAIGN_SALES row with classification</div>
+      <div class="ni inp">INTERESTED → immediate Mo alert</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">✅ CAMPAIGN_SALES row updated (status, classification, reply)</div>
-      <div class="ni out">📱 Mo alert if INTERESTED reply detected</div>
+      <div class="ni out">✅ CAMPAIGN_SALES updated · 📱 Mo alert if INTERESTED</div>
     </div></div>
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
@@ -541,7 +455,7 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
 </div>
 
 <!-- Agent-13 -->
-<div class="node p-outreach" id="a13" style="left:755px;top:820px" data-d='a13'>
+<div class="node p-outreach" id="a13" style="left:780px;top:940px" data-d="a13">
   <div class="node-head">
     <div class="node-ico">🚀</div>
     <div class="node-titlewrap">
@@ -551,36 +465,28 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">📱 Mo runs: <code>/outreach</code> — Mo must have manually queued leads first</div>
-    </div></div>
     <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">OUTREACH_QUEUE rows (Mo adds leads here manually — Agent-02 no longer auto-adds)</div>
-      <div class="ni inp">Woodpecker Campaign ID (in OUTREACH_QUEUE row)</div>
-      <div class="ni inp">Mo's approval (TYPE 1 message: /approve_ button)</div>
-      <div class="ni env">🔑 WOODPECKER_API_KEY</div>
+      <div class="ni inp">OUTREACH_QUEUE rows (Mo adds manually)</div>
+      <div class="ni inp">Mo's approval via TYPE 1 <code>/approve_</code> button</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
-      <div class="ni inp">1. Reads OUTREACH_QUEUE — formats prospects for Woodpecker</div>
-      <div class="ni inp">2. Sends approval request to Mo (TYPE 1 with prospect list preview)</div>
-      <div class="ni inp">3. On /approve_: addProspectsToCampaign() in batches of 100</div>
-      <div class="ni inp">4. Updates OUTREACH_QUEUE status, logs to OUTREACH_LOG</div>
-      <div class="ni inp">5. reconstructBulkApproval() — KB fallback if Railway restarts mid-approval</div>
+      <div class="ni inp">1. Reads OUTREACH_QUEUE → formats for Woodpecker</div>
+      <div class="ni inp">2. TYPE 1 approval request to Mo</div>
+      <div class="ni inp">3. On approve: addProspectsToCampaign() in batches of 100</div>
+      <div class="ni inp">4. Updates OUTREACH_QUEUE + OUTREACH_LOG</div>
+      <div class="ni inp">reconstructBulkApproval() — KB fallback after restart</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">✅ Prospects added to Woodpecker campaign (via API)</div>
-      <div class="ni out">✅ OUTREACH_LOG entries · OUTREACH_QUEUE status updated</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚠️ Important</div><div class="ns-items">
-      <div class="ni bad">Approval callback is in-memory — lost on Railway restart. Only Agent-13 has KB recovery via reconstructBulkApproval()</div>
+      <div class="ni out">✅ Prospects added to Woodpecker campaign</div>
     </div></div>
   </div>
+  <div class="node-foot">Only Agent-13 has KB-based approval recovery after Railway restart</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-20 -->
-<div class="node p-outreach" id="a20" style="left:755px;top:1240px" data-d='a20'>
+<div class="node p-outreach" id="a20" style="left:780px;top:1440px" data-d="a20">
   <div class="cbadge2">⏰ 3am</div>
   <div class="node-head">
     <div class="node-ico">📦</div>
@@ -592,48 +498,30 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">⏰ Cron: 03:00 Berlin every night (full sync)</div>
+      <div class="ni trg">⏰ Cron: 03:00 Berlin nightly</div>
       <div class="ni trg">🔗 POST /webhook/woodpecker — real-time reply capture</div>
-      <div class="ni trg">📱 Manual: <code>/wpsync</code></div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs — READ ONLY from Woodpecker</div><div class="ns-items">
-      <div class="ni inp">Woodpecker API: /campaign_list (stats: sent, open, reply, bounce per campaign)</div>
-      <div class="ni inp">Woodpecker API: /prospects_list?status=REPLIED per campaign</div>
-      <div class="ni inp">Woodpecker API: /prospects_list?status=INTERESTED per campaign</div>
-      <div class="ni inp">Webhook path: reply body from Woodpecker POST event</div>
-      <div class="ni inp">KNOWLEDGE_BASE sheet (write destination)</div>
-      <div class="ni env">🔑 WOODPECKER_API_KEY (read only — never writes to Woodpecker)</div>
-      <div class="ni env">🔑 ANTHROPIC_API_KEY (summarises reply bodies)</div>
+    <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
+      <div class="ni inp">listCampaigns() → getCampaignStats() per campaign</div>
+      <div class="ni inp">saveKnowledge()/updateKnowledge() per campaign stats</div>
+      <div class="ni inp">getProspectsByCampaign(REPLIED/INTERESTED) → KB entries</div>
+      <div class="ni inp">Webhook: Claude summarises reply → saveKnowledge()</div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">⚙️ Does (nightly sync)</div><div class="ns-items">
-      <div class="ni inp">1. listCampaigns() → for each campaign: getCampaignStats()</div>
-      <div class="ni inp">2. saveKnowledge() or updateKnowledge() per campaign: open rate, reply rate, bounce rate</div>
-      <div class="ni inp">3. getProspectsByCampaign(REPLIED) + (INTERESTED) → deduplicated by email</div>
-      <div class="ni inp">4. saveKnowledge() per replied company: contact, show, status</div>
-      <div class="ni inp">Rate limit: 1.1s delay between campaign API calls (Woodpecker is strict)</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚙️ Does (webhook path)</div><div class="ns-items">
-      <div class="ni inp">Receives reply body from Woodpecker → Claude summarises to 1-2 sentences</div>
-      <div class="ni inp">saveKnowledge() as woodpecker-reply-{email}-{date} in KB</div>
-      <div class="ni inp">Brain uses this in the next conversation with Mo about that company</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">📤 Outputs (all to Knowledge Base)</div><div class="ns-items">
-      <div class="ni out">✅ KB entry per campaign: "Campaign X: 156 sent, 18% open, 4.5% reply…"</div>
-      <div class="ni out">✅ KB entry per replied company: contact + show + interest status</div>
-      <div class="ni out">✅ KB entry per live reply: AI summary of what they said</div>
+    <div class="ns"><div class="ns-lbl">📤 Outputs (all → Knowledge Base)</div><div class="ns-items">
+      <div class="ni out">✅ KB: campaign stats · replied prospects · live reply summaries</div>
     </div></div>
   </div>
-  <div class="node-foot">100% read-only from Woodpecker. Brain searches this KB on every conversation.</div>
+  <div class="node-foot">Read-only from Woodpecker. Brain searches this KB on every message.</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- ══════════════════════════════════════════ -->
-<!-- OPERATIONS AGENTS -->
-<!-- ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  OPERATIONS AGENTS  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
 <!-- Agent-05 -->
-<div class="node p-ops" id="a05" style="left:1115px;top:220px" data-d='a05'>
+<div class="node p-ops" id="a05" style="left:1125px;top:260px" data-d="a05">
   <div class="cbadge2">⏰ 8am</div>
   <div class="node-head">
     <div class="node-ico">⚠️</div>
@@ -644,49 +532,43 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
+    <div class="ns"><div class="ns-lbl">📥 Reads</div><div class="ns-items">
       <div class="ni inp">TECHNICAL_DEADLINES sheet — all show dates</div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
-      <div class="ni inp">Filters shows within 30 days · sorts by urgency</div>
-    </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">📱 Daily alert: upcoming shows summary → Mo</div>
+      <div class="ni out">📱 Daily alert: shows with deadlines in next 30 days</div>
     </div></div>
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-08 -->
-<div class="node p-ops" id="a08" style="left:1415px;top:220px" data-d='a08'>
+<div class="node p-ops" id="a08" style="left:1450px;top:260px" data-d="a08">
   <div class="node-head">
     <div class="node-ico">🃏</div>
     <div class="node-titlewrap">
       <div class="node-id">AGENT-08 · MANUAL + INTERNAL</div>
-      <div class="node-name">Card Manager</div>
+      <div class="node-name">Card Manager (Trello)</div>
       <div class="node-cmd">/card · /move · /addcard · /comment</div>
     </div>
   </div>
   <div class="node-body">
     <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">📱 Manual Telegram commands</div>
-      <div class="ni trg">🔧 Internal: Agent-01 (create card), Agent-03 (move card to Brief)</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">Trello API key + board IDs</div>
-      <div class="ni inp">Card name + list name + board ID</div>
-      <div class="ni env">🔑 TRELLO_API_KEY · TRELLO_TOKEN · TRELLO_BOARD_* env vars</div>
+      <div class="ni trg">📱 Manual commands</div>
+      <div class="ni trg">🔧 Internal: Agent-01 (create card), Agent-03 (move to Brief)</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
       <div class="ni out">✅ Trello card created / moved / commented</div>
+      <div class="ni out">⚡ Fires <code>deal.won</code> → W3 when card moved to Won</div>
     </div></div>
   </div>
-  <div class="node-foot">Must stay registered as 'agent-08' — other agents call it via registry.getAgent('agent-08')</div>
+  <div class="node-foot">Must stay as 'agent-08' — other agents call it via registry.getAgent()</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-06 -->
-<div class="node p-ops" id="a06" style="left:1115px;top:520px" data-d='a06'>
+<div class="node p-ops" id="a06" style="left:1125px;top:640px" data-d="a06">
   <div class="node-head">
     <div class="node-ico">📋</div>
     <div class="node-titlewrap">
@@ -696,19 +578,18 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">Trello all boards (sales + ops + design)</div>
-      <div class="ni inp">CROSS_AGENT_HUB sheet (design/ops/production statuses)</div>
+    <div class="ns"><div class="ns-lbl">📥 Reads</div><div class="ns-items">
+      <div class="ni inp">Trello all boards · CROSS_AGENT_HUB sheet</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">📱 Cross-team project status dashboard → Telegram</div>
+      <div class="ni out">📱 Cross-team project status → Telegram</div>
     </div></div>
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-09 -->
-<div class="node p-ops" id="a09" style="left:1415px;top:520px" data-d='a09'>
+<div class="node p-ops" id="a09" style="left:1450px;top:640px" data-d="a09">
   <div class="node-head">
     <div class="node-ico">📅</div>
     <div class="node-titlewrap">
@@ -718,8 +599,8 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">DEADLINES sheet: portal, rigging, electrics, design approval dates</div>
+    <div class="ns"><div class="ns-lbl">📥 Reads</div><div class="ns-items">
+      <div class="ni inp">DEADLINES sheet: portal, rigging, electrics dates</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
       <div class="ni out">📱 Per-show technical submission dates → Telegram</div>
@@ -729,7 +610,7 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
 </div>
 
 <!-- Agent-07 -->
-<div class="node p-ops" id="a07" style="left:1115px;top:810px" data-d='a07'>
+<div class="node p-ops" id="a07" style="left:1125px;top:1020px" data-d="a07">
   <div class="node-head">
     <div class="node-ico">🔔</div>
     <div class="node-titlewrap">
@@ -739,18 +620,18 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">LEAD_MASTER: lastContact dates · EMAIL_FUNNEL: lastContact dates</div>
+    <div class="ns"><div class="ns-lbl">📥 Reads</div><div class="ns-items">
+      <div class="ni inp">LEAD_MASTER lastContact · EMAIL_FUNNEL lastContact</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">📱 Draft follow-up messages → Mo approval before sending</div>
+      <div class="ni out">📱 Draft follow-ups → Mo approval before sending</div>
     </div></div>
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-10 -->
-<div class="node p-ops" id="a10" style="left:1415px;top:810px" data-d='a10'>
+<div class="node p-ops" id="a10" style="left:1450px;top:1020px" data-d="a10">
   <div class="node-head">
     <div class="node-ico">🔧</div>
     <div class="node-titlewrap">
@@ -760,7 +641,7 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
+    <div class="ns"><div class="ns-lbl">📥 Reads</div><div class="ns-items">
       <div class="ni inp">CONTRACTORS sheet · specialty + region filters</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
@@ -770,8 +651,21 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
+<!-- W3 workflow event -->
+<div class="wbox" id="w3" style="left:1295px;top:1110px">
+  <div class="cbadge2">⚡ W3 EVENT</div>
+  <div class="wt">W3 — deal.won</div>
+  <div class="ws">
+    Fires when Trello card moves to <code>06 Won</code><br>
+    → Triggers Agent-11 (Lessons Learned)<br>
+    → Triggers Agent-16 (Cross Board Sync)
+  </div>
+  <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
+</div>
+
 <!-- Agent-11 -->
-<div class="node p-ops" id="a11" style="left:1115px;top:1100px" data-d='a11'>
+<div class="node p-ops" id="a11" style="left:1125px;top:1360px" data-d="a11">
   <div class="node-head">
     <div class="node-ico">🏆</div>
     <div class="node-titlewrap">
@@ -781,10 +675,6 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">⚡ W3: deal.won event (Trello card → 06 Won)</div>
-      <div class="ni trg">📱 Manual: <code>/lesson [project]</code></div>
-    </div></div>
     <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
       <div class="ni inp">Project name · Trello card data · Mo's reflection input</div>
     </div></div>
@@ -793,11 +683,11 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div></div>
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-16 -->
-<div class="node p-ops" id="a16" style="left:1415px;top:1100px" data-d='a16'>
-  <div class="fbadge">FIXED</div>
+<div class="node p-ops" id="a16" style="left:1450px;top:1360px" data-d="a16">
   <div class="node-head">
     <div class="node-ico">🔄</div>
     <div class="node-titlewrap">
@@ -813,93 +703,74 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
       <div class="ni out">✅ Hub sheet updated · Trello boards synced</div>
     </div></div>
-    <div class="ns"><div class="ns-lbl">⚠️ Was Broken</div><div class="ns-items">
-      <div class="ni bad">Had 8:30am daily cron → auto-commented on every active Trello card with unsolicited noise</div>
-    </div></div>
   </div>
-  <div class="node-foot">Schedule REMOVED. Manual only. No auto-Trello comments.</div>
+  <div class="node-foot">Schedule removed — was auto-commenting on every Trello card daily</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- ══════════════════════════════════════════ -->
-<!-- BRAIN / AI / DATA -->
-<!-- ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  BRAIN / AI / DATA  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
 <!-- Agent-04 Brain -->
-<div class="node p-brain" id="a04" style="left:2115px;top:330px;width:300px" data-d='a04'>
+<div class="node p-brain" id="a04" style="left:2170px;top:350px;width:300px" data-d="a04">
   <div class="node-head">
     <div class="node-ico">🧠</div>
     <div class="node-titlewrap">
-      <div class="node-id">AGENT-04 · ANY TEXT / DASHBOARD CHAT</div>
+      <div class="node-id">AGENT-04 · ANY TEXT / DASHBOARD</div>
       <div class="node-name">Brain — Central AI</div>
       <div class="node-cmd">/ask · any unrecognised text · dashboard chat</div>
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">🔔 Triggers</div><div class="ns-items">
-      <div class="ni trg">📱 Any Telegram message not matching a command</div>
-      <div class="ni trg">🖥️ Dashboard chat window (via chat-service.ts)</div>
-      <div class="ni trg">📱 <code>/ask [question]</code></div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">📥 Needs — ALL AUTO-INJECTED by BaseAgent.run()</div><div class="ns-items">
-      <div class="ni inp">Per-user message history (up to 50 msgs, in-memory, lost on restart)</div>
-      <div class="ni inp">threadContext: last 20 cross-agent events for this user (4hr session)</div>
+    <div class="ns"><div class="ns-lbl">📥 Auto-injected context</div><div class="ns-items">
+      <div class="ni inp">Per-user message history (up to 50 msgs)</div>
+      <div class="ni inp">threadContext: last 20 cross-agent events (4hr session)</div>
       <div class="ni inp">activeFocus: current lead/project/show Mo is working on</div>
-      <div class="ni inp">KB search: top 8 entries matching the query (5min cached)</div>
-      <div class="ni inp">Live data (parallel, 60s cached): Trello pipeline + LEAD_MASTER + DEADLINES</div>
-      <div class="ni inp">Static knowledge: standme-knowledge.ts (pricing, shows, brand, industry)</div>
-      <div class="ni env">🔑 ANTHROPIC_API_KEY — uses generateChat() (NOT generateText)</div>
+      <div class="ni inp">KB search: top 8 entries matching query (5min cache)</div>
+      <div class="ni inp">Live data (parallel, 60s cached): Trello + LEAD_MASTER + DEADLINES</div>
+      <div class="ni inp">Pipeline awareness: WAITING/RUNNING/BLOCKED/DONE states</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
-      <div class="ni inp">1. Builds system prompt with all context above</div>
-      <div class="ni inp">2. generateChat(messages[], systemPrompt) — real multi-turn with full history</div>
-      <div class="ni inp">3. Understands Arabic, English, Franco-Arabic, typos</div>
-      <div class="ni inp">4. Knows all 20 agents — can advise which command to run</div>
-      <div class="ni inp">5. Saves response to per-user history array</div>
+      <div class="ni inp">generateChat(messages[], systemPrompt) — real multi-turn</div>
+      <div class="ni inp">Knows all 20 agents — advises which command to run</div>
+      <div class="ni inp">Suggests /resume when sees a BLOCKED pipeline</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
       <div class="ni out">📱 AI response → Telegram or 🖥️ Dashboard</div>
-      <div class="ni out">✅ Per-user history updated (multi-turn memory)</div>
-    </div></div>
-    <div class="ns"><div class="ns-lbl">⚠️ Critical constraint</div><div class="ns-items">
-      <div class="ni bad">Must use generateChat() — never flatten to generateText(). Breaks multi-turn if changed.</div>
     </div></div>
   </div>
-  <div class="node-foot">Dashboard chat has 60s live data cache — prevents Sheets/Trello quota errors.</div>
+  <div class="node-foot">Must use generateChat() — never flatten to generateText()</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-14 -->
-<div class="node p-brain" id="a14" style="left:2115px;top:960px" data-d='a14'>
+<div class="node p-brain" id="a14" style="left:2170px;top:1060px" data-d="a14">
   <div class="node-head">
     <div class="node-ico">📁</div>
     <div class="node-titlewrap">
       <div class="node-id">AGENT-14 · MANUAL</div>
       <div class="node-name">Drive Indexer</div>
-      <div class="node-cmd">/indexdrive · /reindexdrive · /kb · /kbstats</div>
+      <div class="node-cmd">/indexdrive · /kb · /kbstats</div>
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">Google Drive API + folder IDs (loaded from KB at startup)</div>
-      <div class="ni inp">File content: PDF, Google Docs, Sheets, XLSX</div>
-      <div class="ni env">🔑 GOOGLE_CLIENT_ID · DRIVE_FOLDER_ID (from KB at startup)</div>
-    </div></div>
     <div class="ns"><div class="ns-lbl">⚙️ Does</div><div class="ns-items">
-      <div class="ni inp">Scans Drive folders → reads each file → Claude extracts key info</div>
-      <div class="ni inp">updateKnowledge() per file (idempotent — safe to re-run)</div>
+      <div class="ni inp">Scans Drive folders → reads PDF/Docs/XLSX</div>
+      <div class="ni inp">Claude extracts key info per file</div>
+      <div class="ni inp">updateKnowledge() per file (idempotent)</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
       <div class="ni out">✅ KB entries per Drive file · DRIVE_INDEX sheet updated</div>
+      <div class="ni out">Brain now has Drive file knowledge for every conversation</div>
     </div></div>
   </div>
-  <div class="node-foot">Uses shared KB cache to avoid Sheets quota during bulk reindex.</div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
 <!-- Agent-15 -->
-<div class="node p-brain" id="a15" style="left:2115px;top:1290px" data-d='a15'>
+<div class="node p-brain" id="a15" style="left:2170px;top:1410px" data-d="a15">
   <div class="node-head">
     <div class="node-ico">📣</div>
     <div class="node-titlewrap">
@@ -909,281 +780,292 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
     </div>
   </div>
   <div class="node-body">
-    <div class="ns"><div class="ns-lbl">📥 Needs</div><div class="ns-items">
-      <div class="ni inp">Topic or show name · KB past project examples · Brand voice knowledge</div>
+    <div class="ns"><div class="ns-lbl">📥 Reads</div><div class="ns-items">
+      <div class="ni inp">Topic or show name · KB past projects · Brand voice</div>
     </div></div>
     <div class="ns"><div class="ns-lbl">📤 Outputs</div><div class="ns-items">
-      <div class="ni out">📱 Social posts / captions / case studies → Telegram (ready to copy)</div>
+      <div class="ni out">📱 Social posts / captions / case studies → Telegram</div>
     </div></div>
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- W5 Morning Review — UPGRADED -->
-<div class="wbox" id="w5" style="left:2150px;top:1520px;width:280px">
-  <div class="cbadge2">⏰ 7am DAILY (UPGRADED)</div>
+<!-- W5 Morning Briefing -->
+<div class="wbox" id="w5" style="left:2200px;top:1720px;width:290px">
+  <div class="cbadge2">⏰ 7am DAILY</div>
   <div class="wt">W5 — Morning Briefing</div>
   <div class="ws">
-    1. Reads PipelineRunner → lists blocked pipelines<br>
+    1. Reads PipelineRunner → blocked pipelines<br>
     2. Scans LEAD_MASTER → stale unenriched leads<br>
-    3. Sends full structured briefing to Mo with:<br>
-    &nbsp;&nbsp;🔴 Blocked pipelines + /resume commands<br>
-    &nbsp;&nbsp;📋 Stale leads list with age in hours<br>
-    &nbsp;&nbsp;📊 Pipeline overview (active/blocked count)<br>
-    4. <span style="color:#10b981">Auto-triggers /enrich</span> if stale leads found<br>
-    5. /briefing command = manual re-run any time
+    3. Sends full structured briefing to Mo:<br>
+    &nbsp;&nbsp;🔴 Blocked pipelines + <code>/resume</code> commands<br>
+    &nbsp;&nbsp;📋 Stale leads with age in hours<br>
+    &nbsp;&nbsp;📊 Active/blocked pipeline count<br>
+    4. Auto-triggers <code>/enrich</code> if stale leads found<br>
+    5. <code>/briefing</code> = manual re-run any time
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- ══════════════════════════════════════════ -->
-<!-- DATA STORES -->
-<!-- ══════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  DATA STORES  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
-<div style="position:absolute;left:60px;top:2020px;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#30363d;">DATA STORES — All persistent in Google Sheets (13 tabs) + Trello</div>
+<div style="position:absolute;left:60px;top:2660px;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#30363d;">DATA STORES — Google Sheets (13 tabs) + Trello</div>
 
-<div class="snode" style="left:60px;top:2060px;border-color:#2563eb">
+<div class="snode" id="ds-lead" style="left:60px;top:2700px;border-color:#2563eb">
   <div class="si">📊</div><div class="sn" style="color:#93c5fd">LEAD_MASTER</div>
-  <div class="sd">Written by: Agent-01, Agent-18<br>Read by: Agent-02,03,07,12,13,W5<br>25 columns · ID · score · DM data</div>
+  <div class="sd">Write: Agent-01, 18<br>Read: 02,03,07,12,13,W5<br>25 cols · ID · DM · score</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:260px;top:2060px;border-color:#d97706">
+<div class="snode" id="ds-email" style="left:250px;top:2700px;border-color:#d97706">
   <div class="si">📧</div><div class="sn" style="color:#fcd34d">EMAIL_FUNNEL</div>
-  <div class="sd">Written by: Agent-18 (create), Agent-19 (update)<br>15 cols: threadId · lastMsgId · stage · log JSON</div>
+  <div class="sd">Write: Agent-18 (create), 19 (update)<br>15 cols: threadId · stage · log JSON</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:460px;top:2060px;border-color:#059669">
+<div class="snode" id="ds-campaign" style="left:460px;top:2700px;border-color:#059669">
   <div class="si">🚀</div><div class="sn" style="color:#6ee7b7">CAMPAIGN_SALES</div>
-  <div class="sd">Written by: Agent-17 (webhook)<br>21 cols: reply classification · conversation log</div>
+  <div class="sd">Write: Agent-17<br>21 cols: classification · reply log</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:660px;top:2060px;border-color:#7c3aed">
+<div class="snode" id="ds-kb" style="left:670px;top:2700px;border-color:#7c3aed">
   <div class="si">🧠</div><div class="sn" style="color:#c4b5fd">KNOWLEDGE_BASE</div>
-  <div class="sd">Written by: Agent-14, Agent-20, Agent-11<br>Read by: Brain on EVERY message (5min cache)<br>7 cols: source · type · topic · tags · content</div>
+  <div class="sd">Write: 11,14,20,pipeline-runner<br>Read: Brain on EVERY message (5min cache)<br>pipeline-state-* · thread-context-* · pending-approval-*</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:880px;top:2060px">
+<div class="snode" id="ds-queue" style="left:900px;top:2700px">
   <div class="si">📋</div><div class="sn">OUTREACH_QUEUE</div>
-  <div class="sd">Mo adds manually<br>Read by: Agent-13<br>Agent-02 no longer auto-adds here</div>
+  <div class="sd">Mo adds manually<br>Read by: Agent-13</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:1060px;top:2060px">
+<div class="snode" id="ds-log" style="left:1080px;top:2700px">
   <div class="si">📝</div><div class="sn">OUTREACH_LOG</div>
-  <div class="sd">Written by: Agent-13<br>Renamed from 'Log' (tab collision fix)</div>
+  <div class="sd">Write: Agent-13<br>Sent outreach history</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:1240px;top:2060px">
+<div class="snode" id="ds-deadlines" style="left:1260px;top:2700px">
   <div class="si">⏰</div><div class="sn">DEADLINES</div>
-  <div class="sd">Read by: Agent-05, Agent-09<br>Portal · rigging · electrics dates per show</div>
+  <div class="sd">Read: Agent-05, 09<br>Portal · rigging · electrics dates</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:1420px;top:2060px">
+<div class="snode" id="ds-contractors" style="left:1440px;top:2700px">
   <div class="si">🔧</div><div class="sn">CONTRACTORS</div>
-  <div class="sd">Read/written by: Agent-10<br>Name · specialty · region · rating</div>
+  <div class="sd">Read/write: Agent-10<br>Name · specialty · region · rating</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:1600px;top:2060px">
+<div class="snode" id="ds-drive" style="left:1630px;top:2700px">
   <div class="si">📁</div><div class="sn">DRIVE_INDEX</div>
-  <div class="sd">Written by: Agent-14<br>File path · ID · category · linked project</div>
+  <div class="sd">Write: Agent-14<br>File path · ID · category</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:1780px;top:2060px;border-color:#ef4444">
+<div class="snode" id="ds-trello" style="left:1820px;top:2700px;border-color:#ef4444">
   <div class="si">🔴</div><div class="sn">Trello Boards</div>
-  <div class="sd">Written by: Agent-01,03,08,16<br>Read by: Agent-06,12,Brain<br>5 boards · sales pipeline source of truth</div>
+  <div class="sd">Write: 01,03,08,16<br>Read: 06,12,Brain<br>5 boards · Sales pipeline</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:1980px;top:2060px">
+<div class="snode" id="ds-syslog" style="left:2010px;top:2700px">
   <div class="si">📜</div><div class="sn">SYSTEM_LOG</div>
-  <div class="sd">Auto by BaseAgent.run()<br>Every agent action logged<br>Renamed from 'Log'</div>
+  <div class="sd">Auto by BaseAgent.run()<br>Every agent action logged</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:2180px;top:2060px">
+<div class="snode" id="ds-lessons" style="left:2190px;top:2700px">
   <div class="si">🏆</div><div class="sn">LESSONS</div>
-  <div class="sd">Written by: Agent-11<br>Triggered by W3 deal.won<br>Win/loss analysis</div>
+  <div class="sd">Write: Agent-11 (W3)<br>Win/loss analysis</div>
   <div class="port port-in"></div>
 </div>
 
-<div class="snode" style="left:2380px;top:2060px">
+<div class="snode" id="ds-workflow" style="left:2380px;top:2700px">
   <div class="si">🔄</div><div class="sn">WORKFLOW_LOG</div>
   <div class="sd">Auto by workflow-engine.ts<br>W1–W5 execution history</div>
   <div class="port port-in"></div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════════════════════════════ -->
-<!-- PIPELINE LAYER — NEW CROSS-CUTTING SERVICES (added in Master Improvement) -->
-<!-- ══════════════════════════════════════════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════ -->
+<!--  PIPELINE LAYER — CROSS-CUTTING SERVICES  -->
+<!-- ══════════════════════════════════════════════════════ -->
 
-<!-- Pipeline layer swim lane -->
-<div class="lane" style="left:60px;top:2290px;width:2720px;height:560px;border-color:#10b98133;background:#10b98108"></div>
-<div class="slbl" style="left:200px;top:2296px;color:#10b981">PIPELINE LAYER — NEW CROSS-CUTTING SERVICES</div>
+<div class="lane" style="left:60px;top:2980px;width:2790px;height:900px;border-color:#10b98133;background:#10b98108"></div>
+<div class="slbl" style="left:200px;top:2988px;color:#10b981">PIPELINE LAYER — CROSS-CUTTING SERVICES (new in Master Improvement)</div>
 
-<!-- PipelineRunner service -->
-<div class="wbox" id="pipeline-runner" style="left:75px;top:2340px;width:280px;border-color:#10b981">
-  <div class="cbadge2" style="background:#10b981;color:#000">NEW SERVICE</div>
+<!-- PipelineRunner -->
+<div class="wbox" id="pipeline-runner" style="left:80px;top:3040px;width:300px;border-color:#10b981">
+  <div class="cbadge2" style="background:#10b981;color:#000">CORE SERVICE</div>
   <div class="wt" style="color:#6ee7b7">⚙️ PipelineRunner</div>
   <div class="ws">
     <b>src/services/pipeline-runner.ts</b><br><br>
     Tracks each lead through sequential steps:<br>
     <code>INTAKE → ENRICH → BRIEF → PROPOSAL → OUTREACH</code><br><br>
-    States per lead:<br>
-    🟢 WAITING — next step ready<br>
-    🟡 RUNNING — step executing<br>
-    🔴 BLOCKED — missing data / step failed<br>
-    ✅ DONE — all steps complete<br><br>
-    <b>Wired into:</b><br>
-    • Agent-01 → start() on HOT/WARM leads<br>
-    • Agent-18 → start() on email leads<br>
-    • Agent-02 → advance() after enrichment<br>
-    • Agent-03 → advance() or block() after brief<br><br>
-    <b>Persists to KB</b> on every state change<br>
-    <b>Loads from KB</b> at startup (survives restarts)
+    States: 🟢 WAITING &nbsp; 🟡 RUNNING &nbsp; 🔴 BLOCKED &nbsp; ✅ DONE<br><br>
+    Wired into:<br>
+    • Agent-01 / 18 → <code>start()</code> on lead creation<br>
+    • Agent-02 → <code>advance()</code> after enrichment<br>
+    • Agent-03 → <code>advance()</code> or <code>block()</code> after brief<br>
+    • W5 reads <code>getBlocked()</code> for morning briefing<br><br>
+    Persists to KB on every state change.<br>
+    <code>loadFromKB()</code> restores pipelines on restart.
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
   <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- DataValidator utility -->
-<div class="wbox" id="data-validator" style="left:420px;top:2340px;width:260px;border-color:#f59e0b">
-  <div class="cbadge2" style="background:#f59e0b;color:#000">NEW UTIL</div>
+<!-- DataValidator -->
+<div class="wbox" id="data-validator" style="left:450px;top:3040px;width:270px;border-color:#f59e0b">
+  <div class="cbadge2" style="background:#f59e0b;color:#000">UTILITY</div>
   <div class="wt" style="color:#fcd34d">✅ DataValidator</div>
   <div class="ws">
     <b>src/utils/data-validator.ts</b><br><br>
     Checks required fields before each pipeline step:<br><br>
     <code>validateForEnrichment(row)</code><br>
-    → needs: company name<br>
-    → warns: contact email, industry<br><br>
+    → requires: company name<br><br>
     <code>validateForBrief(row)</code><br>
-    → needs: company, show, size, budget<br>
-    → warns: industry<br><br>
+    → requires: company, show, size, budget<br><br>
     <code>validateForOutreach(row)</code><br>
-    → needs: company, email<br>
-    → warns: show, readiness score<br><br>
-    Agent-03 calls block() if fields missing
+    → requires: company, email<br><br>
+    Returns <code>{ valid, missing[], warnings[] }</code><br>
+    Agent-03 calls <code>block()</code> if <code>missing.length > 0</code>
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- New Commands box -->
-<div class="wbox" id="new-cmds" style="left:750px;top:2340px;width:270px;border-color:#7c3aed">
+<!-- New Pipeline Commands -->
+<div class="wbox" id="new-cmds" style="left:800px;top:3040px;width:290px;border-color:#7c3aed">
   <div class="cbadge2" style="background:#7c3aed">NEW COMMANDS</div>
-  <div class="wt" style="color:#c4b5fd">📱 New Pipeline Commands</div>
+  <div class="wt" style="color:#c4b5fd">📱 Pipeline Commands</div>
   <div class="ws">
-    Handled directly in <b>index.ts</b> before agent routing:<br><br>
+    Handled in <b>index.ts</b> before agent routing:<br><br>
     <code>/status</code><br>
-    Pipeline dashboard — shows all active leads,<br>
-    current step, blocked reason + /resume hint<br><br>
+    Pipeline dashboard — all active leads, current step,<br>blocked reason + /resume hint<br><br>
     <code>/resume [company]</code><br>
-    Re-runs the blocked step for that company.<br>
-    Calls the right agent with company as args.<br><br>
+    Finds pipeline → runs blocked step's agent<br><br>
     <code>/retry [company]</code><br>
     Alias for /resume<br><br>
     <code>/briefing</code><br>
-    Instant snapshot: blocked pipelines, stale<br>
-    leads, quick action commands
+    Instant snapshot: blocked count, stale leads,<br>quick action commands — manual re-run of W5
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- KB Persistence layer -->
-<div class="wbox" id="kb-persist" style="left:1090px;top:2340px;width:280px;border-color:#6366f1">
+<!-- KB Persistence Layer -->
+<div class="wbox" id="kb-persist" style="left:1165px;top:3040px;width:290px;border-color:#6366f1">
   <div class="cbadge2" style="background:#6366f1">PERSISTENCE</div>
   <div class="wt" style="color:#a5b4fc">🗄️ KB Persistence Layer</div>
   <div class="ws">
-    New: 3 systems now write their state to KB<br>
+    3 systems now write state to Knowledge Base<br>
     so they survive Railway restarts:<br><br>
-    <b>PipelineRunner</b><br>
-    source: <code>pipeline-state-{leadId}</code><br>
+    <b>PipelineRunner</b> → <code>pipeline-state-{leadId}</code><br>
     Saves on every state change. Loads on startup.<br><br>
-    <b>ThreadContext</b><br>
-    source: <code>thread-context-{userId}</code><br>
+    <b>ThreadContext</b> → <code>thread-context-{userId}</code><br>
     Debounced 30s per user. Restores sessions &lt;4h old.<br><br>
-    <b>Approvals</b><br>
-    source: <code>pending-approval-{id}</code><br>
-    Saves metadata on register. Marks EXECUTED on complete.<br>
-    Mo gets startup notification of pre-restart pending items.
+    <b>Approvals</b> → <code>pending-approval-{id}</code><br>
+    Saves metadata on register. Marks EXECUTED after handling.
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- Thread context persistence box -->
-<div class="wbox" id="thread-persist" style="left:1090px;top:2650px;width:260px;border-color:#0284c7">
-  <div class="wt" style="color:#7dd3fc">🧵 ThreadContext — Now Persisted</div>
+<!-- Brain Pipeline Awareness -->
+<div class="wbox" id="brain-pipeline" style="left:1540px;top:3040px;width:290px;border-color:#0284c7">
+  <div class="cbadge2" style="background:#0284c7">UPGRADED</div>
+  <div class="wt" style="color:#7dd3fc">🧠 Brain — Pipeline Aware</div>
+  <div class="ws">
+    Brain's system prompt now includes<br>
+    <b>PIPELINE AWARENESS section</b>:<br><br>
+    • Knows WAITING / RUNNING / BLOCKED / DONE states<br>
+    • Knows when to suggest <code>/resume [company]</code><br>
+    • Knows <code>/status</code> shows the full pipeline<br>
+    • Knows <code>/briefing</code> shows blocked + stale items<br><br>
+    When Mo asks "what's happening with X?"<br>
+    → Brain checks pipeline state + gives exact next step<br><br>
+    When Brain sees BLOCKED in threadContext:<br>
+    → Proactively suggests <code>/resume X</code>
+  </div>
+  <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
+</div>
+
+<!-- Pipeline Step Flow (Row 2) -->
+<div class="wbox" id="pipeline-step-flow" style="left:80px;top:3440px;width:360px;border-color:#10b981">
+  <div class="wt" style="color:#6ee7b7">📊 Pipeline Step Flow (per lead)</div>
+  <div class="ws">
+    <span style="color:#6ee7b7;font-weight:700">INTAKE</span> &nbsp;→ Agent-01 (/newlead) or Agent-18 (/checkemails)<br>
+    &nbsp;&nbsp;↓ <code>pipelineRunner.start(leadId, company)</code><br>
+    <span style="color:#6ee7b7;font-weight:700">ENRICH</span> → Agent-02 (/enrich company)<br>
+    &nbsp;&nbsp;↓ <code>pipelineRunner.advance(leadId, { dmTitle, readiness })</code><br>
+    <span style="color:#6ee7b7;font-weight:700">BRIEF</span> &nbsp;→ Agent-03 (/brief company)<br>
+    &nbsp;&nbsp;↓ <code>pipelineRunner.advance()</code> on success<br>
+    &nbsp;&nbsp;✋ <code>pipelineRunner.block(reason)</code> if fields missing<br>
+    <span style="color:#6ee7b7;font-weight:700">PROPOSAL</span> → manual (move Trello card)<br>
+    <span style="color:#6ee7b7;font-weight:700">OUTREACH</span> → Agent-13 or Agent-17<br><br>
+    BLOCKED → /status shows it → /resume X re-runs it
+  </div>
+  <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
+</div>
+
+<!-- Thread Persist (Row 2) -->
+<div class="wbox" id="thread-persist" style="left:540px;top:3440px;width:290px;border-color:#0284c7">
+  <div class="wt" style="color:#7dd3fc">🧵 ThreadContext — Persisted</div>
   <div class="ws">
     <b>src/services/thread-context.ts</b><br><br>
-    Before: in-memory only — lost on every Railway restart<br>
-    Now: saves to KB (debounced 30s)<br>
-    On startup: loadThreadsFromKB() restores recent sessions<br><br>
-    Brain now has context about what Mo was working on<br>
-    even after a restart — no more "starting fresh"
+    Before: in-memory only — lost on every restart<br>
+    Now: debounced save to KB every 30s per user<br><br>
+    On startup: <code>loadThreadsFromKB()</code><br>
+    → Restores sessions less than 4 hours old<br>
+    → Brain knows what Mo was working on before restart<br><br>
+    Also tracks <code>activeFocus</code> (current lead/show)<br>
+    so agents have context across commands
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- Approval persistence box -->
-<div class="wbox" id="approval-persist" style="left:1420px;top:2340px;width:260px;border-color:#ef4444">
-  <div class="wt" style="color:#fca5a5">🔐 Approvals — Now Persisted</div>
+<!-- Approval Persist (Row 2) -->
+<div class="wbox" id="approval-persist" style="left:920px;top:3440px;width:290px;border-color:#ef4444">
+  <div class="wt" style="color:#fca5a5">🔐 Approvals — Persisted</div>
   <div class="ws">
     <b>src/services/approvals.ts</b><br><br>
     Before: approval callbacks lost on restart<br>
-    Mo would get "approval not found" with no context<br><br>
+    Mo got "approval not found" with no context<br><br>
     Now:<br>
-    • registerApproval() → saves metadata to KB<br>
-    • handleApproval() → marks EXECUTED in KB<br>
-    • On startup → scans KB for pre-restart pending items<br>
-    • Sends Mo a list of what was pending before restart<br>
-    • Each item shows the action + re-run instructions<br><br>
-    <b>Note:</b> callbacks still can't be serialized.<br>
-    Re-running the command gives a fresh token.
+    • <code>registerApproval()</code> → saves metadata to KB<br>
+    • <code>handleApproval()</code> → marks EXECUTED in KB<br>
+    • On startup: scans KB for pre-restart pending items<br>
+    • Mo gets a list of what was pending + re-run instructions<br><br>
+    <b>Note:</b> JS callbacks cannot be serialized.<br>
+    Re-running the command gives a fresh approval token.
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
+  <div class="port port-out" style="top:50%;transform:translateY(-50%)"></div>
 </div>
 
-<!-- Brain pipeline awareness box -->
-<div class="wbox" id="brain-pipeline" style="left:1750px;top:2340px;width:280px;border-color:#0284c7">
-  <div class="cbadge2" style="background:#0284c7">UPGRADED</div>
-  <div class="wt" style="color:#7dd3fc">🧠 Brain — Pipeline Awareness</div>
+<!-- Startup Restore (Row 2) -->
+<div class="wbox" id="startup-restore" style="left:1300px;top:3440px;width:290px;border-color:#f59e0b">
+  <div class="wt" style="color:#fcd34d">🚀 Startup Restore</div>
   <div class="ws">
-    Brain's system prompt now includes:<br><br>
-    <b>PIPELINE AWARENESS section</b><br>
-    • Knows WAITING/RUNNING/BLOCKED/DONE states<br>
-    • Knows when to suggest /resume [company]<br>
-    • Knows /status shows the full pipeline<br>
-    • Knows /briefing shows blocked + stale items<br><br>
-    When Mo asks "what's happening with X?"<br>
-    → Brain checks pipeline state + gives exact next step<br><br>
-    When Brain sees a BLOCKED pipeline in thread context:<br>
-    → Proactively tells Mo: "X is blocked at BRIEF.<br>
-    &nbsp;&nbsp;Run /resume X to retry."
-  </div>
-  <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
-</div>
-
-<!-- Agent-01 outputs PipelineRunner -->
-<div class="wbox" id="pipeline-step-flow" style="left:75px;top:2660px;width:340px;border-color:#10b981">
-  <div class="wt" style="color:#6ee7b7">📊 Pipeline Step Flow (per lead)</div>
-  <div class="ws">
-    <span style="color:#6ee7b7;font-weight:700">INTAKE</span> → Agent-01 (/newlead) or Agent-18 (/checkemails)<br>
-    &nbsp;&nbsp;↓ pipelineRunner.start(leadId, company)<br>
-    <span style="color:#6ee7b7;font-weight:700">ENRICH</span> → Agent-02 (/enrich company)<br>
-    &nbsp;&nbsp;↓ pipelineRunner.advance(leadId, { dmTitle, readiness })<br>
-    <span style="color:#6ee7b7;font-weight:700">BRIEF</span> → Agent-03 (/brief company)<br>
-    &nbsp;&nbsp;↓ pipelineRunner.advance(leadId, { docUrl }) on success<br>
-    &nbsp;&nbsp;✋ pipelineRunner.block(leadId, reason) if fields missing<br>
-    <span style="color:#6ee7b7;font-weight:700">PROPOSAL</span> → manual (move Trello card)<br>
-    <span style="color:#6ee7b7;font-weight:700">OUTREACH</span> → Agent-13 or Agent-17<br><br>
-    On BLOCKED: /status shows it · /resume X re-runs it
+    Runs in <b>src/index.ts</b> after initWorkflowEngine()<br><br>
+    On every Railway boot:<br><br>
+    1. <code>pipelineRunner.loadFromKB()</code><br>
+    → Restores all non-DONE pipelines from KB<br><br>
+    2. <code>loadThreadsFromKB()</code><br>
+    → Restores recent user sessions (&lt;4h old)<br><br>
+    3. <code>scanPendingApprovalsFromKB()</code><br>
+    → Finds pre-restart pending approvals<br>
+    → Sends Mo a Telegram list with re-run instructions<br><br>
+    Result: seamless experience after restarts
   </div>
   <div class="port port-in" style="top:50%;transform:translateY(-50%)"></div>
 </div>
@@ -1205,54 +1087,39 @@ body{background:#1a1a2e;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-seri
 
 <script>
 // ── Pan / Zoom ──────────────────────────────────────────────────────
-const cw = document.getElementById('cw');
-const cv = document.getElementById('cv');
-let sc=0.45, tx=40, ty=20;
-let canvasDrag=false, sx,sy,stx,sty;
+const cw=document.getElementById('cw');
+const cv=document.getElementById('cv');
+let sc=0.38,tx=30,ty=15;
+let canvasDrag=false,sx,sy,stx,sty;
 function applyT(){cv.style.transform=`translate(${tx}px,${ty}px) scale(${sc})`}
 applyT();
 
 // ── Node dragging ────────────────────────────────────────────────────
-let nodeDrag=null; // {el, startMouseX, startMouseY, startElX, startElY}
-let nodeMoved=false; // distinguish click vs drag
-
-// Make every draggable element moveable
+let nodeDrag=null;
+let nodeMoved=false;
 function makeDraggable(el){
   el.addEventListener('mousedown',e=>{
-    // Only start node drag on direct click on the node (not on ports or buttons)
     if(e.target.closest('#dp')) return;
     if(e.button!==0) return;
-    e.stopPropagation(); // prevent canvas pan
+    e.stopPropagation();
     nodeMoved=false;
-    nodeDrag={
-      el,
-      startMouseX: e.clientX,
-      startMouseY: e.clientY,
-      startElX: el.offsetLeft,
-      startElY: el.offsetTop,
-    };
+    nodeDrag={el,startMouseX:e.clientX,startMouseY:e.clientY,startElX:el.offsetLeft,startElY:el.offsetTop};
     el.style.zIndex='50';
     el.style.transition='none';
     el.style.boxShadow='0 0 0 2px #7c3aed, 0 16px 50px #00000099';
   });
 }
-
-// Apply to all moveable node types
 document.querySelectorAll('.node,.tnode,.wbox,.snode,.lane,.slbl').forEach(makeDraggable);
 
 window.addEventListener('mousemove',e=>{
-  // Node drag takes priority
   if(nodeDrag){
     const dx=(e.clientX-nodeDrag.startMouseX)/sc;
     const dy=(e.clientY-nodeDrag.startMouseY)/sc;
     if(Math.abs(dx)>2||Math.abs(dy)>2) nodeMoved=true;
     nodeDrag.el.style.left=(nodeDrag.startElX+dx)+'px';
     nodeDrag.el.style.top=(nodeDrag.startElY+dy)+'px';
-    redrawArrows();
-    updateMM();
-    return;
+    redrawArrows(); updateMM(); return;
   }
-  // Canvas pan
   if(!canvasDrag) return;
   tx=stx+(e.clientX-sx); ty=sty+(e.clientY-sy); applyT(); updateMM();
 });
@@ -1262,19 +1129,15 @@ window.addEventListener('mouseup',e=>{
     const el=nodeDrag.el;
     el.style.transition='';
     el.style.zIndex='';
-    // Snap to 30px grid for tidiness
     const snappedL=Math.round(el.offsetLeft/30)*30;
     const snappedT=Math.round(el.offsetTop/30)*30;
     el.style.left=snappedL+'px';
     el.style.top=snappedT+'px';
-    redrawArrows();
-    updateMM();
-    // If barely moved, treat as a click — open detail
-    if(!nodeMoved && el.classList.contains('node') && el.getAttribute('data-d')){
+    redrawArrows(); updateMM();
+    if(!nodeMoved&&el.classList.contains('node')&&el.getAttribute('data-d')){
       openDetail(el.getAttribute('data-d'));
     }
-    nodeDrag=null;
-    return;
+    nodeDrag=null; return;
   }
   canvasDrag=false; cw.classList.remove('drag');
 });
@@ -1289,44 +1152,41 @@ cw.addEventListener('wheel',e=>{
   e.preventDefault();
   const d=e.deltaY>0?0.9:1.11;
   const r=cw.getBoundingClientRect();
-  const mx=e.clientX-r.left, my=e.clientY-r.top;
+  const mx=e.clientX-r.left,my=e.clientY-r.top;
   tx=mx-(mx-tx)*d; ty=my-(my-ty)*d;
-  sc=Math.max(0.15,Math.min(2.5,sc*d)); applyT(); updateMM();
+  sc=Math.max(0.12,Math.min(2.5,sc*d)); applyT(); updateMM();
 },{passive:false});
-function zoom(d){sc=Math.max(0.15,Math.min(2.5,sc*d));applyT();updateMM()}
-function resetView(){sc=0.45;tx=40;ty=20;applyT();updateMM()}
+function zoom(d){sc=Math.max(0.12,Math.min(2.5,sc*d));applyT();updateMM()}
+function resetView(){sc=0.38;tx=30;ty=15;applyT();updateMM()}
 
 // ── Arrows ──────────────────────────────────────────────────────────
 const svg=document.getElementById('arrows');
-const colors={manual:'#2563eb',email:'#d97706',outreach:'#059669',ops:'#7c3aed',brain:'#0284c7',data:'#374151'};
+const colors={manual:'#2563eb',email:'#d97706',outreach:'#059669',ops:'#7c3aed',brain:'#0284c7',data:'#374151',pipeline:'#10b981'};
 
-// Build defs once
 const defs=document.createElementNS('http://www.w3.org/2000/svg','defs');
 Object.entries(colors).forEach(([c,col])=>{
   const m=document.createElementNS('http://www.w3.org/2000/svg','marker');
-  m.setAttribute('id',`mh-${c}`); m.setAttribute('markerWidth','7');
-  m.setAttribute('markerHeight','7'); m.setAttribute('refX','5');
-  m.setAttribute('refY','3'); m.setAttribute('orient','auto');
+  m.setAttribute('id',`mh-${c}`);m.setAttribute('markerWidth','7');
+  m.setAttribute('markerHeight','7');m.setAttribute('refX','5');
+  m.setAttribute('refY','3');m.setAttribute('orient','auto');
   const p=document.createElementNS('http://www.w3.org/2000/svg','path');
-  p.setAttribute('d','M0,0 L0,6 L7,3 z'); p.setAttribute('fill',col);
-  m.appendChild(p); defs.appendChild(m);
+  p.setAttribute('d','M0,0 L0,6 L7,3 z');p.setAttribute('fill',col);
+  m.appendChild(p);defs.appendChild(m);
 });
 svg.appendChild(defs);
 
 function getC(id){
   const el=document.getElementById(id);
   if(!el) return null;
-  return {l:el.offsetLeft,t:el.offsetTop,r:el.offsetLeft+el.offsetWidth,b:el.offsetTop+el.offsetHeight,
-    cx:el.offsetLeft+el.offsetWidth/2, cy:el.offsetTop+el.offsetHeight/2};
+  return {l:el.offsetLeft,t:el.offsetTop,r:el.offsetLeft+el.offsetWidth,
+    b:el.offsetTop+el.offsetHeight,cx:el.offsetLeft+el.offsetWidth/2,cy:el.offsetTop+el.offsetHeight/2};
 }
 
-// All connections defined as data — redrawn whenever a node moves
 const CONNECTIONS=[
-  // ── Telegram → agents (manual triggers) ──
+  // ── Telegram → agents (primary command entry) ──
   {f:'tg-telegram',t:'a01',c:'manual'},
-  {f:'tg-telegram',t:'a18',c:'email',dash:true},
-  {f:'tg-telegram',t:'a13',c:'outreach',dash:true},
-  {f:'tg-telegram',t:'a17',c:'outreach',dash:true},
+  {f:'tg-telegram',t:'a03',c:'manual',dash:true},
+  {f:'tg-telegram',t:'a04',c:'brain',dash:true},
   {f:'tg-telegram',t:'a05',c:'ops',dash:true},
   {f:'tg-telegram',t:'a06',c:'ops',dash:true},
   {f:'tg-telegram',t:'a07',c:'ops',dash:true},
@@ -1335,11 +1195,14 @@ const CONNECTIONS=[
   {f:'tg-telegram',t:'a10',c:'ops',dash:true},
   {f:'tg-telegram',t:'a11',c:'ops',dash:true},
   {f:'tg-telegram',t:'a12',c:'manual',dash:true},
+  {f:'tg-telegram',t:'a13',c:'outreach',dash:true},
   {f:'tg-telegram',t:'a14',c:'brain',dash:true},
   {f:'tg-telegram',t:'a15',c:'brain',dash:true},
   {f:'tg-telegram',t:'a16',c:'ops',dash:true},
+  {f:'tg-telegram',t:'a17',c:'outreach',dash:true},
+  {f:'tg-telegram',t:'a18',c:'email',dash:true},
   {f:'tg-telegram',t:'a19',c:'email',dash:true},
-  {f:'tg-telegram',t:'a04',c:'brain',dash:true},
+  {f:'tg-telegram',t:'new-cmds',c:'manual',dash:true},
   // ── Gmail inbox → Agent-18 ──
   {f:'tg-gmail',t:'a18',c:'email'},
   // ── Webhooks → agents ──
@@ -1347,95 +1210,88 @@ const CONNECTIONS=[
   {f:'tg-wp-wh',t:'a20',c:'outreach'},
   // ── Cron → scheduled agents ──
   {f:'tg-cron',t:'a05',c:'ops'},
+  {f:'tg-cron',t:'a18',c:'email',dash:true},
   {f:'tg-cron',t:'a20',c:'outreach'},
   {f:'tg-cron',t:'w5',c:'ops'},
-  // ── Any text → Brain ──
+  // ── Any unrecognised text → Brain ──
   {f:'tg-anytext',t:'a04',c:'brain'},
-  // ── Manual lead path (vertical chain) ──
+  // ── Manual lead path vertical chain ──
   {f:'a01',t:'w1',c:'manual',fs:'bottom',ts:'top'},
   {f:'w1',t:'a02',c:'manual',fs:'bottom',ts:'top'},
-  {f:'a02',t:'a03',c:'manual',fs:'bottom',ts:'top'},
-  {f:'a03',t:'a12',c:'manual',fs:'bottom',ts:'top'},
+  {f:'a02',t:'w2',c:'manual',fs:'bottom',ts:'top'},
+  {f:'w2',t:'a03',c:'manual',fs:'bottom',ts:'top'},
   // ── Email funnel path ──
-  {f:'a18',t:'a19',c:'email',fs:'bottom',ts:'top'},
-  // ── Outreach path ──
+  {f:'a18',t:'w4',c:'email',fs:'bottom',ts:'top'},
+  {f:'w4',t:'a19',c:'email',fs:'bottom',ts:'top'},
+  // ── Cold outreach path ──
   {f:'a13',t:'a17',c:'outreach',dash:true},
-  // ── W5 → Mo notification (Brain handles it) ──
-  {f:'w5',t:'a04',c:'brain',dash:true},
-  // ── KB writers → Brain (data flow) ──
-  {f:'a14',t:'a04',c:'brain',dash:true},
-  {f:'a20',t:'a04',c:'brain',dash:true},
-  {f:'a11',t:'a04',c:'brain',dash:true},
   // ── Internal agent calls ──
   {f:'a01',t:'a08',c:'ops',dash:true},
   {f:'a03',t:'a08',c:'ops',dash:true},
-  // ── W3 event (deal.won) → Lessons + CrossBoard ──
-  {f:'a08',t:'a11',c:'ops',dash:true},
-  {f:'a08',t:'a16',c:'ops',dash:true},
-  // ── PipelineRunner connections (NEW) ──
-  {f:'a01',t:'pipeline-runner',c:'manual',dash:true,fs:'bottom',ts:'top'},
-  {f:'a18',t:'pipeline-runner',c:'email',dash:true,fs:'bottom',ts:'top'},
-  {f:'a02',t:'pipeline-runner',c:'manual',dash:true,fs:'bottom',ts:'top'},
-  {f:'a03',t:'pipeline-runner',c:'manual',dash:true,fs:'bottom',ts:'top'},
+  // ── W3 deal.won → ops agents ──
+  {f:'a08',t:'w3',c:'ops',dash:true},
+  {f:'w3',t:'a11',c:'ops',dash:true},
+  {f:'w3',t:'a16',c:'ops',dash:true},
+  // ── KB writers feed Brain ──
+  {f:'a11',t:'a04',c:'brain',dash:true},
+  {f:'a14',t:'a04',c:'brain',dash:true},
+  {f:'a20',t:'a04',c:'brain',dash:true},
+  {f:'w5',t:'a04',c:'brain',dash:true},
+  // ── PipelineRunner: agents → pipeline layer ──
+  {f:'a01',t:'pipeline-runner',c:'pipeline',dash:true,fs:'bottom',ts:'top'},
+  {f:'a18',t:'pipeline-runner',c:'pipeline',dash:true,fs:'bottom',ts:'top'},
+  {f:'a02',t:'pipeline-runner',c:'pipeline',dash:true,fs:'bottom',ts:'top'},
+  {f:'a03',t:'pipeline-runner',c:'pipeline',dash:true,fs:'bottom',ts:'top'},
   {f:'a03',t:'data-validator',c:'ops',dash:true,fs:'bottom',ts:'top'},
-  {f:'pipeline-runner',t:'pipeline-step-flow',c:'outreach',fs:'bottom',ts:'top'},
-  {f:'pipeline-runner',t:'new-cmds',c:'ops',dash:true},
-  {f:'pipeline-runner',t:'kb-persist',c:'data',dash:true},
-  // ── W5 reads pipeline runner ──
-  {f:'w5',t:'pipeline-runner',c:'ops',dash:true},
-  {f:'w5',t:'kb-persist',c:'data',dash:true},
-  // ── KB persistence ──
-  {f:'kb-persist',t:'thread-persist',c:'data',fs:'bottom',ts:'top'},
-  {f:'kb-persist',t:'approval-persist',c:'data',dash:true},
-  // ── Brain pipeline awareness ──
+  {f:'w5',t:'pipeline-runner',c:'pipeline',dash:true},
+  // ── Pipeline layer internal flow (row 1) ──
+  {f:'pipeline-runner',t:'data-validator',c:'pipeline',dash:true},
+  {f:'data-validator',t:'new-cmds',c:'ops',dash:true},
+  {f:'new-cmds',t:'pipeline-runner',c:'ops',dash:true,fs:'bottom',ts:'bottom'},
+  {f:'pipeline-runner',t:'kb-persist',c:'pipeline',dash:true},
   {f:'pipeline-runner',t:'brain-pipeline',c:'brain',dash:true},
-  {f:'brain-pipeline',t:'a04',c:'brain',dash:true},
-  // ── /status /resume → PipelineRunner ──
-  {f:'tg-telegram',t:'new-cmds',c:'manual',dash:true},
+  {f:'brain-pipeline',t:'a04',c:'brain',dash:true,fs:'top',ts:'bottom'},
+  // ── Pipeline layer row 2 (detail nodes) ──
+  {f:'pipeline-runner',t:'pipeline-step-flow',c:'pipeline',fs:'bottom',ts:'top'},
+  {f:'kb-persist',t:'thread-persist',c:'data',fs:'bottom',ts:'top'},
+  {f:'kb-persist',t:'approval-persist',c:'data',dash:true,fs:'bottom',ts:'top'},
+  {f:'thread-persist',t:'startup-restore',c:'brain',dash:true},
+  {f:'approval-persist',t:'startup-restore',c:'ops',dash:true},
+  {f:'pipeline-step-flow',t:'new-cmds',c:'pipeline',dash:true,fs:'top',ts:'bottom'},
 ];
 
 function redrawArrows(){
-  // Remove all paths (keep defs)
-  Array.from(svg.children).forEach(ch=>{ if(ch.tagName!=='defs') svg.removeChild(ch); });
-
+  Array.from(svg.children).forEach(ch=>{if(ch.tagName!=='defs') svg.removeChild(ch);});
   CONNECTIONS.forEach(conn=>{
-    const a=getC(conn.f), b=getC(conn.t);
+    const a=getC(conn.f),b=getC(conn.t);
     if(!a||!b) return;
     const col=colors[conn.c]||'#374151';
-    const fs=conn.fs||'right', ts=conn.ts||'left';
+    const fs=conn.fs||'right',ts=conn.ts||'left';
     let x1,y1,x2,y2;
-    if(fs==='right'){x1=a.r; y1=a.cy}
-    else if(fs==='bottom'){x1=a.cx; y1=a.b}
-    else if(fs==='left'){x1=a.l; y1=a.cy}
-    if(ts==='left'){x2=b.l; y2=b.cy}
-    else if(ts==='top'){x2=b.cx; y2=b.t}
-    else if(ts==='right'){x2=b.r; y2=b.cy}
-    else if(ts==='bottom'){x2=b.cx; y2=b.b}
-
+    if(fs==='right'){x1=a.r;y1=a.cy}
+    else if(fs==='bottom'){x1=a.cx;y1=a.b}
+    else if(fs==='left'){x1=a.l;y1=a.cy}
+    else if(fs==='top'){x1=a.cx;y1=a.t}
+    if(ts==='left'){x2=b.l;y2=b.cy}
+    else if(ts==='top'){x2=b.cx;y2=b.t}
+    else if(ts==='right'){x2=b.r;y2=b.cy}
+    else if(ts==='bottom'){x2=b.cx;y2=b.b}
     let d;
-    if(fs==='bottom'&&ts==='top'){
-      // vertical bezier
+    if((fs==='bottom'&&ts==='top')||(fs==='top'&&ts==='bottom')){
       const gap=Math.abs(y2-y1);
-      const bend=Math.max(gap*0.45, 40);
-      // if x positions differ, curve through midpoint
-      if(Math.abs(x2-x1)>60){
+      const bend=Math.max(gap*0.45,50);
+      if(Math.abs(x2-x1)>80){
         const mx=(x1+x2)/2;
         d=`M${x1},${y1} C${x1},${y1+bend} ${mx},${(y1+y2)/2} ${mx},${(y1+y2)/2} C${mx},${(y1+y2)/2} ${x2},${y2-bend} ${x2},${y2}`;
       } else {
         d=`M${x1},${y1} C${x1},${y1+bend} ${x2},${y2-bend} ${x2},${y2}`;
       }
     } else {
-      // horizontal bezier
       const gap=Math.abs(x2-x1);
-      const bend=Math.max(gap*0.4, 50);
+      const bend=Math.max(gap*0.4,50);
       const xDir=x2>x1?1:-1;
-      if(Math.abs(y2-y1)>80){
-        d=`M${x1},${y1} C${x1+bend*xDir},${y1} ${x2-bend*xDir},${y2} ${x2},${y2}`;
-      } else {
-        d=`M${x1},${y1} C${x1+bend*xDir},${y1} ${x2-bend*xDir},${y2} ${x2},${y2}`;
-      }
+      d=`M${x1},${y1} C${x1+bend*xDir},${y1} ${x2-bend*xDir},${y2} ${x2},${y2}`;
     }
-
     const path=document.createElementNS('http://www.w3.org/2000/svg','path');
     path.setAttribute('d',d);
     path.setAttribute('stroke',col);
@@ -1448,9 +1304,9 @@ function redrawArrows(){
   });
 }
 
-setTimeout(()=>{ redrawArrows(); updateMM(); }, 400);
+setTimeout(()=>{redrawArrows();updateMM();},400);
 
-// ── Filter ──────────────────────────────────────────────────────────
+// ── Filter ────────────────────────────────────────────────────────
 function filter(p,btn){
   document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
@@ -1461,103 +1317,92 @@ function filter(p,btn){
   });
 }
 
-// ── Detail panel ────────────────────────────────────────────────────
+// ── Detail Panel ─────────────────────────────────────────────────
 const detailData={
-  a01:{icon:'📋',name:'Lead Intake',id:'Agent-01 / /newlead',
-    sections:[
-      {h:'🔔 Triggers',items:['Telegram: /newlead Company | Contact | Email | Show | Size | Budget (pipe format)','Telegram: /newlead "Pharma GmbH is joining Arab Health with 60sqm" (natural language — Claude extracts fields)']},
-      {h:'📥 What it needs to run',items:['Company name (required minimum)','Everything else optional (contact, email, show, size, budget)','ANTHROPIC_API_KEY for natural language parsing','SHEET_LEAD_MASTER env var (Google Sheet ID)','TRELLO_BOARD_SALES_PIPELINE env var (board ID)']},
-      {h:'⚙️ Step-by-step process',items:['1. Checks if args contain pipe | character','2. If pipe → splits on | and maps to fields','3. If natural language → Claude extracts structured data from free text','4. Validates: company name must exist','5. Generates lead ID: LD-{timestamp}','6. appendRow(SHEETS.LEAD_MASTER, row) → 25 columns','7. Calls Agent-08 via registry to create Trello card in "01 New Inquiry"','8. Emits lead.created event with company name → triggers W1 Workflow']},
-      {h:'📤 What it produces',items:['New row in LEAD_MASTER (status: PENDING, source: manual)','New Trello card in "01 New Inquiry" list','lead.created event (W1 picks this up → calls /enrich for this company only)','Confirmation message to Mo on Telegram']},
-      {h:'🔗 Connects to next',items:['→ Agent-08 (internal: creates Trello card)','→ W1 Workflow → Agent-02 (enrichment, scoped to this company)']}
-    ]},
-  a02:{icon:'🔍',name:'Lead Enrichment',id:'Agent-02 / /enrich [company?]',
-    sections:[
-      {h:'🔔 Triggers',items:['W1 Workflow: /enrich "CompanyName" — enriches ONE specific company only','Manual Telegram: /enrich — enriches all PENDING leads (no filter)']},
-      {h:'📥 What it needs',items:['LEAD_MASTER rows with status=PENDING','targetCompany argument from W1 (critical — without it enriches ALL)','ANTHROPIC_API_KEY (Claude does DM extraction)','SHEET_LEAD_MASTER env var']},
-      {h:'⚙️ Step-by-step',items:['1. Read LEAD_MASTER — if targetCompany provided, filter to that company only','2. For each target lead: web search for Decision Maker at the company','3. Claude extracts: DM first name, last name, title, email, LinkedIn URL','4. Score lead 0-10: show tier (A/B/C) + stand size bucket + budget signals','5. Write DM data to LEAD_MASTER columns S–V (dmName, dmTitle, dmLinkedIn, dmEmail)','6. Write score + scoreBreakdown + outreachReadiness to columns M,N,W','7. Set enrichmentStatus = ENRICHED','8. Fire lead.enriched event → W2 → Mo gets Telegram notification']},
-      {h:'📤 Produces',items:['Updated LEAD_MASTER row with DM contact data and lead score','lead.enriched event → W2 Workflow → Mo notified']},
-      {h:'⚠️ Critical fixes applied',items:['FIX 1: Added targetCompany filter — W1 now passes company name so only ONE company is enriched, not all','FIX 2: Removed auto-add to OUTREACH_QUEUE — Mo manually decides when to queue for outreach']},
-      {h:'🔗 Connects to',items:['← W1 (called with targetCompany)','→ LEAD_MASTER (writes DM + score)','→ W2 event (Mo notification)']}
-    ]},
-  a18:{icon:'📬',name:'Gmail Lead Monitor',id:'Agent-18 / /checkemails (auto every 15min)',
-    sections:[
-      {h:'🔔 Triggers',items:['⏰ Automatic cron: every 15 minutes','Manual: /checkemails']},
-      {h:'📥 What it needs',items:['Gmail API access to info@standme.de (OAuth2)','EMAIL_FUNNEL sheet (to check if sender is a known contact with ongoing conversation)','LEAD_MASTER sheet (deduplication check by company name and email)','conflictGuard mutex — prevents two overlapping 15min cycles creating the same lead twice','GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET env vars','ANTHROPIC_API_KEY (email intent classification)']},
-      {h:'⚙️ Decision tree per email',items:['1. Fetch unread emails from info@standme.de since last scan timestamp','2. For each email: is sender in EMAIL_FUNNEL? → handleFunnelReply()','   2a. If yes (reply to ongoing funnel): update EMAIL_FUNNEL stage to REPLIED','   2b. Generate AI draft reply for Mo · notify Mo on Telegram with draft suggestion','3. If new email: conflictGuard.acquire(companyName) — prevents duplicates','4. findRowByValue(LEAD_MASTER, email) — if found, skip (already a lead)','5. Claude classifies email intent (genuine inquiry vs auto-reply vs spam)','6. If genuine: appendRow(LEAD_MASTER, ...) with source=email','7. sendEmail(to, subject, welcomeBody) via Gmail API — creates new thread','8. saveFunnelRecord(email, threadId, messageId, company) → EMAIL_FUNNEL row','   Sets: stage=WELCOMED, gmailThreadId, lastMessageId (critical for threading later)','9. Notify Mo: "[Company] emailed — run /brief or /emaildraft"']},
-      {h:'📤 Produces',items:['New LEAD_MASTER row (source: email, enrichmentStatus: PENDING)','New EMAIL_FUNNEL row (stage: WELCOMED, threadId saved — Agent-19 needs this)','Welcome email sent from info@standme.de via Gmail API','Mo notification on Telegram with lead summary','OR: for replies → EMAIL_FUNNEL stage updated to REPLIED + AI draft for Mo']},
-      {h:'⚠️ Bugs that were fixed',items:['REMOVED: setTimeout(2min → /enrich ALL pending) — was triggering mass enrichment on every email','REMOVED: setTimeout(3min → /brief ALL) — was creating briefs for wrong leads','ADDED: conflictGuard mutex (60s TTL) — prevents duplicate rows on overlapping scans','ADDED: dedup check via findRowByValue before appendRow','W1 Workflow now SKIPS email-sourced leads (source=email filter) — no double enrichment']},
-      {h:'⚠️ Critical: saveFunnelRecord()',items:['This method MUST be called after sending welcome email','It creates the EMAIL_FUNNEL row that Agent-19 depends on','If missing: Agent-19 can\'t find the conversation → /emaildraft and /emailreply break']}
-    ]},
-  a19:{icon:'💬',name:'Email Funnel Manager',id:'Agent-19 / /emailfunnel /emailthread /emaildraft /emailreply',
-    sections:[
-      {h:'🔔 Triggers',items:['Mo runs commands after Agent-18 notifies of a reply','/emailfunnel — dashboard of all conversations by stage','/emailthread Company — see full email history','/emaildraft Company — AI generates reply','/emailreply Company | message — send reply','/emailreply Company | SEND_DRAFT — send stored AI draft']},
-      {h:'📥 What it needs',items:['EMAIL_FUNNEL row for the company (MUST exist — created by Agent-18)','gmailThreadId (col F) — keeps reply in same Gmail thread','lastMessageId (col G) — used as In-Reply-To header for proper threading','conversationLog JSON (col O) — full [{direction, date, summary}] array','funnelStage (col H) — determines AI draft goal and tone','GOOGLE_CLIENT_ID (Gmail send as info@standme.de)','ANTHROPIC_API_KEY (draft generation)']},
-      {h:'⚙️ What each command does',items:['/emaildraft: builds conversation history → stage-aware system prompt → Claude generates reply → stores as "DRAFT::{content}" in col N','/emailreply Company | SEND_DRAFT: reads DRAFT:: from col N → sends via Gmail → clears draft','/emailreply Company | custom message: sends custom text directly via Gmail','On every send: append to conversationLog, increment sentCount (col J), advanceStage(), update lastContact + lastMessageId']},
-      {h:'📤 Produces',items:['Gmail reply sent (In-Reply-To: lastMessageId — stays in same thread in Gmail)','EMAIL_FUNNEL updated: stage advanced, log appended, sentCount++, lastContact updated','Confirmation to Mo with new stage name']},
-      {h:'🔗 Stage progression',items:['NEW_INQUIRY → WELCOMED (Agent-18 handles this)','WELCOMED → QUALIFYING (first outbound reply by Agent-19)','QUALIFYING → BRIEFED (send concept brief or proposal)','BRIEFED → PROPOSAL','PROPOSAL → WON or LOST']}
-    ]},
-  a17:{icon:'📡',name:'Campaign Builder',id:'Agent-17 / /newcampaign /salesreplies',
-    sections:[
-      {h:'🔔 Triggers',items:['POST /webhook/instantly — Instantly.ai sends reply/open/bounce events','Manual: /newcampaign ShowName','Manual: /salesreplies — see recent reply classifications']},
-      {h:'📥 Needs',items:['Instantly.ai webhook: email, event, campaign_id, reply_message body','CAMPAIGN_SALES sheet','INSTANTLY_API_KEY env var']},
-      {h:'⚙️ Webhook flow',items:['1. Receive Instantly.ai event (REPLY / OPENED / BOUNCED)','2. For REPLY: Claude classifies → INTERESTED / NOT_INTERESTED / INFO_REQUEST / OOO','3. Update CAMPAIGN_SALES row: status, classification, lastReplyDate','4. If INTERESTED: immediate Mo alert on Telegram','5. For open/bounce: update status only']},
-      {h:'📤 Produces',items:['CAMPAIGN_SALES row updated','Mo alert if INTERESTED reply']}
-    ]},
-  a13:{icon:'🚀',name:'Outreach',id:'Agent-13 / /outreach',
-    sections:[
-      {h:'📥 Needs',items:['OUTREACH_QUEUE rows (Mo adds manually — Agent-02 no longer auto-adds)','Woodpecker Campaign ID per row','Mo approval (TYPE 1 Telegram message with /approve_ button)','WOODPECKER_API_KEY env var']},
-      {h:'⚙️ Process',items:['1. Read OUTREACH_QUEUE','2. Send TYPE 1 approval message to Mo (shows prospect list)','3. On /approve_: addProspectsToCampaign(campaignId, prospects) in batches of 100','4. 500ms delay between batches (Woodpecker rate limit)','5. Update OUTREACH_QUEUE status, log to OUTREACH_LOG']},
-      {h:'⚠️ Approval is in-memory',items:['Callback stored in Map — lost on Railway restart','Only Agent-13 has recovery: reconstructBulkApproval() reads from KB','All other agents: must re-run the command after restart']}
-    ]},
-  a20:{icon:'📦',name:'Woodpecker Knowledge Sync',id:'Agent-20 / /wpsync /wpstats',
-    sections:[
-      {h:'🔔 Triggers (3 paths)',items:['⏰ Cron: 03:00 Berlin nightly — full sync','POST /webhook/woodpecker — real-time reply capture','Manual: /wpsync']},
-      {h:'📥 Needs',items:['WOODPECKER_API_KEY (READ ONLY — never writes to Woodpecker)','Knowledge Base sheet','ANTHROPIC_API_KEY (summarises reply bodies from webhook)']},
-      {h:'⚙️ Nightly sync (cron)',items:['1. listCampaigns() → all campaigns','2. getCampaignStats(id) → sent, open, reply, bounce rates','3. saveKnowledge() or updateKnowledge() per campaign (idempotent)','4. getProspectsByCampaign(status=REPLIED) per campaign','5. getProspectsByCampaign(status=INTERESTED) per campaign','6. Deduplicate by email','7. saveKnowledge() per replied/interested company','Rate: 1.1s delay between campaign calls (Woodpecker Classic API rate limit)']},
-      {h:'⚙️ Webhook path (real-time)',items:['Receive REPLY event from Woodpecker POST','Claude summarises reply body to 1-2 sentences','saveKnowledge() as woodpecker-reply-{email}-{date}','Brain uses this next time Mo asks about that company']},
-      {h:'📤 Produces (all to Knowledge Base)',items:['KB entry per campaign: open rate, reply rate, bounce rate, interested count','KB entry per replied company: contact, show context, status','KB entry per live reply: AI summary of what they wrote']},
-      {h:'🔗 Why this matters for Brain',items:['Brain calls searchKnowledge() on every message','If Mo asks "what happened with PharmaCorp?" → Brain finds their Woodpecker reply KB entry','Real campaign intelligence available in real-time conversations']}
-    ]},
-  a04:{icon:'🧠',name:'Brain — Central AI',id:'Agent-04 / /ask + any text + dashboard',
-    sections:[
-      {h:'🔔 Triggers',items:['Any Telegram text that is NOT a recognised command','Dashboard chat window','Explicit /ask command']},
-      {h:'📥 Context injected automatically',items:['Per-user message history (up to 50 messages, in-memory, lost on Railway restart — expected)','threadContext: last 20 cross-agent events for this user (thread-context.ts, 4hr session window)','activeFocus: current entity Mo is working on (lead/project/show)','KB search: searchKnowledge(userMessage, 8) — top 8 matching entries (5min cache)','Live data (parallel, 60s cached): Trello pipeline + last 5 LEAD_MASTER rows + upcoming deadlines','standme-knowledge.ts: pricing, shows, brand voice, industry knowledge']},
-      {h:'⚙️ Process',items:['1. Build system prompt with all injected context','2. generateChat(messages[], systemPrompt) — NOT generateText(). Full multi-turn.','3. Claude understands Arabic, English, Franco-Arabic, typos','4. Knows all 20 agents and their commands — can advise "run /enrich then /brief"','5. Save response to per-user history array']},
-      {h:'📤 Produces',items:['AI response → Telegram or Dashboard','Per-user history updated']},
-      {h:'⚠️ Critical — do not break',items:['Must use generateChat() — passing full messages array for real multi-turn','Never flatten to generateText(prompt) — breaks conversation memory completely','Dashboard live data has 60s cache — prevents Sheets/Trello API hammering','3 data fetches run in parallel via Promise.all (not sequential — was causing >8s timeout)']}
-    ]},
-  a05:{icon:'⚠️',name:'Deadline Monitor',id:'Agent-05 / /deadlines (cron 8am daily)',
-    sections:[
-      {h:'📥 Needs',items:['TECHNICAL_DEADLINES sheet']},
-      {h:'📤 Produces',items:['Daily Telegram alert: shows with deadlines in next 30 days']}
-    ]},
-  'pipeline-runner':{icon:'⚙️',name:'PipelineRunner Service',id:'src/services/pipeline-runner.ts (NEW)',
-    sections:[
-      {h:'🎯 Purpose',items:['Manages sequential agent pipelines for individual leads','Each lead moves through: INTAKE → ENRICH → BRIEF → PROPOSAL → OUTREACH','State is persisted to KB so pipelines survive Railway restarts']},
-      {h:'📊 States',items:['WAITING — next step is ready to run (no action needed)','RUNNING — step is currently executing','BLOCKED — step failed or missing data — requires /resume','DONE — all steps completed for this lead']},
-      {h:'⚙️ Key methods',items:['start(leadId, company) — called by Agent-01 and Agent-18 when lead is created','advance(leadId, stepData) — called by Agent-02 and Agent-03 on success. Moves to next step.','block(leadId, reason) — called by Agent-03 when fields missing. Shows in /status.','resume(leadId) — returns {command, args} for the blocked step. Called by /resume handler.','findByCompany(name) — fuzzy search used by /resume [company] command','getBlocked() — returns all blocked pipelines. Used by W5 morning briefing.','loadFromKB() — called at startup. Restores active pipelines that survived restarts.']},
-      {h:'🔗 Wired into',items:['Agent-01 → start() for HOT/WARM manual leads','Agent-18 → start() for email-sourced leads','Agent-02 → advance() after enrichment completes','Agent-03 → advance() on success / block() if data missing','W5 → reads getBlocked() for morning briefing','index.ts /status → reads getActive()','index.ts /resume → calls resume() then routes to agent']},
-      {h:'💾 KB persistence',items:['Saves to KB source: pipeline-state-{leadId} on every state change','On startup: loadFromKB() searches for pipeline-state-* entries','DONE pipelines are excluded on load (no need to track completed)','stepData (DM info etc.) is NOT persisted — too large, not needed on restart']}
-    ]},
-  'data-validator':{icon:'✅',name:'DataValidator Utility',id:'src/utils/data-validator.ts (NEW)',
-    sections:[
-      {h:'🎯 Purpose',items:['Validates lead row data completeness before each pipeline step','Returns structured ValidationResult with missing (blocking) and warnings (non-blocking) fields','Used by Agent-03 to decide whether to block() the pipeline or proceed']},
-      {h:'⚙️ Functions',items:['validateForEnrichment(row) → requires company name (col C). Warns: email, industry.','validateForBrief(row) → requires company, show (col G), stand size (col I), budget (col J). Warns: industry.','validateForOutreach(row) → requires company, email. Warns: show, readiness score.','validateForDealAnalysis(row) → requires company. Warns: show, budget, industry.','formatValidationError(result, stepName) → human-readable message for Telegram']},
-      {h:'🔗 Used by',items:['Agent-03 — before generating a brief (blocks if show/size/budget missing)','PipelineRunner-aware agents will call this before each step']}
-    ]},
-  'new-cmds':{icon:'📱',name:'New Pipeline Commands',id:'Handled in index.ts before agent routing',
-    sections:[
-      {h:'📋 Commands added',items:['/status — Shows pipeline dashboard. Lists all active pipelines with company, current step, status. BLOCKED pipelines show reason + /resume hint.','/resume [company] — Finds pipeline by company name (fuzzy), calls pipelineRunner.resume() to get the next command, then runs that agent.','/retry [company] — Alias for /resume.','/briefing — Instant snapshot: blocked pipeline count, stale lead count, quick action commands.']},
-      {h:'⚙️ How /resume works',items:['1. Find pipeline by partial company name: pipelineRunner.findByCompany(arg)','2. If not found → list all blocked pipelines','3. Call pipelineRunner.resume(leadId) → returns { command, args } for the blocked step','4. Route to the correct agent with company as args','5. Example: blocked at BRIEF → runs /brief [company]']},
-      {h:'🔗 Why before agent routing',items:['These commands are not agents — they control the pipeline meta-layer','They need access to pipelineRunner which is a service, not an agent class','Handled in the same section as /start, /help, /approve_ in index.ts']}
-    ]},
-  a14:{icon:'📁',name:'Drive Indexer',id:'Agent-14 / /indexdrive /kbstats',
-    sections:[
-      {h:'📥 Needs',items:['Google Drive API access','Folder IDs (loaded from KB at startup via loadRuntimeConfig())','File content reading capability (PDF, Docs, Sheets, XLSX)']},
-      {h:'⚙️ Process',items:['Scan Drive folders recursively','Read each file content','Claude extracts key info per file','updateKnowledge() — idempotent, safe to re-run','Uses shared KB cache during bulk reindex (avoids Sheets quota errors)']},
-      {h:'📤 Produces',items:['KB entry per Drive file (source: file name, type: drive)','DRIVE_INDEX sheet row per file']}
-    ]}
+  a01:{icon:'📋',name:'Lead Intake',id:'Agent-01 / /newlead',sections:[
+    {h:'🔔 Triggers',items:['Telegram: /newlead Company | Contact | Email | Show | Size | Budget','Telegram: /newlead "Free text" — Claude extracts all fields']},
+    {h:'⚙️ Step-by-step',items:['1. Detect pipe | vs natural language','2. Natural language → Claude extracts structured fields','3. Generate ID: LD-{timestamp}','4. appendRow(LEAD_MASTER) — 25 columns','5. Agent-08 creates Trello card in "01 New Inquiry"','6. Emit lead.created → W1 → Agent-02 (scoped to this company)','7. pipelineRunner.start(leadId, company) for HOT/WARM leads']},
+    {h:'📤 Produces',items:['LEAD_MASTER row (status: PENDING, source: manual)','Trello card in "01 New Inquiry"','W1 triggers enrichment for this company only']}
+  ]},
+  a02:{icon:'🔍',name:'Lead Enrichment',id:'Agent-02 / /enrich [company?]',sections:[
+    {h:'🔔 Triggers',items:['W1 Workflow: /enrich "CompanyName" — enriches ONE company only','Manual: /enrich — enriches all PENDING leads']},
+    {h:'⚙️ Step-by-step',items:['1. Read LEAD_MASTER, filter to targetCompany if provided','2. Web search for Decision Maker','3. Claude extracts: DM name, title, email, LinkedIn URL','4. Score lead 0–10 (show tier + size + budget signals)','5. Write DM data to LEAD_MASTER cols S–V','6. Set enrichmentStatus = ENRICHED','7. Fire lead.enriched → W2 → Mo notified','8. pipelineRunner.advance() moves pipeline to BRIEF step']},
+    {h:'📤 Produces',items:['Updated LEAD_MASTER row: DM data + score + ENRICHED status','W2 event: Mo notified on Telegram','Pipeline advances to BRIEF step']}
+  ]},
+  a03:{icon:'📐',name:'Concept Brief Generator',id:'Agent-03 / /brief [client]',sections:[
+    {h:'⚙️ How it works',items:['3-pass fuzzy search: exact → partial → word-level match','DataValidator.validateForBrief() — checks show/size/budget','If missing: pipelineRunner.block() + info request email to client','If valid: Claude generates full design brief','Creates Google Doc in Drive /01_Sales/Proposals','Moves Trello card to "03 Concept Brief" list','pipelineRunner.advance() on success']},
+    {h:'📤 Produces',items:['Google Doc brief in Drive','Trello card moved','TYPE 1 approval message to Mo with doc URL']}
+  ]},
+  a18:{icon:'📬',name:'Gmail Lead Monitor',id:'Agent-18 / auto 15min + /checkemails',sections:[
+    {h:'Decision tree per email',items:['Is sender in EMAIL_FUNNEL? → handleFunnelReply() → stage=REPLIED + AI draft','New email: conflictGuard.acquire() prevents duplicates','Claude classifies intent (genuine vs spam)','appendRow(LEAD_MASTER) with source=email','Send welcome email via Gmail API','saveFunnelRecord() → EMAIL_FUNNEL row (MUST happen — Agent-19 needs it)','pipelineRunner.start() for new email lead']},
+    {h:'Critical: saveFunnelRecord()',items:['Creates EMAIL_FUNNEL row with gmailThreadId and lastMessageId','Agent-19 /emaildraft and /emailreply BREAK if this row is missing']}
+  ]},
+  a19:{icon:'💬',name:'Email Funnel Manager',id:'Agent-19 / /emailfunnel /emaildraft /emailreply',sections:[
+    {h:'Commands',items:['/emailfunnel — all conversations by stage','/emaildraft Company — AI writes stage-aware reply','/emailreply Company | message — send custom reply','/emailreply Company | SEND_DRAFT — send stored AI draft']},
+    {h:'Threading',items:['Uses gmailThreadId + lastMessageId (In-Reply-To header)','Reply stays in same Gmail thread — professional appearance','Updates conversationLog, sentCount, funnelStage on every send']},
+    {h:'Stage progression',items:['WELCOMED → QUALIFYING → BRIEFED → PROPOSAL → WON/LOST']}
+  ]},
+  a04:{icon:'🧠',name:'Brain — Central AI',id:'Agent-04 / /ask + any text + dashboard',sections:[
+    {h:'Auto-injected context (every message)',items:['Per-user message history (up to 50 msgs)','threadContext: last 20 cross-agent events (4hr window)','activeFocus: current entity Mo is working on','KB search: top 8 matching entries (5min cache)','Live data (parallel 60s cache): Trello + LEAD_MASTER + DEADLINES','Pipeline awareness: WAITING/RUNNING/BLOCKED/DONE states']},
+    {h:'Critical constraints',items:['Must use generateChat() — NOT generateText()','Never flatten messages array to single prompt','Dashboard live data uses parallel Promise.all (not sequential)','60s cache prevents Sheets/Trello quota errors']}
+  ]},
+  a17:{icon:'📡',name:'Campaign Builder',id:'Agent-17 / webhook + /newcampaign',sections:[
+    {h:'Webhook path',items:['POST /webhook/instantly receives reply/open/bounce','Claude classifies: INTERESTED / NOT_INTERESTED / INFO_REQUEST','Updates CAMPAIGN_SALES row','INTERESTED → immediate Mo Telegram alert']},
+    {h:'Manual path',items:['/newcampaign ShowName — generates prospect data for Woodpecker UI']}
+  ]},
+  a13:{icon:'🚀',name:'Outreach (Woodpecker)',id:'Agent-13 / /outreach',sections:[
+    {h:'Process',items:['Reads OUTREACH_QUEUE (Mo adds manually)','TYPE 1 approval request to Mo','On /approve_: addProspectsToCampaign() in batches of 100','Updates OUTREACH_QUEUE + OUTREACH_LOG']},
+    {h:'Restart recovery',items:['Only Agent-13 has KB-based approval recovery','reconstructBulkApproval() reads KB if callback was lost on restart','All other agents: must re-run the command to get a fresh token']}
+  ]},
+  a20:{icon:'📦',name:'Woodpecker Knowledge Sync',id:'Agent-20 / 3am cron + webhook + /wpsync',sections:[
+    {h:'Nightly sync',items:['listCampaigns() → getCampaignStats() per campaign','saveKnowledge() per campaign: open rate, reply rate, bounce rate','getProspectsByCampaign(REPLIED/INTERESTED) → KB entries per company']},
+    {h:'Webhook path',items:['Receives reply from Woodpecker','Claude summarises to 1-2 sentences','saveKnowledge() as woodpecker-reply-{email}-{date}','Brain finds this next time Mo asks about that company']}
+  ]},
+  a05:{icon:'⚠️',name:'Deadline Monitor',id:'Agent-05 / 8am cron + /deadlines',sections:[
+    {h:'Process',items:['Reads TECHNICAL_DEADLINES sheet','Filters shows within 30 days','Sorts by urgency']},
+    {h:'Output',items:['Daily Telegram alert to Mo: upcoming show deadlines']}
+  ]},
+  a08:{icon:'🃏',name:'Card Manager',id:'Agent-08 / /card /move /addcard /comment',sections:[
+    {h:'Triggers',items:['Manual Telegram commands','/card, /move, /addcard, /comment','Internal calls from Agent-01 (create) and Agent-03 (move to Brief)']},
+    {h:'W3 trigger',items:['When card is moved to "06 Won" → emits deal.won event → W3 Workflow','W3 then triggers Agent-11 (Lessons) and Agent-16 (Cross Board Sync)']}
+  ]},
+  a11:{icon:'🏆',name:'Lessons Learned',id:'Agent-11 / W3 event + /lesson',sections:[
+    {h:'Triggers',items:['W3 event when deal.won fires','Manual: /lesson [project]']},
+    {h:'Output',items:['LESSONS sheet row','KB entry — Brain uses this in future briefs for similar shows/clients']}
+  ]},
+  a12:{icon:'📊',name:'Deal Analyser',id:'Agent-12 / /score /qualify /pipeline',sections:[
+    {h:'What it does',items:['Reads LEAD_MASTER and Trello sales board (read-only)','Generates pipeline health report','Scores each lead 0-10 and explains the breakdown','Identifies overdue leads and suggests next actions']},
+    {h:'Output',items:['Telegram report — no data changes, analysis only']}
+  ]},
+  a14:{icon:'📁',name:'Drive Indexer',id:'Agent-14 / /indexdrive /kb /kbstats',sections:[
+    {h:'Process',items:['Scans Drive folders (folder IDs loaded from KB at startup)','Reads PDF, Google Docs, Sheets, XLSX','Claude extracts key info per file','updateKnowledge() per file (idempotent — safe to re-run)']},
+    {h:'Output',items:['KB entries per Drive file','DRIVE_INDEX sheet updated','Brain now has Drive file knowledge in every conversation']}
+  ]},
+  a15:{icon:'📣',name:'Marketing Content',id:'Agent-15 / /post /caption /content /casestudy',sections:[
+    {h:'Process',items:['Topic or show name → KB search for past projects → brand voice','Claude generates LinkedIn posts, Instagram captions, case studies']},
+    {h:'Output',items:['Ready-to-publish content → Telegram']}
+  ]},
+  'pipeline-runner':{icon:'⚙️',name:'PipelineRunner Service',id:'src/services/pipeline-runner.ts',sections:[
+    {h:'Purpose',items:['Sequential lead pipeline tracker','INTAKE → ENRICH → BRIEF → PROPOSAL → OUTREACH','State persisted to KB — survives Railway restarts']},
+    {h:'States',items:['WAITING — next step is ready','RUNNING — step is executing','BLOCKED — needs attention (/resume to fix)','DONE — all steps complete']},
+    {h:'Key methods',items:['start(leadId, company) — Agent-01 + Agent-18 call this','advance(leadId, stepData) — Agent-02 + Agent-03 call this on success','block(leadId, reason) — Agent-03 calls this if data missing','resume(leadId) — returns {command, args} for the blocked step','getBlocked() — W5 uses this for morning briefing','loadFromKB() — called at startup to restore pipelines']}
+  ]},
+  'data-validator':{icon:'✅',name:'DataValidator Utility',id:'src/utils/data-validator.ts',sections:[
+    {h:'Functions',items:['validateForEnrichment(row) — requires company name','validateForBrief(row) — requires company, show, size, budget','validateForOutreach(row) — requires company, email','validateForDealAnalysis(row) — requires company','All return: { valid: boolean, missing: string[], warnings: string[] }']},
+    {h:'How it connects',items:['Agent-03 calls validateForBrief() before generating brief','If missing.length > 0 → pipelineRunner.block() + info request email','DataValidator result → informs /resume and /status command output']}
+  ]},
+  'new-cmds':{icon:'📱',name:'Pipeline Commands',id:'Handled in index.ts before agent routing',sections:[
+    {h:'Commands',items:['/status — full pipeline dashboard with all active leads and their step/status','/resume [company] — fuzzy find pipeline → call pipelineRunner.resume() → run the blocked agent','/retry [company] — alias for /resume','/briefing — instant snapshot: blocked count, stale leads, quick action list']},
+    {h:'Why in index.ts',items:['These control the pipeline meta-layer, not agent logic','Handled in same section as /start, /help, /approve_ in index.ts','They need direct access to pipelineRunner service instance']}
+  ]},
+  'kb-persist':{icon:'🗄️',name:'KB Persistence Layer',id:'Knowledge Base as state store',sections:[
+    {h:'Three systems persisted',items:['1. PipelineRunner → pipeline-state-{leadId}','2. ThreadContext → thread-context-{userId}','3. Approvals → pending-approval-{id}']},
+    {h:'How it survives restarts',items:['On startup: loadFromKB() restores pipelines','On startup: loadThreadsFromKB() restores sessions <4h old','On startup: scanPendingApprovalsFromKB() notifies Mo of pending approvals','All three run in index.ts after initWorkflowEngine()']}
+  ]},
+  'startup-restore':{icon:'🚀',name:'Startup Restore',id:'src/index.ts after initWorkflowEngine()',sections:[
+    {h:'What runs on every boot',items:['pipelineRunner.loadFromKB() — restores all non-DONE pipelines','loadThreadsFromKB() — restores user sessions under 4 hours old','scanPendingApprovalsFromKB() — finds pre-restart pending approvals']},
+    {h:'Mo notification',items:['If pending approvals found: Telegram message lists each with re-run instructions','Example: "Before restart, you had a pending /outreach approval for X. Re-run /outreach to get a fresh token."']}
+  ]}
 };
 
 function openDetail(key){
@@ -1575,56 +1420,40 @@ function openDetail(key){
   document.getElementById('dp-body').innerHTML=html;
   document.getElementById('dp').classList.add('open');
 }
-
 function closeDetail(){document.getElementById('dp').classList.remove('open')}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDetail()});
 
-// ── Mini-map ────────────────────────────────────────────────────────
+// ── Mini-map ──────────────────────────────────────────────────────
 const mmCanvas=document.getElementById('mm-canvas');
 const mmCtx=mmCanvas.getContext('2d');
 const mmVp=document.getElementById('mm-vp');
-const MM_SCALE=180/4800;
+const MM_SCALE=180/5000;
 
 function updateMM(){
-  // viewport box
-  const vw=window.innerWidth, vh=window.innerHeight-48;
-  const vpx=-tx/sc, vpy=-ty/sc;
-  const vpw=vw/sc, vph=vh/sc;
-  mmVp.style.left=(vpx*MM_SCALE)+'px';
-  mmVp.style.top=(vpy*MM_SCALE*(110/3600))+'px';
-  mmVp.style.width=(vpw*MM_SCALE)+'px';
-  mmVp.style.height=(vph*MM_SCALE*(110/3600))+'px';
-
+  const r=cw.getBoundingClientRect();
+  const vpW=r.width/sc,vpH=r.height/sc;
+  const vpX=-tx/sc,vpY=-ty/sc;
   mmCtx.clearRect(0,0,180,110);
-  // Draw node dots on minimap
-  document.querySelectorAll('.node,.tnode,.wbox,.snode').forEach(n=>{
-    const x=n.offsetLeft*MM_SCALE;
-    const y=n.offsetTop*(110/3600);
-    const w=n.offsetWidth*MM_SCALE;
-    const h=n.offsetHeight*(110/3600);
-    let col='#374151';
-    if(n.classList.contains('p-manual')) col='#2563eb';
-    else if(n.classList.contains('p-email')) col='#d97706';
-    else if(n.classList.contains('p-outreach')) col='#059669';
-    else if(n.classList.contains('p-ops')) col='#7c3aed';
-    else if(n.classList.contains('p-brain')) col='#0284c7';
-    mmCtx.fillStyle=col+'aa';
-    mmCtx.fillRect(x,y,Math.max(w,3),Math.max(h,3));
+  mmCtx.fillStyle='#1e1e35';
+  document.querySelectorAll('.node,.tnode,.wbox,.snode').forEach(el=>{
+    const x=el.offsetLeft*MM_SCALE,y=el.offsetTop*(110/7000);
+    const w=el.offsetWidth*MM_SCALE,h=el.offsetHeight*(110/7000);
+    const cls=el.className;
+    if(cls.includes('p-manual')) mmCtx.fillStyle='#2563eb55';
+    else if(cls.includes('p-email')) mmCtx.fillStyle='#d9770655';
+    else if(cls.includes('p-outreach')) mmCtx.fillStyle='#05966955';
+    else if(cls.includes('p-ops')) mmCtx.fillStyle='#7c3aed55';
+    else if(cls.includes('p-brain')) mmCtx.fillStyle='#0284c755';
+    else mmCtx.fillStyle='#37415155';
+    mmCtx.fillRect(x,y,Math.max(w,2),Math.max(h,2));
   });
+  const vx=vpX*MM_SCALE,vy=vpY*(110/7000);
+  const vw=vpW*MM_SCALE,vh=vpH*(110/7000);
+  mmVp.style.left=Math.max(0,vx)+'px';
+  mmVp.style.top=Math.max(0,vy)+'px';
+  mmVp.style.width=Math.min(180,vw)+'px';
+  mmVp.style.height=Math.min(110,vh)+'px';
 }
-
-// Click minimap to navigate
-mmCanvas.addEventListener('click',e=>{
-  const r=mmCanvas.getBoundingClientRect();
-  const mx=(e.clientX-r.left)/MM_SCALE;
-  const my=(e.clientY-r.top)/(110/3600);
-  tx=-(mx-window.innerWidth/(2*sc))*sc;
-  ty=-(my-(window.innerHeight-48)/(2*sc))*sc;
-  applyT(); updateMM();
-});
-
-setTimeout(updateMM,500);
-window.addEventListener('resize',updateMM);
 </script>
 </body>
 </html>
