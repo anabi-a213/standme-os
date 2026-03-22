@@ -42,6 +42,7 @@ import { CrossBoardAgent } from './agents/16-cross-board.agent';
 import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
 import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
 import { EmailFunnelAgent } from './agents/19-email-funnel.agent';
+import { WoodpeckerSyncAgent } from './agents/20-woodpecker-sync.agent';
 import { initWorkflowEngine } from './services/workflow-engine';
 
 
@@ -107,6 +108,7 @@ async function main() {
     new CrossBoardAgent(),
     new GmailLeadMonitorAgent(),
     new EmailFunnelAgent(),
+    new WoodpeckerSyncAgent(),
   ];
 
   for (const agent of agents) {
@@ -343,10 +345,37 @@ async function main() {
     }
   });
 
-  // Keep backward compat — old Woodpecker webhook URL redirects to Instantly handler
+  // Woodpecker webhook — captures real-time reply events into Knowledge Base
   app.post('/webhook/woodpecker', (req, res) => {
-    logger.warn('[Webhook] Woodpecker endpoint hit — redirecting to Instantly handler');
-    res.sendStatus(200);
+    res.sendStatus(200); // always ACK immediately
+
+    const body = req.body || {};
+    const event   = (body.event || body.type || '').toUpperCase();
+    const email   = body.email || body.prospect_email || '';
+    const company = body.company || body.prospect?.company || '';
+
+    // Only process REPLY events — they have the richest data
+    if (!['REPLY', 'REPLIED'].includes(event) || !email) {
+      if (event) logger.info(`[Webhook/WP] Ignored event: ${event}`);
+      return;
+    }
+
+    logger.info(`[Webhook/WP] Reply received from ${email} (${company || 'unknown company'})`);
+
+    // Save to Knowledge Base asynchronously — don't block the response
+    const syncAgent = getAgent('agent-20') as WoodpeckerSyncAgent | undefined;
+    if (syncAgent) {
+      syncAgent.saveReplyToKB({
+        email,
+        company:      company || undefined,
+        campaignId:   body.campaign_id   ? Number(body.campaign_id)   : undefined,
+        campaignName: body.campaign_name || undefined,
+        replyBody:    body.reply_message || body.reply_body || body.message || undefined,
+        subject:      body.subject       || undefined,
+      }).catch((err: any) => logger.warn(`[Webhook/WP] KB save failed: ${err.message}`));
+    } else {
+      logger.warn('[Webhook/WP] WoodpeckerSyncAgent not found — reply not saved to KB');
+    }
   });
 
   // Health check endpoint for Railway
