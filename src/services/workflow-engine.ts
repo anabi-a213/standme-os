@@ -303,10 +303,9 @@ async function w5_staleLead(): Promise<void> {
     for (const row of rows.slice(1)) {
       const enrichStatus = row[17] || ''; // col R
       const timestamp = row[1] || '';     // col B
-      const score = parseInt(row[12] || '0'); // col M
 
-      // Only rescue leads worth enriching (score 5+) that are still PENDING
-      if ((enrichStatus !== 'PENDING' && enrichStatus !== '') || score < 5) continue;
+      // Rescue any unenriched lead — no score gate (email leads score 0 but still need enrichment)
+      if (enrichStatus !== 'PENDING' && enrichStatus !== '' && enrichStatus !== 'QUALIFYING') continue;
 
       const age = now - new Date(timestamp).getTime();
       if (age >= STALE_THRESHOLD) staleCount++;

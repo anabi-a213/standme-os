@@ -20,14 +20,21 @@ export class LeadEnrichmentAgent extends BaseAgent {
   };
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
-    // Read leads that need enrichment (score 5+, status PENDING)
+    // Optional: if args provided, restrict to that company name only.
+    // This prevents W1/W5 from enriching every lead when targeting one specific lead.
+    const targetCompany = (ctx.args || '').trim().toLowerCase();
+
     const rows = await readSheet(SHEETS.LEAD_MASTER);
     const leadsToEnrich: { row: number; data: string[] }[] = [];
 
     for (let i = 1; i < rows.length; i++) {
       const enrichStatus = rows[i][17] || ''; // column R = enrichmentStatus
+      const companyName = (rows[i][2] || '').toLowerCase();
+
+      // If a specific company was requested, filter to that company only
+      if (targetCompany && !companyName.includes(targetCompany)) continue;
+
       // Enrich any lead that hasn't been enriched yet — no score gate
-      // QUALIFYING leads (from email/website approvals) must be enriched regardless of score
       if (['PENDING', 'QUALIFYING', ''].includes(enrichStatus) && rows[i][2]) {
         leadsToEnrich.push({ row: i + 1, data: rows[i] });
       }

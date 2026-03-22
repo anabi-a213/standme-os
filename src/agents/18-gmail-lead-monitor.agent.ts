@@ -16,7 +16,6 @@ import {
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
 import { registerApproval } from '../services/approvals';
 import { agentEventBus } from '../services/agent-event-bus';
-import { getAgent } from '../agents/registry';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -400,30 +399,26 @@ Return ONLY the JSON object. No explanation.`;
       data: { status: 'QUALIFYING', showName: d.showName, contactEmail: d.contactEmail, source: 'website' },
     });
 
-    // Step 1: Send welcome email immediately (no budget mention)
+    // Send welcome email immediately (no budget mention)
     await this.sendWelcomeEmail(d, leadId).catch(() => null);
 
-    // Step 2: Auto-enrich after 2 minutes
-    setTimeout(async () => {
-      const enrichAgent = getAgent('/enrich');
-      if (enrichAgent) {
-        await enrichAgent.run({
-          userId: 'SYSTEM', chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
-          command: '/enrich', args: '', role: 'ADMIN' as any, language: 'en',
-        }).catch(() => null);
-      }
-    }, 2 * 60 * 1000);
+    // Notify Mo with clear next-step instructions — no auto-triggering downstream agents.
+    // Email leads already have the contact's email. Enrichment (AI DM research) adds little
+    // until we know the show + size. Brief needs show + size + budget — wait for client reply.
+    const missingList = [
+      !d.showName && 'show name',
+      !d.standSize && 'stand size',
+      !d.budget && 'budget',
+    ].filter(Boolean).join(', ');
 
-    // Step 3: Generate AI concept brief after 3 minutes
-    setTimeout(async () => {
-      const briefAgent = getAgent('/brief');
-      if (briefAgent) {
-        await briefAgent.run({
-          userId: 'SYSTEM', chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
-          command: '/brief', args: d.companyName, role: 'ADMIN' as any, language: 'en',
-        }).catch(() => null);
-      }
-    }, 3 * 60 * 1000);
+    await sendToMo(formatType2(
+      `Lead QUALIFYING: ${d.companyName}`,
+      `Welcome email sent to *${d.contactEmail}*.\n` +
+      (missingList ? `⏳ Waiting for client reply — still missing: ${missingList}.\n` : '') +
+      `\nWhen client replies with details, run:\n` +
+      `• \`/brief ${d.companyName}\` — to generate concept brief\n` +
+      `• \`/enrich\` — to research decision maker`
+    ));
 
     return (
       `⭐ *Website Lead Created: ${d.companyName}*\n` +
@@ -432,8 +427,7 @@ Return ONLY the JSON object. No explanation.`;
       `Contact: ${d.contactName} — ${d.contactEmail}\n` +
       `Lead ID: ${leadId}\n` +
       (trelloCardId ? `Trello card: 01 — New Inquiry ✅\n` : '') +
-      `\n✉️ Welcome email sent\n` +
-      `⏳ Enrichment in 2 min | AI Brief in 3 min`
+      `\n✉️ Welcome email sent — awaiting client reply`
     );
   }
 
