@@ -31,6 +31,7 @@ import { sendToMo, formatType2, formatType3 } from './telegram/bot';
 import { saveKnowledge } from './knowledge';
 import { writeSystemLog } from '../utils/system-log';
 import { logger } from '../utils/logger';
+import { pipelineRunner } from './pipeline-runner';
 
 // ── WORKFLOW_LOG helpers ────────────────────────────────────────────────────
 
@@ -104,8 +105,9 @@ async function w1_autoEnrich(event: AgentEvent): Promise<void> {
   const status = ((event.data.status as string) || '').toUpperCase();
   // Only auto-enrich HOT/WARM manual leads. QUALIFYING = email lead — Mo decides when to enrich.
   if (status !== 'HOT' && status !== 'WARM') return;
-  // Don't auto-enrich email/website leads — they already have the contact, enrichment adds little
-  if ((event.data.source as string) === 'website') return;
+  // Don't auto-enrich email/website leads — Agent-18 handles those directly
+  const source = (event.data.source as string || '').toLowerCase();
+  if (source === 'email' || source === 'website') return;
   if (!guardStart('W1', event.entityId)) return;
 
   const startedAt = new Date().toISOString();
@@ -288,52 +290,107 @@ async function w4_enrichedReady(event: AgentEvent): Promise<void> {
   }
 }
 
-// ── W5: Daily 7am — stale lead rescue ──────────────────────────────────────
+// ── W5: Daily 7am — morning briefing + stale lead rescue ────────────────────
 
-async function w5_staleLead(): Promise<void> {
+async function w5_morningBriefing(): Promise<void> {
   const entityId = `W5-${new Date().toISOString().substring(0, 10)}`;
   if (!guardStart('W5', entityId)) return;
 
   const startedAt = new Date().toISOString();
-  await logWF({ workflowId: 'W5', workflowName: 'Stale Lead Auto-Enrich', trigger: 'cron:daily-7am', entityName: 'system', status: 'RUNNING', startedAt });
+  await logWF({ workflowId: 'W5', workflowName: 'Morning Briefing', trigger: 'cron:daily-7am', entityName: 'system', status: 'RUNNING', startedAt });
 
   try {
     const rows = await readSheet(SHEETS.LEAD_MASTER);
     const now = Date.now();
     const STALE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours
-    let staleCount = 0;
 
+    // ── 1. Count stale unenriched leads ──────────────────────────────────────
+    const staleLeads: { company: string; age: number }[] = [];
     for (const row of rows.slice(1)) {
       const enrichStatus = row[17] || ''; // col R
-      const timestamp = row[1] || '';     // col B
+      const companyName  = row[2]  || 'Unknown';
+      const timestamp    = row[1]  || '';
 
-      // Rescue any unenriched lead — no score gate (email leads score 0 but still need enrichment)
       if (enrichStatus !== 'PENDING' && enrichStatus !== '' && enrichStatus !== 'QUALIFYING') continue;
-
       const age = now - new Date(timestamp).getTime();
-      if (age >= STALE_THRESHOLD) staleCount++;
+      if (age >= STALE_THRESHOLD) {
+        staleLeads.push({ company: companyName, age: Math.floor(age / 3600000) });
+      }
     }
 
-    if (staleCount === 0) {
-      await logWF({ workflowId: 'W5', workflowName: 'Stale Lead Auto-Enrich', trigger: 'cron:daily-7am', entityName: 'system', status: 'SKIPPED', startedAt, notes: 'No stale leads found' });
-      return;
+    // ── 2. Collect blocked pipelines ─────────────────────────────────────────
+    const blocked = pipelineRunner.getBlocked();
+
+    // ── 3. Count PENDING/QUALIFYING leads ────────────────────────────────────
+    const pendingLeads = rows.slice(1).filter(row => {
+      const status = (row[12] || '').toUpperCase();
+      return status === 'PENDING' || status === 'QUALIFYING' || status === '01 NEW INQUIRY' || status === '02 QUALIFYING';
+    });
+
+    // ── 4. Build morning briefing message ────────────────────────────────────
+    const sections: { label: string; content: string }[] = [];
+
+    const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    sections.push({ label: 'DATE', content: today });
+
+    sections.push({
+      label: `PIPELINE OVERVIEW`,
+      content:
+        `Active leads: ${rows.length - 1}\n` +
+        `Pending/qualifying: ${pendingLeads.length}\n` +
+        `Active pipelines: ${pipelineRunner.getActive().length}\n` +
+        `Blocked pipelines: ${blocked.length}`,
+    });
+
+    if (staleLeads.length > 0) {
+      sections.push({
+        label: `STALE (UNENRICHED) LEADS — ${staleLeads.length}`,
+        content: staleLeads.slice(0, 10).map(l => `  • ${l.company} (${l.age}h old)`).join('\n') +
+          (staleLeads.length > 10 ? `\n  ...and ${staleLeads.length - 10} more` : '') +
+          '\n\nRun /enrich to process them.',
+      });
     }
 
-    const enrichAgent = getAgent('/enrich');
-    if (!enrichAgent) throw new Error('Agent-02 (/enrich) not found in registry');
+    if (blocked.length > 0) {
+      sections.push({
+        label: `BLOCKED PIPELINES — ${blocked.length}`,
+        content: blocked.map(p =>
+          `  • ${p.companyName} | step: ${p.currentStep}\n    Reason: ${p.blockedReason || 'unknown'}\n    Run: /resume ${p.companyName}`
+        ).join('\n\n'),
+      });
+    }
 
-    logger.info(`[WorkflowEngine] W5: found ${staleCount} stale leads — triggering enrichment`);
-    await enrichAgent.run(systemCtx('/enrich'));
+    sections.push({
+      label: 'QUICK ACTIONS',
+      content:
+        `/enrich — process stale leads\n` +
+        `/status — full pipeline dashboard\n` +
+        `/deadlines — check upcoming deadlines\n` +
+        `/briefing — re-run this briefing manually`,
+    });
+
+    await sendToMo(formatType3('🌅 Good Morning — StandMe Daily Briefing', sections));
+
+    // ── 5. Auto-enrich stale leads if any ────────────────────────────────────
+    if (staleLeads.length > 0) {
+      const enrichAgent = getAgent('/enrich');
+      if (enrichAgent) {
+        logger.info(`[WorkflowEngine] W5: triggering enrichment for ${staleLeads.length} stale leads`);
+        await enrichAgent.run(systemCtx('/enrich')).catch(err =>
+          logger.error(`[WorkflowEngine] W5 enrichment failed: ${err.message}`)
+        );
+      }
+    }
 
     await logWF({
-      workflowId: 'W5', workflowName: 'Stale Lead Auto-Enrich',
+      workflowId: 'W5', workflowName: 'Morning Briefing',
       trigger: 'cron:daily-7am', entityName: 'system',
       status: 'DONE', startedAt, completedAt: new Date().toISOString(),
-      steps: `${staleCount} stale leads found, triggered agent-02`,
+      steps: `${staleLeads.length} stale leads, ${blocked.length} blocked pipelines, briefing sent to Mo`,
     });
   } catch (err: any) {
     logger.error(`[WorkflowEngine] W5 failed: ${err.message}`);
-    await logWF({ workflowId: 'W5', workflowName: 'Stale Lead Auto-Enrich', trigger: 'cron:daily-7am', entityName: 'system', status: 'FAILED', startedAt, notes: err.message });
+    await logWF({ workflowId: 'W5', workflowName: 'Morning Briefing', trigger: 'cron:daily-7am', entityName: 'system', status: 'FAILED', startedAt, notes: err.message });
   } finally {
     guardEnd('W5', entityId);
   }
@@ -373,15 +430,15 @@ export function initWorkflowEngine(): void {
   }, { timezone: 'Europe/Berlin' });
 
   cron.schedule('0 7 * * *', () => {
-    w5_staleLead().catch(err =>
+    w5_morningBriefing().catch(err =>
       logger.error(`[WorkflowEngine] W5 cron error: ${err.message}`)
     );
   }, { timezone: 'Europe/Berlin' });
 
   logger.info('[WorkflowEngine] ✓ 5 workflows active (W1-W5) | 2 cron jobs registered');
-  logger.info('[WorkflowEngine]   W1: HOT/WARM lead → auto-enrich (3 min delay)');
+  logger.info('[WorkflowEngine]   W1: HOT/WARM manual leads only → auto-enrich (3 min delay)');
   logger.info('[WorkflowEngine]   W2: Deal won → lesson + case study prompt');
   logger.info('[WorkflowEngine]   W3: Mon 9am → scoring modifiers from lessons → KB');
   logger.info('[WorkflowEngine]   W4: Lead enriched (readiness≥7) → notify Mo');
-  logger.info('[WorkflowEngine]   W5: Daily 7am → stale lead auto-rescue');
+  logger.info('[WorkflowEngine]   W5: Daily 7am → morning briefing + stale lead rescue');
 }

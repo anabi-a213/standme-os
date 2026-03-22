@@ -11,6 +11,7 @@ import { detectLanguage, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
+import { pipelineRunner } from '../services/pipeline-runner';
 
 export class LeadIntakeAgent extends BaseAgent {
   config: AgentConfig = {
@@ -186,6 +187,11 @@ export class LeadIntakeAgent extends BaseAgent {
     const leadSheetLink = sheetUrl(SHEETS.LEAD_MASTER);
     const dupNote = existingDup ? `\n⚠️ Possible duplicate flagged — Mo notified to review.` : '';
     await this.respond(ctx.chatId, `✅ Lead captured: ${companyName} — ${scoreResult.status} (${scoreResult.total}/10)${dupNote}${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
+
+    // Start pipeline for HOT/WARM manual leads (COLD leads don't warrant automatic pipeline)
+    if (scoreResult.status === 'HOT' || scoreResult.status === 'WARM') {
+      pipelineRunner.start(leadId, companyName);
+    }
 
     return {
       success: true,

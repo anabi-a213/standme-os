@@ -6,9 +6,12 @@
  * - Recent interactions across ALL agents (not just Brain)
  * - Provides context string any agent can inject into its AI prompt
  *
- * This ensures agents never respond "in a vacuum" — they know what you've been
- * working on even if you switch commands or agents mid-conversation.
+ * Thread context is now persisted to the Knowledge Base so sessions survive
+ * Railway restarts. Saves are debounced (1 per user per 30s) to avoid quota hits.
  */
+
+import { saveKnowledge, updateKnowledge, searchKnowledge, sourceExistsInKnowledge } from './knowledge';
+import { logger } from '../utils/logger';
 
 interface ThreadEntry {
   timestamp: number;
@@ -29,6 +32,10 @@ interface UserThread {
 const threads = new Map<string, UserThread>();
 const MAX_ENTRIES = 20;
 const SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours — stale sessions reset focus
+
+// Debounce KB saves: track last save time per userId
+const lastKbSave = new Map<string, number>();
+const KB_SAVE_DEBOUNCE_MS = 30_000; // save at most once per 30s per user
 
 function getOrCreate(userId: string): UserThread {
   let thread = threads.get(userId);
@@ -73,6 +80,7 @@ export function getThreadContext(userId: string): string {
 /**
  * Save an agent interaction to the user's thread.
  * Call this after every agent execution.
+ * Persists to KB (debounced) so sessions survive Railway restarts.
  */
 export function saveThreadEntry(
   userId: string,
@@ -103,6 +111,79 @@ export function saveThreadEntry(
   }
 
   threads.set(userId, thread);
+
+  // Persist to KB (debounced) — skip SYSTEM user (scheduled runs have no thread to restore)
+  if (userId !== 'SYSTEM') {
+    persistThreadToKB(userId, thread).catch(() => {}); // fire-and-forget, non-blocking
+  }
+}
+
+/** Persist a user's thread to KB (debounced at 30s per user) */
+async function persistThreadToKB(userId: string, thread: UserThread): Promise<void> {
+  const now = Date.now();
+  const lastSave = lastKbSave.get(userId) || 0;
+  if (now - lastSave < KB_SAVE_DEBOUNCE_MS) return; // debounce
+
+  lastKbSave.set(userId, now);
+
+  const source = `thread-context-${userId}`;
+  const content = JSON.stringify({
+    activeFocus: thread.activeFocus,
+    lastSeen:    thread.lastSeen,
+    entries:     thread.entries.slice(-10), // save last 10 entries only
+  });
+
+  try {
+    const exists = await sourceExistsInKnowledge(source);
+    if (exists) {
+      await updateKnowledge(source, { content, lastUpdated: new Date().toISOString() } as any);
+    } else {
+      await saveKnowledge({
+        source,
+        sourceType: 'system',
+        topic:      `thread-context-${userId}`,
+        tags:       `thread,context,user-${userId}`,
+        content,
+      });
+    }
+  } catch (err: any) {
+    logger.warn(`[ThreadContext] KB persist failed for ${userId}: ${err.message}`);
+  }
+}
+
+/**
+ * Restore user thread sessions from KB on startup.
+ * Call this in index.ts after KB is ready.
+ */
+export async function loadThreadsFromKB(): Promise<void> {
+  try {
+    const entries = await searchKnowledge('thread-context', 50);
+    const threadEntries = entries.filter(e => e.source?.startsWith('thread-context-'));
+    let loaded = 0;
+
+    for (const entry of threadEntries) {
+      try {
+        const userId = entry.source.replace('thread-context-', '');
+        const data = JSON.parse(entry.content);
+
+        // Only restore sessions that are less than 4 hours old
+        const age = Date.now() - (data.lastSeen || 0);
+        if (age > SESSION_TIMEOUT_MS) continue;
+
+        const thread: UserThread = {
+          entries:     data.entries || [],
+          activeFocus: data.activeFocus,
+          lastSeen:    data.lastSeen || Date.now(),
+        };
+        threads.set(userId, thread);
+        loaded++;
+      } catch { /* corrupt entry — skip */ }
+    }
+
+    if (loaded > 0) logger.info(`[ThreadContext] Restored ${loaded} user thread(s) from KB`);
+  } catch (err: any) {
+    logger.warn(`[ThreadContext] Failed to load threads from KB: ${err.message}`);
+  }
 }
 
 /**

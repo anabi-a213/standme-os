@@ -44,6 +44,9 @@ import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
 import { EmailFunnelAgent } from './agents/19-email-funnel.agent';
 import { WoodpeckerSyncAgent } from './agents/20-woodpecker-sync.agent';
 import { initWorkflowEngine } from './services/workflow-engine';
+import { pipelineRunner } from './services/pipeline-runner';
+import { loadThreadsFromKB } from './services/thread-context';
+import { scanPendingApprovalsFromKB } from './services/approvals';
 
 
 async function main() {
@@ -121,6 +124,18 @@ async function main() {
   // (engine calls getAgent() lazily at runtime — registry must be populated first)
   initWorkflowEngine();
 
+  // Restore persistent state from KB (pipelines + thread sessions + pending approvals)
+  // Non-blocking — startup continues even if KB is temporarily unavailable
+  Promise.all([
+    pipelineRunner.loadFromKB(),
+    loadThreadsFromKB(),
+  ]).catch(err => logger.warn(`[Startup] KB restore failed: ${err.message}`));
+
+  // Notify Mo of any approvals that were pending before the last restart
+  scanPendingApprovalsFromKB().then(async (msg) => {
+    if (msg) await sendToMo(msg).catch(() => {});
+  }).catch(() => {});
+
   // Initialize Telegram bot (skip polling in local dashboard-only mode)
   if (process.env.DASHBOARD_ONLY === 'true') {
     logger.info('[Bot] DASHBOARD_ONLY mode — Telegram polling disabled');
@@ -145,7 +160,10 @@ async function main() {
         `/newlead — Add a new lead\n` +
         `/enrich — Enrich pending leads\n` +
         `/brief [client] — Generate concept brief\n` +
-        `/status — Pipeline dashboard\n` +
+        `/status — Pipeline dashboard (all active leads)\n` +
+        `/resume [company] — Resume a blocked pipeline step\n` +
+        `/retry [company] — Retry last failed step\n` +
+        `/briefing — Morning briefing with blocked items\n` +
         `/deadlines — Check deadlines\n` +
         `/reminders — Client follow-ups\n` +
         `/movecard — Move a card to a pipeline stage\n` +
@@ -189,11 +207,107 @@ async function main() {
     if (text === '/help') {
       await bot.sendMessage(msg.chat.id,
         `*StandMe OS Help*\n\n` +
-        `18 agents running. All actions require Mo's approval.\n` +
+        `20 agents running. All actions require Mo's approval.\n` +
         `Type any command or ask a question with /ask.\n\n` +
+        `Pipeline commands: /status | /resume [company] | /retry [company] | /briefing\n\n` +
         `Your role: ${ctx.role}`,
         { parse_mode: 'Markdown' }
       );
+      return;
+    }
+
+    // ── /status — pipeline dashboard ─────────────────────────────────────────
+    if (text === '/status') {
+      const active = pipelineRunner.getActive();
+      if (active.length === 0) {
+        await bot.sendMessage(msg.chat.id, '✅ No active pipelines. All leads are at rest or complete.');
+      } else {
+        const lines = active.map(p => {
+          const statusEmoji = p.status === 'BLOCKED' ? '🔴' : p.status === 'RUNNING' ? '🟡' : '🟢';
+          const blocked = p.status === 'BLOCKED' ? `\n  ⚠️ ${p.blockedReason}\n  → /resume ${p.companyName}` : '';
+          return `${statusEmoji} *${p.companyName}* — ${p.currentStep} (${p.status})${blocked}`;
+        }).join('\n\n');
+        await bot.sendMessage(msg.chat.id, `*Pipeline Dashboard — ${active.length} active*\n\n${lines}`, { parse_mode: 'Markdown' });
+      }
+      return;
+    }
+
+    // ── /resume [company] — resume a blocked pipeline ────────────────────────
+    if (text.startsWith('/resume')) {
+      const companyArg = text.replace('/resume', '').trim();
+      if (!companyArg) {
+        const blocked = pipelineRunner.getBlocked();
+        if (blocked.length === 0) {
+          await bot.sendMessage(msg.chat.id, 'No blocked pipelines to resume.');
+        } else {
+          const list = blocked.map(p => `  • ${p.companyName} (${p.currentStep}): ${p.blockedReason || 'unknown reason'}\n    /resume ${p.companyName}`).join('\n\n');
+          await bot.sendMessage(msg.chat.id, `*Blocked Pipelines:*\n\n${list}`, { parse_mode: 'Markdown' });
+        }
+        return;
+      }
+      const pipeline = pipelineRunner.findByCompany(companyArg);
+      if (!pipeline) {
+        await bot.sendMessage(msg.chat.id, `No active pipeline found for "${companyArg}".`);
+        return;
+      }
+      const next = pipelineRunner.resume(pipeline.leadId);
+      if (!next) {
+        await bot.sendMessage(msg.chat.id, `Pipeline for "${pipeline.companyName}" is ${pipeline.status} — nothing to resume.`);
+        return;
+      }
+      await bot.sendMessage(msg.chat.id, `▶️ Resuming pipeline for *${pipeline.companyName}* at step *${pipeline.currentStep}*...`, { parse_mode: 'Markdown' });
+      const agent = getAgent(next.command);
+      if (agent) {
+        ctx.command = next.command;
+        ctx.args    = next.args;
+        await agent.run(ctx);
+      } else {
+        await bot.sendMessage(msg.chat.id, `No agent found for command ${next.command}.`);
+      }
+      return;
+    }
+
+    // ── /briefing — trigger morning briefing manually ─────────────────────────
+    if (text === '/briefing') {
+      const w5Agent = getAgent('/enrich'); // reuse W5 logic via workflow engine pattern
+      // Build a quick briefing inline
+      const blocked = pipelineRunner.getBlocked();
+      const active  = pipelineRunner.getActive();
+      const sections = [
+        `*Active pipelines:* ${active.length}`,
+        `*Blocked pipelines:* ${blocked.length}${blocked.length > 0 ? '\n' + blocked.map(p => `  🔴 ${p.companyName} — ${p.currentStep}: ${p.blockedReason || 'unknown'}\n  → /resume ${p.companyName}`).join('\n') : ''}`,
+        blocked.length > 0 ? '' : '✅ All pipelines are clear.',
+        `\nFull commands:\n/status — pipeline dashboard\n/enrich — enrich stale leads\n/deadlines — check deadlines`,
+      ].filter(Boolean).join('\n\n');
+      await bot.sendMessage(msg.chat.id, `*📋 StandMe Briefing*\n\n${sections}`, { parse_mode: 'Markdown' });
+      return;
+    }
+
+    // ── /retry [company] — alias for /resume ─────────────────────────────────
+    if (text.startsWith('/retry')) {
+      const companyArg = text.replace('/retry', '').trim();
+      const pipeline = companyArg ? pipelineRunner.findByCompany(companyArg) : null;
+      if (!pipeline) {
+        const blocked = pipelineRunner.getBlocked();
+        if (blocked.length === 0) {
+          await bot.sendMessage(msg.chat.id, 'No blocked pipelines to retry.');
+        } else {
+          await bot.sendMessage(msg.chat.id, `Use /resume ${blocked[0].companyName} to retry the last blocked pipeline.`);
+        }
+        return;
+      }
+      const next = pipelineRunner.resume(pipeline.leadId);
+      if (!next) {
+        await bot.sendMessage(msg.chat.id, `Pipeline for "${pipeline.companyName}" is ${pipeline.status} — nothing to retry.`);
+        return;
+      }
+      await bot.sendMessage(msg.chat.id, `🔄 Retrying *${pipeline.companyName}* at step *${pipeline.currentStep}*...`, { parse_mode: 'Markdown' });
+      const agent = getAgent(next.command);
+      if (agent) {
+        ctx.command = next.command;
+        ctx.args    = next.args;
+        await agent.run(ctx);
+      }
       return;
     }
 

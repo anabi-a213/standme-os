@@ -9,6 +9,7 @@ import { getFolderIdForCategory } from '../config/drive-folders';
 import { generateBrief, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { sendToMo, formatType1, formatType2, sendToTeam } from '../services/telegram/bot';
+import { pipelineRunner } from '../services/pipeline-runner';
 
 export class ConceptBriefAgent extends BaseAgent {
   config: AgentConfig = {
@@ -52,6 +53,12 @@ export class ConceptBriefAgent extends BaseAgent {
     // brand guidelines optional
 
     if (missing.length > 0) {
+      // Block the pipeline so /status shows it as needing attention
+      const leadId = leadRow.data[0];
+      if (leadId) {
+        pipelineRunner.block(leadId, `Missing required fields for brief: ${missing.join(', ')}`);
+      }
+
       const contactEmail = leadRow.data[4];
       if (contactEmail) {
         // Draft info request email
@@ -81,7 +88,7 @@ export class ConceptBriefAgent extends BaseAgent {
           confidence: 'MEDIUM',
         };
       } else {
-        await this.respond(ctx.chatId, `Missing data for brief: ${missing.join(', ')}. No contact email to request info.`);
+        await this.respond(ctx.chatId, `Missing data for brief: ${missing.join(', ')}. No contact email to request info.\nPipeline blocked — run /resume ${companyName} once data is added.`);
         return { success: false, message: 'Missing data, no email', confidence: 'LOW' };
       }
     }
@@ -173,6 +180,12 @@ export class ConceptBriefAgent extends BaseAgent {
     }
 
     await this.respond(ctx.chatId, `✅ Brief generated for ${companyName}.\nDoc: ${doc.url}`);
+
+    // Advance pipeline if one exists for this lead
+    const leadId = leadRow.data[0];
+    if (leadId) {
+      pipelineRunner.advance(leadId, { docUrl: doc.url, briefGeneratedAt: new Date().toISOString() });
+    }
 
     return {
       success: true,

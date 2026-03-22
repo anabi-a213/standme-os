@@ -3,14 +3,19 @@
  * Keeps callbacks in memory so approval/reject handlers in index.ts
  * can execute the real action registered by any agent.
  *
- * ⚠️  IN-MEMORY ONLY — approvals do NOT survive a Railway redeploy.
- *     If Mo clicks /approve_xxx after a restart it will return null.
- *     For bulk outreach approvals, reconstructBulkApproval() in the
- *     outreach agent handles this via a Knowledge Base fallback.
- *     All other approval types require re-running the original command.
+ * Callbacks are NOT serialisable, so full persistence is not possible.
+ * However, approval *metadata* (action, data, timestamp) IS persisted to
+ * the Knowledge Base so that on restart, index.ts can show Mo a
+ * human-readable summary of what was pending, rather than a cryptic
+ * "approval not found" message.
+ *
+ * For bulk outreach, reconstructBulkApproval() in the outreach agent still
+ * provides full re-execution from KB. Other approval types still require
+ * re-running the original command after a Railway restart.
  */
 
 import { logger } from '../utils/logger';
+import { saveKnowledge, updateKnowledge, sourceExistsInKnowledge, searchKnowledge } from './knowledge';
 
 export interface PendingApproval {
   action: string;
@@ -33,7 +38,84 @@ export function registerApproval(id: string, approval: PendingApproval): void {
     if (now - val.timestamp > 86400000) pendingApprovals.delete(key);
   }
   pendingApprovals.set(id, approval);
-  logger.info(`[Approvals] Registered: ${id} — "${approval.action}" (in-memory only — lost on restart) | total pending: ${pendingApprovals.size}`);
+  logger.info(`[Approvals] Registered: ${id} — "${approval.action}" | total pending: ${pendingApprovals.size}`);
+
+  // Persist metadata to KB so restarts show a human-readable pending list
+  // (callbacks cannot be serialised — re-running the command is still required)
+  persistApprovalToKB(id, approval).catch(() => {});
+}
+
+async function persistApprovalToKB(id: string, approval: PendingApproval): Promise<void> {
+  const source = `pending-approval-${id}`;
+  const content = JSON.stringify({
+    id,
+    action:    approval.action,
+    data:      approval.data,
+    timestamp: approval.timestamp,
+  });
+  try {
+    const exists = await sourceExistsInKnowledge(source);
+    if (exists) {
+      await updateKnowledge(source, { content, lastUpdated: new Date().toISOString() } as any);
+    } else {
+      await saveKnowledge({
+        source,
+        sourceType: 'system',
+        topic:      'pending-approval',
+        tags:       `approval,pending,${id}`,
+        content,
+      });
+    }
+  } catch { /* non-critical — in-memory callbacks are the source of truth */ }
+}
+
+async function deleteApprovalFromKB(id: string): Promise<void> {
+  try {
+    // Mark as executed in KB (cannot delete rows from Sheets — overwrite instead)
+    const source = `pending-approval-${id}`;
+    const exists = await sourceExistsInKnowledge(source);
+    if (exists) {
+      await updateKnowledge(source, {
+        content:     JSON.stringify({ id, status: 'EXECUTED', executedAt: new Date().toISOString() }),
+        tags:        `approval,executed,${id}`,
+        lastUpdated: new Date().toISOString(),
+      } as any);
+    }
+  } catch { /* non-critical */ }
+}
+
+/**
+ * On startup, scan KB for any pending approvals that were registered before a restart.
+ * Notifies Mo that they are no longer valid and must be re-run.
+ * Returns a summary string (empty string if nothing pending).
+ */
+export async function scanPendingApprovalsFromKB(): Promise<string> {
+  try {
+    const entries = await searchKnowledge('pending-approval', 50);
+    const pending = entries.filter(e => {
+      if (!e.source?.startsWith('pending-approval-')) return false;
+      try {
+        const data = JSON.parse(e.content);
+        // Exclude already-executed entries and entries older than 24h
+        if (data.status === 'EXECUTED') return false;
+        if (Date.now() - (data.timestamp || 0) > 86400000) return false;
+        return true;
+      } catch { return false; }
+    });
+
+    if (pending.length === 0) return '';
+
+    const lines = pending.map(e => {
+      try {
+        const data = JSON.parse(e.content);
+        return `  • ${data.action} (ID: ${data.id})`;
+      } catch { return `  • ${e.source}`; }
+    });
+
+    return `⚠️ ${pending.length} approval(s) were pending before the server restarted:\n${lines.join('\n')}\n\nRe-run the original command to get a fresh approval token.`;
+  } catch {
+    return '';
+  }
 }
 
 export async function handleApproval(id: string, approved: boolean): Promise<string | null> {
@@ -88,6 +170,7 @@ export async function handleApproval(id: string, approved: boolean): Promise<str
   // Only reach here on success — safe to delete now.
   executingApprovals.delete(id);
   pendingApprovals.delete(id);
+  deleteApprovalFromKB(id).catch(() => {}); // mark as executed in KB
   logger.info(`[Approvals] Executed: ${id} — ${approved ? 'APPROVED' : 'REJECTED'}`);
   return result;
 }

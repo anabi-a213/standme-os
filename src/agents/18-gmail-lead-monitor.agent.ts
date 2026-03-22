@@ -17,6 +17,7 @@ import { sendToMo, formatType1, formatType2, formatType3 } from '../services/tel
 import { registerApproval } from '../services/approvals';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
+import { pipelineRunner } from '../services/pipeline-runner';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -488,8 +489,12 @@ Return ONLY the JSON object. No explanation.`;
       agentId: this.config.id,
       entityId: leadId,
       entityName: d.companyName,
-      data: { status: 'QUALIFYING', showName: d.showName, contactEmail: d.contactEmail, source: 'website' },
+      data: { status: 'QUALIFYING', showName: d.showName, contactEmail: d.contactEmail, source: 'email' },
     });
+
+    // Start pipeline (email leads start at BRIEF step — enrichment is less critical here
+    // since we already have the email. Pipeline will wait until client replies with full data)
+    pipelineRunner.start(leadId, d.companyName);
 
     // Send welcome email immediately (no budget mention)
     const welcomeSubject = `Your ${d.showName || 'Exhibition Stand'} Request — We're On It`;

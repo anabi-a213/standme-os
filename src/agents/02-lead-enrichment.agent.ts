@@ -9,6 +9,7 @@ import { saveKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '.
 import { logger } from '../utils/logger';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
+import { pipelineRunner } from '../services/pipeline-runner';
 
 export class LeadEnrichmentAgent extends BaseAgent {
   config: AgentConfig = {
@@ -126,6 +127,9 @@ export class LeadEnrichmentAgent extends BaseAgent {
           data: { outreachReadiness: readiness, score: parseInt(lead.data[12] || '0'), showName: lead.data[6] || '' },
         });
 
+        // Advance pipeline if one is tracking this lead
+        pipelineRunner.advance(leadId, { dmTitle, readiness, enrichedAt: new Date().toISOString() });
+
         enriched++;
         conflictGuard.release(lockKey);
       } catch (err: any) {
@@ -144,6 +148,15 @@ export class LeadEnrichmentAgent extends BaseAgent {
     await this.respond(ctx.chatId, `✅ ${summary}${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
     await sendToMo(formatType2('Lead Enrichment Run', `${summary}${leadSheetLink ? `\n📊 [Lead Master](${leadSheetLink})` : ''}`));
 
-    return { success: true, message: summary, confidence: 'MEDIUM' };
+    return {
+      success:    true,
+      message:    summary,
+      confidence: 'MEDIUM',
+      data: {
+        enrichedCount: enriched,
+        totalCount:    leadsToEnrich.length,
+        targetCompany: targetCompany || null,
+      },
+    };
   }
 }
