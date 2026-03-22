@@ -151,20 +151,21 @@ export const INDUSTRY = {
   },
 
   sizeGuide: {
-    small: { sqm: '9–18 sqm', type: 'Corner or inline', budget: '€10,000–€25,000', signal: 'Entry/test' },
-    medium: { sqm: '18–36 sqm', type: 'Island or peninsula', budget: '€25,000–€60,000', signal: 'Serious exhibitor' },
-    large: { sqm: '36–72 sqm', type: 'Island', budget: '€60,000–€120,000', signal: 'Major brand or regional HQ' },
-    premium: { sqm: '72 sqm+', type: 'Island / DD', budget: '€120,000+', signal: 'Tier-1 brand, needs white-glove' },
+    small: { sqm: '10–30 sqm', type: 'Corner or inline', budget: '€10,000–€20,000', signal: 'Entry/test' },
+    medium: { sqm: '30–50 sqm', type: 'Island or peninsula', budget: '€20,000–€29,000', signal: 'Serious exhibitor' },
+    large: { sqm: '50–72 sqm', type: 'Island', budget: '€29,000–€39,000', signal: 'Major brand or regional HQ' },
+    premium: { sqm: '72 sqm+', type: 'Island / DD', budget: '€39,000+', signal: 'Tier-1 brand, needs white-glove' },
   },
 
   budgetSignals: `
-BUDGET READING FROM STAND SIZE:
-- Prospect says "9-18 sqm" → €10k–25k range. Small project. Good for pipeline volume.
-- Prospect says "18-36 sqm" → €25k–60k. Sweet spot for StandMe.
-- Prospect says "36-72 sqm" → €60k–120k. High value. Prioritise.
-- Prospect says "72sqm+" → €120k+. Major account. Mo should be involved from day one.
+BUDGET READING FROM STAND SIZE (StandMe pricing: base €10k-20k for 10-30sqm, then +€450/sqm above 30sqm):
+- Prospect says "10-30 sqm" → €10k–20k range. Entry level.
+- Prospect says "30-50 sqm" → €20k–29k (€20k base + €450 × extra sqm above 30). Sweet spot.
+- Prospect says "50-72 sqm" → €29k–39k. High value. Prioritise.
+- Prospect says "72sqm+" → €39k+. Major account. Mo should be involved from day one.
+- Quick formula above 30sqm: €20,000 + (sqm − 30) × €450
 - If budget sounds too low for stated size → flag it. Don't take a project that will lose money.
-- If no budget given → ask: "Are you working to a specific number, or should we advise on what's realistic for that size?"
+- If no budget given → do NOT mention pricing in first contact. Qualify interest first.
 `,
 
   buildProcess: `
@@ -434,12 +435,26 @@ COMMON OBJECTIONS AND HOW STANDME HANDLES THEM:
 `,
 
   pricingGuide: `
-STANDME PRICING SIGNALS (internal — not for client):
-- Never quote a price without knowing: size, show, complexity level, timeline, AV requirements
-- Per-sqm rough guide (custom build, Europe): €800-1,200 basic, €1,200-1,800 mid, €1,800-3,000+ premium
-- Add-ons that significantly increase budget: double-decker (+30-50%), heavy AV (+20-40%), rigging (+10-20%), rush (<8 weeks +15-25%)
-- MENA shows (DWTC) tend to be 10-20% less than equivalent European show due to local labour costs
-- Always build in Mo's approval before confirming any price to client
+STANDME PRICING (internal — NEVER share in first contact emails):
+- Base pricing: 10-30 sqm stands = €10,000–€20,000
+- Above 30 sqm: €20,000 + (sqm − 30) × €450 per sqm
+  Examples: 36sqm ≈ €22,700 | 50sqm ≈ €29,000 | 72sqm ≈ €38,900 | 100sqm ≈ €51,500
+- Add-ons: double-decker (+30-50%), heavy AV (+20-40%), rigging (+10-20%), rush <8 weeks (+15-25%)
+- MENA shows (DWTC) 10-20% less than equivalent European show (local labour costs)
+- CRITICAL: Never quote price without knowing size, show, complexity, timeline, AV requirements
+- Always Mo approval before confirming any price to client
+- EMAIL POLICY: NEVER mention budget or pricing in first outreach emails — qualify interest first
+`,
+
+  emailPolicy: `
+STANDME EMAIL POLICY (applies to ALL first contact and welcome emails):
+- NEVER mention pricing, budget ranges, or cost estimates in any first contact email
+- NEVER ask "what is your budget?" in a first email — this is a phone/call question
+- First email goal: confirm interest, understand the show + objectives, earn a conversation
+- Ask about: show name, stand size if not known, main objective for exhibiting
+- Budget conversations happen ONLY after initial interest is confirmed and a call/meeting is scheduled
+- This rule applies to: Agent-18 welcome emails, Agent-11 outreach emails, Brain-drafted emails
+- Violation of this rule damages brand positioning and client trust
 `,
 };
 
@@ -559,7 +574,7 @@ Ideal client: Serious brand, 18sqm+, confirmed budget, show within 6 months, wan
 
 === EXHIBITION INDUSTRY KNOWLEDGE ===
 Stand types: Shell scheme (organiser box, avoid), Space only (our world), Modular (reusable), Custom build (premium), Double-decker (72sqm+, €100k+)
-Budget guide: 9-18sqm = €10-25k | 18-36sqm = €25-60k | 36-72sqm = €60-120k | 72sqm+ = €120k+
+Budget guide: 10-30sqm = €10-20k | 30-50sqm = €20-29k (+€450/sqm above 30) | 50-72sqm = €29-39k | 72sqm+ = €39k+
 Build timeline: Brief → Concept (1-2w) → Approval → Technical drawings (1w) → Production (3-6w) → Logistics → Build → Show → Strip
 Timeline risk zones: <8 weeks = rush premium | <4 weeks = crisis, needs Mo approval
 Key DM titles: Marketing Director, Brand Manager, Head of Events, Marketing Manager, Exhibition Manager
@@ -598,6 +613,11 @@ Card stuck in same stage 14+ days → flag + suggest action
 Organiser portal deadline <2 weeks → remind + check
 Multiple shows overlapping → contractor availability risk
 New lead mentions show → check VERIFIED_SHOWS + check for duplicates in pipeline
+
+=== EMAIL POLICY (MANDATORY) ===
+NEVER mention pricing, budget, or cost in any first contact or welcome email.
+First email purpose: confirm interest, understand show + objectives, earn a conversation.
+Budget discussions happen only after initial interest confirmed and a call is scheduled.
 `;
 }
 
@@ -656,7 +676,7 @@ export const KNOWLEDGE_SEED: SeedEntry[] = [
     sourceType: 'manual',
     topic: 'industry',
     tags: 'budget, size, sqm, pricing, investment, cost',
-    content: 'Budget guide by size: 9-18sqm → €10-25k (entry). 18-36sqm → €25-60k (sweet spot). 36-72sqm → €60-120k (major brand). 72sqm+ → €120k+ (tier-1, Mo direct). Per sqm: €800-1,200 basic, €1,200-1,800 mid, €1,800-3,000+ premium. Add-ons: double-decker +30-50%, heavy AV +20-40%, rush (<8wks) +15-25%.',
+    content: 'Budget guide by size (StandMe pricing): 10-30sqm → €10k-20k (entry). Above 30sqm: €20k + (sqm-30)×€450. Examples: 36sqm≈€22.7k, 50sqm≈€29k, 72sqm≈€39k, 100sqm≈€51.5k. Add-ons: double-decker +30-50%, heavy AV +20-40%, rush <8wks +15-25%. NEVER mention pricing in first contact emails.',
   },
   {
     source: 'Exhibition Build Process',
@@ -770,7 +790,7 @@ export const KNOWLEDGE_SEED: SeedEntry[] = [
     sourceType: 'manual',
     topic: 'sales',
     tags: 'size, sqm, budget, pricing, conversion, estimate',
-    content: 'Size to budget quick read: 9-18sqm = €10-25k. 18-36sqm = €25-60k (StandMe sweet spot). 36-72sqm = €60-120k (high value, prioritise). 72sqm+ = €120k+ (Mo direct). If prospect states size and budget feels too low → flag gently. If no budget given → "Are you working to a number, or should we advise what\'s realistic for that size?"',
+    content: 'Size to budget quick read (StandMe pricing): 10-30sqm = €10-20k. Above 30sqm: €20k base + €450 per extra sqm (36sqm≈€22.7k, 50sqm≈€29k, 72sqm≈€39k). If budget feels too low for stated size → flag gently to Mo. If no budget given in first contact → do NOT ask about budget in first email; qualify interest and show objectives first.',
   },
   // ─── OPERATIONS ───
   {

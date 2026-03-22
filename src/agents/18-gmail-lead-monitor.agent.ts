@@ -16,6 +16,7 @@ import {
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
 import { registerApproval } from '../services/approvals';
 import { agentEventBus } from '../services/agent-event-bus';
+import { getAgent } from '../agents/registry';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -331,10 +332,10 @@ Return ONLY the JSON object. No explanation.`;
     showValidation: { valid: boolean; match: any; confidence: string }
   ): Promise<string> {
     const leadId = `SM-${Date.now()}`;
-    const score = this.scoreLead(d, showValidation.valid);
     const language = d.contactEmail.includes('.de') ? 'de' :
                      d.contactEmail.includes('.fr') ? 'fr' : 'en';
 
+    // All Mo-approved email leads enter as QUALIFYING — no scoring gate
     const leadData: Record<string, string> = {
       id: leadId,
       timestamp: new Date().toISOString(),
@@ -347,11 +348,11 @@ Return ONLY the JSON object. No explanation.`;
       standSize: d.standSize,
       budget: d.budget,
       industry: d.industry,
-      leadSource: 'email',
-      score: score.total.toString(),
-      scoreBreakdown: JSON.stringify(score.breakdown),
-      confidence: showValidation.confidence,
-      status: score.status,
+      leadSource: 'website',   // flag as direct/VIP lead
+      score: '0',
+      scoreBreakdown: '{}',
+      confidence: 'MEDIUM',
+      status: 'QUALIFYING',    // always QUALIFYING — Mo already approved
       trelloCardId: '',
       enrichmentStatus: 'PENDING',
       dmName: '',
@@ -360,56 +361,112 @@ Return ONLY the JSON object. No explanation.`;
       dmEmail: d.contactEmail,
       outreachReadiness: '',
       language,
-      notes: `Source: Gmail. Website: ${d.website || 'N/A'}. ${d.notes || ''}`.trim(),
+      notes: `Source: Website/Email. Website: ${d.website || 'not provided'}. ${d.notes || ''}`.trim(),
     };
 
     await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
 
-    // Publish event — W1 will auto-enrich HOT/WARM leads, W4 notifies Mo when enriched
-    agentEventBus.publish('email.lead.received', {
-      agentId: this.config.id,
-      entityId: leadId,
-      entityName: d.companyName,
-      data: { status: score.status, score: score.total, showName: d.showName, contactEmail: d.contactEmail, source: 'gmail' },
-    });
+    // Always create Trello card — every approved lead enters the pipeline
+    let trelloCardId = '';
+    const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+    const list = await findListByName(boardId, '01 — New Inquiry').catch(() => null);
+    if (list) {
+      const card = await createCard(
+        list.id,
+        `${d.companyName} — ${d.showName || 'New Inquiry'}`,
+        `Lead ID: ${leadId}\nSource: Website/Email ⭐\n` +
+        `Company: ${d.companyName}\nContact: ${d.contactName} <${d.contactEmail}>\n` +
+        `Show: ${d.showName || 'TBC'}\nSize: ${d.standSize || 'TBC'} sqm\n` +
+        `Industry: ${d.industry || 'TBC'}\nWebsite: ${d.website || 'not provided'}\n` +
+        (d.notes ? `\nNotes: ${d.notes}` : '')
+      ).catch(() => null);
+      if (card) trelloCardId = card.id;
+    }
 
+    // Save to Knowledge Base so /brief and /enrich can find this lead
     await saveKnowledge({
       source: `lead-${leadId}`,
       sourceType: 'sheet',
       topic: d.companyName,
-      tags: `lead,company,email-source,${(d.industry || '').toLowerCase()},${(d.showName || '').toLowerCase().replace(/\s+/g, '-')},${score.status.toLowerCase()}`,
-      content: `${d.companyName} (${d.industry || 'unknown industry'}) attending ${d.showName || 'unknown show'}. Lead score: ${score.total}/10 (${score.status}). Contact: ${d.contactName || 'unknown'} <${d.contactEmail}>. Budget: ${d.budget || 'unknown'}. Stand: ${d.standSize || 'unknown'} sqm. Website: ${d.website || 'N/A'}. Source: email.`,
+      tags: `lead,company,website-source,qualifying,${(d.industry || '').toLowerCase()},${(d.showName || '').toLowerCase().replace(/\s+/g, '-')}`,
+      content: `${d.companyName} (${d.industry || 'unknown industry'}) — website lead. Show: ${d.showName || 'TBC'}. Contact: ${d.contactName || 'unknown'} <${d.contactEmail}>. Stand: ${d.standSize || 'TBC'} sqm. Website: ${d.website || 'not provided'}. Status: QUALIFYING.`,
     });
 
-    // Create Trello card for HOT/WARM
-    let trelloCardId = '';
-    if (score.status === 'HOT' || score.status === 'WARM') {
-      const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
-      const list = await findListByName(boardId, '01 — New Inquiry').catch(() => null);
-      if (list) {
-        const card = await createCard(
-          list.id,
-          `${d.companyName} — ${d.showName || 'Unknown Show'}`,
-          `Lead ID: ${leadId}\nScore: ${score.total}/10 (${score.status})\nSource: Gmail\n` +
-          `Company: ${d.companyName}\nContact: ${d.contactName} <${d.contactEmail}>\n` +
-          `Show: ${d.showName || 'N/A'}\nSize: ${d.standSize || 'N/A'} sqm\n` +
-          `Budget: ${d.budget || 'N/A'}\nIndustry: ${d.industry || 'N/A'}\n` +
-          `Website: ${d.website || 'N/A'}\n` +
-          (d.notes ? `\nNotes: ${d.notes}` : '')
-        ).catch(() => null);
-        if (card) trelloCardId = card.id;
-      }
-    }
+    // Publish event
+    agentEventBus.publish('email.lead.received', {
+      agentId: this.config.id,
+      entityId: leadId,
+      entityName: d.companyName,
+      data: { status: 'QUALIFYING', showName: d.showName, contactEmail: d.contactEmail, source: 'website' },
+    });
 
-    const emoji = score.status === 'HOT' ? '🔥' : score.status === 'WARM' ? '🟡' : '❄️';
+    // Step 1: Send welcome email immediately (no budget mention)
+    await this.sendWelcomeEmail(d, leadId).catch(() => null);
+
+    // Step 2: Auto-enrich after 2 minutes
+    setTimeout(async () => {
+      const enrichAgent = getAgent('/enrich');
+      if (enrichAgent) {
+        await enrichAgent.run({
+          userId: 'SYSTEM', chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
+          command: '/enrich', args: '', role: 'ADMIN' as any, language: 'en',
+        }).catch(() => null);
+      }
+    }, 2 * 60 * 1000);
+
+    // Step 3: Generate AI concept brief after 3 minutes
+    setTimeout(async () => {
+      const briefAgent = getAgent('/brief');
+      if (briefAgent) {
+        await briefAgent.run({
+          userId: 'SYSTEM', chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
+          command: '/brief', args: d.companyName, role: 'ADMIN' as any, language: 'en',
+        }).catch(() => null);
+      }
+    }, 3 * 60 * 1000);
+
     return (
-      `${emoji} *Lead Created: ${d.companyName}*\n` +
-      `Score: ${score.total}/10 (${score.status})\n` +
-      `Show: ${d.showName || 'N/A'} ${showValidation.valid ? '✅' : '⚠️'}\n` +
+      `⭐ *Website Lead Created: ${d.companyName}*\n` +
+      `Status: QUALIFYING\n` +
+      `Show: ${d.showName || 'TBC'} ${showValidation.valid ? '✅' : ''}\n` +
       `Contact: ${d.contactName} — ${d.contactEmail}\n` +
       `Lead ID: ${leadId}\n` +
-      (trelloCardId ? `Trello card created ✅\n` : '') +
-      `\nUse /enrich ${d.companyName} to enrich, or /brief ${d.companyName} for a concept brief.`
+      (trelloCardId ? `Trello card: 01 — New Inquiry ✅\n` : '') +
+      `\n✉️ Welcome email sent\n` +
+      `⏳ Enrichment in 2 min | AI Brief in 3 min`
+    );
+  }
+
+  // ─── Send Welcome Email (no budget, no pricing) ─────────────────────────
+
+  private async sendWelcomeEmail(d: ExtractedLead, leadId: string): Promise<void> {
+    const missingInfo: string[] = [];
+    if (!d.website) missingInfo.push('your company website');
+    if (!d.showName) missingInfo.push('which exhibition or show you\'re planning for');
+    if (!d.standSize) missingInfo.push('your approximate stand size in sqm');
+    if (!d.industry) missingInfo.push('your industry or main products');
+
+    const prompt = `Write a short, warm welcome email from StandMe (info@standme.de) to ${d.contactName || 'the client'} at ${d.companyName || 'their company'}.
+
+They enquired about an exhibition stand${d.showName ? ` for ${d.showName}` : ''}.
+
+Rules — follow strictly:
+- NEVER mention pricing, budget, or costs in this email
+- Focus on design vision, making a great impression at the show, and our expertise
+- Keep it under 120 words
+- Do NOT use "I hope this email finds you well" or any filler phrases
+- End with asking for ONLY these missing details (if any): ${missingInfo.length > 0 ? missingInfo.join(', ') : 'no missing info — just confirm you are working on it'}
+- Sign off: Mohammed Anabi | StandMe | www.standme.de
+- Subject line: "Your ${d.showName || 'Exhibition Stand'} Request — We're On It"
+
+Return ONLY the email body (no subject line in body).`;
+
+    const emailBody = await generateText(prompt, undefined, 300);
+
+    await sendEmail(
+      d.contactEmail,
+      `Your ${d.showName || 'Exhibition Stand'} Request — We're On It`,
+      emailBody
     );
   }
 

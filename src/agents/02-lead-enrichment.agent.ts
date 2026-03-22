@@ -25,15 +25,16 @@ export class LeadEnrichmentAgent extends BaseAgent {
     const leadsToEnrich: { row: number; data: string[] }[] = [];
 
     for (let i = 1; i < rows.length; i++) {
-      const score = parseInt(rows[i][12] || '0'); // column M = score
       const enrichStatus = rows[i][17] || ''; // column R = enrichmentStatus
-      if (score >= 5 && (enrichStatus === 'PENDING' || enrichStatus === '')) {
+      // Enrich any lead that hasn't been enriched yet — no score gate
+      // QUALIFYING leads (from email/website approvals) must be enriched regardless of score
+      if (['PENDING', 'QUALIFYING', ''].includes(enrichStatus) && rows[i][2]) {
         leadsToEnrich.push({ row: i + 1, data: rows[i] });
       }
     }
 
     if (leadsToEnrich.length === 0) {
-      await this.respond(ctx.chatId, 'No leads pending enrichment (score 5+).');
+      await this.respond(ctx.chatId, 'No leads pending enrichment.');
       return { success: true, message: 'No leads to enrich', confidence: 'HIGH' };
     }
 

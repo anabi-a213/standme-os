@@ -26,11 +26,10 @@ export class ConceptBriefAgent extends BaseAgent {
       return { success: false, message: 'No client specified', confidence: 'LOW' };
     }
 
-    // Find lead in master sheet
+    // Find lead in master sheet — exact → partial → word match
     let leadRow = await findRowByValue(SHEETS.LEAD_MASTER, 'C', clientName);
-    if (!leadRow) {
-      leadRow = await findRowByValue(SHEETS.LEAD_MASTER, 'A', clientName);
-    }
+    if (!leadRow) leadRow = await findRowByValue(SHEETS.LEAD_MASTER, 'A', clientName);
+    if (!leadRow) leadRow = await this.fuzzyFindLead(clientName);
 
     if (!leadRow) {
       await this.respond(ctx.chatId, `Lead "${clientName}" not found in the system.`);
@@ -181,5 +180,26 @@ export class ConceptBriefAgent extends BaseAgent {
       confidence: 'HIGH',
       data: { docUrl: doc.url },
     };
+  }
+
+  /** Fuzzy lead search: partial substring + word-level match across company name (col C) */
+  private async fuzzyFindLead(search: string): Promise<{ row: number; data: string[] } | null> {
+    try {
+      const rows = await readSheet(SHEETS.LEAD_MASTER);
+      const q = search.toLowerCase();
+      const words = q.split(/\s+/).filter(w => w.length > 2);
+
+      // Pass 1: partial substring match on company name
+      for (let i = 1; i < rows.length; i++) {
+        const name = (rows[i][2] || '').toLowerCase();
+        if (name && name.includes(q)) return { row: i + 1, data: rows[i] };
+      }
+      // Pass 2: word-level match — any search word appears in company name
+      for (let i = 1; i < rows.length; i++) {
+        const name = (rows[i][2] || '').toLowerCase();
+        if (name && words.some(w => name.includes(w))) return { row: i + 1, data: rows[i] };
+      }
+    } catch { /* non-fatal */ }
+    return null;
   }
 }

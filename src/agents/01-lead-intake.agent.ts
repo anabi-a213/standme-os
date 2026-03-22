@@ -7,7 +7,7 @@ import { SHEETS } from '../config/sheets';
 import { appendRow, readSheet, rowToObject, objectToRow, sheetUrl } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
-import { detectLanguage } from '../services/ai/client';
+import { detectLanguage, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
@@ -28,8 +28,14 @@ export class LeadIntakeAgent extends BaseAgent {
       return { success: false, message: 'No lead data provided', confidence: 'LOW' };
     }
 
-    // Parse lead data from pipe-separated input
-    const parts = args.split('|').map(s => s.trim());
+    // Parse lead data — pipe-separated preferred, natural language fallback
+    let parts: string[];
+    if (args.includes('|')) {
+      parts = args.split('|').map(s => s.trim());
+    } else {
+      // Natural language: use AI to extract structured fields
+      parts = await this.parseNaturalLanguageLead(args);
+    }
     const [companyName, contactName, contactEmail, showName, standSize, budget, industry] = parts;
 
     if (!companyName) {
@@ -187,6 +193,23 @@ export class LeadIntakeAgent extends BaseAgent {
       confidence: showValidation.confidence,
       data: { leadId, score: scoreResult.total, status: scoreResult.status },
     };
+  }
+
+  private async parseNaturalLanguageLead(text: string): Promise<string[]> {
+    try {
+      const result = await generateText(
+        `Extract lead data from this text and return ONLY a pipe-separated line in this exact format:\n` +
+        `[company name] | [contact name] | [email] | [show name] | [stand size sqm] | [budget] | [industry]\n\n` +
+        `Use empty string for any field not found. Do not add any explanation.\n\nText: "${text}"`,
+        'You extract structured data from unstructured text. Output only the pipe-separated line, nothing else.',
+        100
+      );
+      const line = result.trim().replace(/^["']|["']$/g, '');
+      return line.split('|').map(s => s.trim());
+    } catch {
+      // Fallback: treat entire text as company name
+      return [text.trim(), '', '', '', '', '', ''];
+    }
   }
 
   private scoreLead(data: {
