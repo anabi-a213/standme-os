@@ -41,6 +41,7 @@ import { CardManagerAgent } from './agents/08-card-manager.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
 import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
 import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
+import { initWorkflowEngine } from './services/workflow-engine';
 
 
 async function main() {
@@ -111,6 +112,10 @@ async function main() {
     dashboardBus.registerAgent(agent.config.id, agent.config.name);
     logger.info(`  Registered: ${agent.config.name} (${agent.config.commands.join(', ')})`);
   }
+
+  // Initialize Workflow Engine AFTER all agents are registered
+  // (engine calls getAgent() lazily at runtime — registry must be populated first)
+  initWorkflowEngine();
 
   // Initialize Telegram bot (skip polling in local dashboard-only mode)
   if (process.env.DASHBOARD_ONLY === 'true') {

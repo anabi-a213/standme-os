@@ -121,6 +121,14 @@ const REQUIRED_TABS: TabConfig[] = [
       'Lead Master ID', 'Notes', 'Website', 'Logo URL',
     ],
   },
+  {
+    envKey: 'SHEET_WORKFLOW_LOG',
+    tabName: 'WorkflowLog',
+    headers: [
+      'ID', 'Workflow ID', 'Workflow Name', 'Trigger', 'Entity Name',
+      'Status', 'Started At', 'Completed At', 'Steps', 'Notes',
+    ],
+  },
 ];
 
 // ── Step 1: Find or auto-create the master spreadsheet ─────────────────────────

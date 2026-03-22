@@ -15,6 +15,7 @@ import {
 } from '../services/knowledge';
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
 import { registerApproval } from '../services/approvals';
+import { agentEventBus } from '../services/agent-event-bus';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -363,6 +364,14 @@ Return ONLY the JSON object. No explanation.`;
     };
 
     await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
+
+    // Publish event — W1 will auto-enrich HOT/WARM leads, W4 notifies Mo when enriched
+    agentEventBus.publish('email.lead.received', {
+      agentId: this.config.id,
+      entityId: leadId,
+      entityName: d.companyName,
+      data: { status: score.status, score: score.total, showName: d.showName, contactEmail: d.contactEmail, source: 'gmail' },
+    });
 
     await saveKnowledge({
       source: `lead-${leadId}`,

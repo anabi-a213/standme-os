@@ -230,4 +230,22 @@ export const SHEETS: Record<string, SheetConfig> = {
     // Any field missing from this mapping is silently dropped on appendRow calls.
     headerRow: 1,
   },
+
+  WORKFLOW_LOG: {
+    envKey: 'SHEET_WORKFLOW_LOG',
+    tabName: 'WorkflowLog',
+    columns: {
+      id: 'A',
+      workflowId: 'B',
+      workflowName: 'C',
+      trigger: 'D',
+      entityName: 'E',
+      status: 'F',       // RUNNING | DONE | FAILED | SKIPPED
+      startedAt: 'G',
+      completedAt: 'H',
+      steps: 'I',
+      notes: 'J',
+    },
+    headerRow: 1,
+  },
 };

@@ -10,6 +10,7 @@ import {
   TrelloCard,
 } from '../services/trello/client';
 import { formatType2 } from '../services/telegram/bot';
+import { agentEventBus } from '../services/agent-event-bus';
 
 export class CardManagerAgent extends BaseAgent {
   config: AgentConfig = {
@@ -90,6 +91,24 @@ export class CardManagerAgent extends BaseAgent {
 
     // Move the card
     await moveCard(match.id, targetList.id);
+
+    // Emit deal lifecycle events so Workflow Engine can react (W2: deal won actions)
+    const targetLower = targetList.name.toLowerCase();
+    if (targetLower.includes('06') || targetLower.includes('won')) {
+      agentEventBus.publish('deal.won', {
+        agentId: this.config.id,
+        entityId: match.id,
+        entityName: match.name,
+        data: { from: fromStage, to: targetList.name, cardId: match.id },
+      });
+    } else if (targetLower.includes('07') || targetLower.includes('lost') || targetLower.includes('delayed')) {
+      agentEventBus.publish('deal.lost', {
+        agentId: this.config.id,
+        entityId: match.id,
+        entityName: match.name,
+        data: { from: fromStage, to: targetList.name, cardId: match.id },
+      });
+    }
 
     // Add a comment to the card noting the move
     const mover = ctx.userId || 'team';

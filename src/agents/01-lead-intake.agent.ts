@@ -9,6 +9,8 @@ import { createCard, findListByName } from '../services/trello/client';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { detectLanguage } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
+import { agentEventBus } from '../services/agent-event-bus';
+import { conflictGuard } from '../services/conflict-guard';
 
 export class LeadIntakeAgent extends BaseAgent {
   config: AgentConfig = {
@@ -97,8 +99,27 @@ export class LeadIntakeAgent extends BaseAgent {
       notes: existingDup ? `POTENTIAL_DUPLICATE: may match ${existingDup}` : '',
     };
 
+    // Prevent duplicate concurrent creation for same company (Agent-01 + Agent-18 race)
+    const lockKey = `lead:${companyName.toLowerCase().replace(/\s+/g, '-')}`;
+    if (!conflictGuard.acquire(lockKey, this.config.id)) {
+      await this.respond(ctx.chatId, `⏳ A lead for "${companyName}" is already being created. Please wait a moment.`);
+      return { success: false, message: 'Concurrent lead creation blocked', confidence: 'LOW' };
+    }
+
     // Write to Lead Master Sheet
-    await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
+    try {
+      await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
+    } finally {
+      conflictGuard.release(lockKey);
+    }
+
+    // Publish event — Workflow Engine reacts (W1: auto-enrich HOT/WARM after 3 min)
+    agentEventBus.publish('lead.created', {
+      agentId: this.config.id,
+      entityId: leadId,
+      entityName: companyName,
+      data: { status: scoreResult.status, score: scoreResult.total, showName: showName || '', industry: industry || '' },
+    });
 
     // Save to Knowledge Base — makes this lead's context available to all agents
     await saveKnowledge({

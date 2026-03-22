@@ -7,6 +7,8 @@ import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
 import { saveKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '../services/knowledge';
 import { logger } from '../utils/logger';
+import { agentEventBus } from '../services/agent-event-bus';
+import { conflictGuard } from '../services/conflict-guard';
 
 export class LeadEnrichmentAgent extends BaseAgent {
   config: AgentConfig = {
@@ -39,6 +41,14 @@ export class LeadEnrichmentAgent extends BaseAgent {
     for (const lead of leadsToEnrich) {
       const companyName = lead.data[2]; // column C
       const industry = lead.data[10]; // column K
+      const leadId = lead.data[0];    // column A
+
+      // Skip if another agent is already enriching this lead
+      const lockKey = `enrich:${leadId}`;
+      if (!conflictGuard.acquire(lockKey, this.config.id)) {
+        logger.info(`[Enrichment] Skipping ${companyName} — enrichment lock held by another process`);
+        continue;
+      }
 
       // Mark as in progress
       await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'IN_PROGRESS');
@@ -118,8 +128,18 @@ export class LeadEnrichmentAgent extends BaseAgent {
           }
         }
 
+        // Publish lead.enriched — Workflow Engine W4 notifies Mo if readiness≥7
+        agentEventBus.publish('lead.enriched', {
+          agentId: this.config.id,
+          entityId: leadId,
+          entityName: companyName,
+          data: { outreachReadiness: readiness, score: parseInt(lead.data[12] || '0'), showName: lead.data[6] || '' },
+        });
+
         enriched++;
+        conflictGuard.release(lockKey);
       } catch (err: any) {
+        conflictGuard.release(lockKey);
         await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'FAILED');
         await this.log({
           actionType: 'enrich',
