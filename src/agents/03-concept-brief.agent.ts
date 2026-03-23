@@ -433,11 +433,12 @@ export class ConceptBriefAgent extends BaseAgent {
       })(),
     });
 
-    // Send to Mo for approval
+    // Send to Mo for approval — no brief preview in the message, just the URL.
+    // Including brief content broke Telegram Markdown (# / * / _ from anatomy guide).
     await sendToMo(formatType1(
       `Concept Brief: ${companyName}`,
       `${showName} | ${standSize} sqm`,
-      `Brief ready for review:\n${doc.url}\n\n${briefContent.substring(0, 500)}...`,
+      `Brief ready for review:\n${doc.url}`,
       `brief_${leadRow.data[0]}`
     ));
 
