@@ -863,7 +863,7 @@ export class CampaignBuilderAgent extends BaseAgent {
         .map((r, i) => ({ row: r, index: i + 2 }))
         .filter(({ row }) => {
           const status = (row[7] || '').toUpperCase();
-          return ['SENT', 'OPENED', 'REPLIED', 'MORE_INFO_NEEDED', 'INTERESTED'].includes(status);
+          return ['SENT', 'OPENED'].includes(status);
         });
 
       if (activeRecords.length === 0) {
@@ -871,22 +871,17 @@ export class CampaignBuilderAgent extends BaseAgent {
         return { success: true, message: 'No active records', confidence: 'HIGH' };
       }
 
-      // Batch fetch Woodpecker status + sending inbox per campaign
+      // Batch fetch Instantly replies per campaign
       const campaignIds = [...new Set(activeRecords.map(({ row }) => row[1]).filter(Boolean))];
-      const prospectStatusMap = new Map<string, string>();
-      const campaignFromEmailMap = new Map<string, string>(); // campaignId → from_email
+      const replyBodyMap = new Map<string, string>(); // email → reply body
 
       for (const cid of campaignIds) {
         try {
-          // Use Instantly replies API to detect who has replied
-          const replies = await getReplies({ campaignId: cid, limit: 500 }).catch(() => []);
-          for (const r of replies) {
-            if (r.lead_email) prospectStatusMap.set(r.lead_email.toLowerCase(), 'REPLIED');
-          }
-          // Get sending account from campaign details
-          const campDetails = await getCampaign(cid).catch(() => null);
-          if (campDetails) {
-            logger.info(`[CampaignBuilder] Campaign ${cid} (${campDetails.name}) status: ${campaignStatusLabel(campDetails.status)}`);
+          const cReplies = await getReplies({ campaignId: cid, limit: 500 }).catch(() => []);
+          for (const r of cReplies) {
+            if (r.lead_email && r.body) {
+              replyBodyMap.set(r.lead_email.toLowerCase(), r.body);
+            }
           }
         } catch (err: any) {
           logger.warn(`[CampaignBuilder] Instantly fetch failed for campaign ${cid}: ${err.message}`);
@@ -894,241 +889,71 @@ export class CampaignBuilderAgent extends BaseAgent {
       }
 
       for (const { row, index } of activeRecords) {
-        const salesId = row[0] || '';
-        const campaignId = row[1] || '';
-        const showName = row[2] || '';
-        const companyName = row[3] || '';
-        const contactName = row[4] || '';
+        const salesId      = row[0] || '';
+        const showName     = row[2] || '';
+        const companyName  = row[3] || '';
         const contactEmail = (row[5] || '').toLowerCase();
-        const currentStatus = (row[7] || '').toUpperCase();
-        const lastReplyDate = row[15] || '';
-        const existingLeadMasterId = row[17] || '';
 
         if (!contactEmail) continue;
 
-        const wpStatus = prospectStatusMap.get(contactEmail);
+        const replyBody = replyBodyMap.get(contactEmail) || '';
+        if (!replyBody) continue;
 
-        // Track opens
-        if (wpStatus === 'OPENED' && currentStatus === 'SENT') {
-          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'OPENED');
-          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', new Date().toISOString());
-          continue;
-        }
+        // Classify intent directly from Instantly reply body (no Gmail)
+        const intentRaw = await generateText(
+          `Classify this cold email reply: INTERESTED, NOT_INTERESTED, or NEEDS_MORE_INFO.\n` +
+          `INTERESTED = wants to discuss, asks for quote, requests meeting.\n` +
+          `NEEDS_MORE_INFO = vague positive, curious, has questions.\n` +
+          `NOT_INTERESTED = unsubscribe, negative, out of office.\n\n` +
+          `Reply: "${replyBody.slice(0, 500)}"\n\nReturn only: INTERESTED, NOT_INTERESTED, or NEEDS_MORE_INFO`,
+          undefined, 10
+        ).catch(() => 'NEEDS_MORE_INFO');
 
-        const shouldCheckGmail = wpStatus === 'REPLIED' || currentStatus === 'REPLIED';
-        if (!shouldCheckGmail) continue;
+        const VALID = ['INTERESTED', 'NOT_INTERESTED', 'NEEDS_MORE_INFO'];
+        const classification = VALID.includes(intentRaw.trim().toUpperCase())
+          ? intentRaw.trim().toUpperCase() : 'NEEDS_MORE_INFO';
 
-        // Find the reply in Gmail
-        const afterDate = lastReplyDate
-          ? new Date(lastReplyDate).toISOString().split('T')[0].replace(/-/g, '/')
-          : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0].replace(/-/g, '/');
+        const now = new Date().toISOString();
+        await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H',
+          classification === 'NOT_INTERESTED' ? 'NOT_INTERESTED' : 'REPLIED');
+        await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', classification);
+        await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', now);
 
-        let replyBody = '';
-        let replyDate = '';
-        let replyGmailId = '';   // Gmail internal message ID (for threadId lookup)
-        let replyMessageId = ''; // RFC Message-ID header (for In-Reply-To / References)
-        try {
-          // Scope search to the specific inbox this campaign sends from (from_email)
-          // so replies to other connected inboxes don't get mixed up.
-          // in:anywhere ensures we also catch replies in Sent/All Mail.
-          const fromEmail = campaignId ? campaignFromEmailMap.get(campaignId) : undefined;
-          const toFilter = fromEmail ? ` to:${fromEmail}` : '';
-          const emails = await searchEmailsByQuery(
-            `in:anywhere from:${contactEmail} after:${afterDate}${toFilter}`, 5
-          );
-          if (emails.length > 0) {
-            replyBody = emails[0].body;
-            replyDate = emails[0].date;
-            replyGmailId = emails[0].id;
-            replyMessageId = emails[0].messageId || emails[0].id;
-          }
-        } catch (err: any) {
-          logger.warn(`[CampaignBuilder] Gmail search failed for ${contactEmail}: ${err.message}`);
-        }
-
-        if (!replyBody) {
-          if (wpStatus === 'REPLIED' && currentStatus !== 'REPLIED') {
-            await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'REPLIED');
-            await updateCell(SHEETS.CAMPAIGN_SALES, index, 'P', new Date().toISOString());
-            await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', new Date().toISOString());
-          }
-          continue;
-        }
-
-        // Parse stored state
-        let conversationHistory: Array<{ role: string; message: string; date: string }> = [];
-        try { conversationHistory = JSON.parse(row[14] || '[]'); } catch { /* empty */ }
-
-        const collectedInfo: Record<string, string> = {
-          standSize: row[9] || '',
-          budget: row[10] || '',
-          showDates: row[11] || '',
-          phone: row[12] || '',
-          requirements: row[13] || '',
-          website: row[19] || '',
-          logoUrl: row[20] || '',
-        };
-        const missingInfo = SALES_INFO_FIELDS.filter(f => !collectedInfo[f]);
-
-        const historyText = conversationHistory
-          .map(m => `${m.role === 'agent' ? 'StandMe (Mo)' : contactName}: ${m.message}`)
-          .join('\n\n');
-
-        // Get relevant knowledge context for this conversation
-        const knowledgeCtx = await buildKnowledgeContext(`${showName} ${companyName} exhibition stand`);
-
-        // Generate expert sales reply
-        const salesResult = await generateSalesReply({
-          companyName,
-          contactName,
-          showName,
-          prospectMessage: replyBody,
-          conversationHistory: historyText,
-          collectedInfo,
-          missingInfo,
-          knowledgeContext: knowledgeCtx,
-        });
-
-        // Default classification to INFO_REQUEST when AI returns empty/null/unknown
-        const VALID_CLASSIFICATIONS = ['INTERESTED', 'NOT_INTERESTED', 'NEEDS_MORE_INFO', 'READY_TO_CLOSE', 'OUT_OF_OFFICE', 'INFO_REQUEST'];
-        const { reply, extractedInfo, urgencyUsed } = salesResult;
-        const classification: string = VALID_CLASSIFICATIONS.includes(salesResult.classification)
-          ? salesResult.classification
-          : 'INFO_REQUEST';
-        const updatedInfo = { ...collectedInfo, ...extractedInfo };
-
-        // Save the reply to knowledge base for learning
+        // Save reply to KB for learning
         await saveKnowledge({
           source: `sales-reply-${salesId}`,
           sourceType: 'manual',
           topic: `${companyName}-${showName}`,
           tags: `sales-reply,${classification.toLowerCase()},${showName.toLowerCase().replace(/\s+/g, '-')}`,
-          content: `Reply from ${companyName} at ${showName}: "${replyBody.slice(0, 200)}" | Classification: ${classification} | Info extracted: ${JSON.stringify(extractedInfo)}`,
-        });
-
-        // NOT_INTERESTED — log and move on
-        if (classification === 'NOT_INTERESTED') {
-          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'NOT_INTERESTED');
-          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', classification);
-          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', new Date().toISOString());
-          await sendToMo(formatType2(
-            `Not Interested: ${companyName}`,
-            `*Show:* ${showName}\n*Contact:* ${contactEmail}\n\nTheir message:\n${replyBody.slice(0, 300)}\n\nFiled as NOT_INTERESTED.`
-          ));
-          continue;
-        }
-
-        // READY_TO_CLOSE — escalate directly to Mo with full deal summary
-        if (classification === 'READY_TO_CLOSE') {
-          const dealInfo = Object.entries(updatedInfo)
-            .filter(([, v]) => v)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join('\n');
-
-          await sendToMo(formatType2(
-            `CLOSE THIS DEAL: ${companyName}`,
-            `*Show:* ${showName}\n*Contact:* ${contactName} — ${contactEmail}\n\n*Deal Info:*\n${dealInfo || 'Check conversation'}\n\n*Their last message:*\n${replyBody.slice(0, 400)}\n\n*Proposed reply (send manually or approve via /salesreplies):*\n${reply}`
-          ));
-          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', 'INTERESTED');
-          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', classification);
-
-          // Auto-enter into sales pipeline immediately
-          if (!existingLeadMasterId) {
-            await this.convertToLead(row, index, updatedInfo, showName, contactName, contactEmail);
-          }
-
-          escalations++;
-          newReplies++;
-          continue;
-        }
+          content: `Reply from ${companyName} (${contactEmail}) at ${showName}: "${replyBody.slice(0, 200)}" | Classification: ${classification}`,
+        }).catch(() => {});
 
         newReplies++;
+        if (classification === 'NOT_INTERESTED') continue;
 
-        // Register approval for sales reply
-        const approvalId = `salesreply_${salesId}_${Date.now()}`;
+        // Save pending-conversion KB entry for non-negative replies
+        await saveKnowledge({
+          source: `pending-conversion-${contactEmail}`,
+          sourceType: 'manual',
+          topic: 'pending-conversion',
+          tags: `pending-conversion,${classification.toLowerCase()},campaign-reply`,
+          content: `Campaign reply from ${companyName} (${contactEmail}) at ${showName}. Classification: ${classification}. Not yet converted to pipeline. Reply: "${replyBody.slice(0, 300)}"`,
+        }).catch(() => {});
 
-        registerApproval(approvalId, {
-          action: `Send sales reply to ${companyName}`,
-          data: { salesId, contactEmail, reply, updatedInfo, companyName, showName, index, conversationHistory, replyBody, replyDate, replyGmailId },
-          timestamp: Date.now(),
-          onApprove: async () => {
-            try {
-              const subject = `Re: Your stand at ${showName}`;
-              // Pass threading headers so our reply lands inside the prospect's existing thread
-              // inReplyToMessageId = Gmail internal ID (for threadId lookup)
-              // references = RFC Message-ID (for email client thread grouping)
-              await sendEmail(contactEmail, subject, reply, replyGmailId || undefined, replyMessageId || undefined);
+        escalations++;
 
-              conversationHistory.push(
-                { role: 'prospect', message: replyBody, date: replyDate },
-                { role: 'agent', message: reply, date: new Date().toISOString() }
-              );
-
-              await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H', classification === 'INTERESTED' ? 'INTERESTED' : 'REPLIED');
-              await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', classification);
-              if (updatedInfo.standSize) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'J', updatedInfo.standSize);
-              if (updatedInfo.budget) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'K', updatedInfo.budget);
-              if (updatedInfo.showDates) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'L', updatedInfo.showDates);
-              if (updatedInfo.phone) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'M', updatedInfo.phone);
-              if (updatedInfo.requirements) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'N', updatedInfo.requirements);
-              await updateCell(SHEETS.CAMPAIGN_SALES, index, 'O', JSON.stringify(conversationHistory).slice(0, 5000));
-              await updateCell(SHEETS.CAMPAIGN_SALES, index, 'P', replyDate);
-              await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', new Date().toISOString());
-              if (updatedInfo.website) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'T', updatedInfo.website);
-              if (updatedInfo.logoUrl) await updateCell(SHEETS.CAMPAIGN_SALES, index, 'U', updatedInfo.logoUrl);
-
-              // Save sent reply to KB for future learning
-              await saveKnowledge({
-                source: `sent-reply-${salesId}`,
-                sourceType: 'manual',
-                topic: `email-template-${showName}`,
-                tags: `sent-reply,outreach,${classification.toLowerCase()},${showName.toLowerCase().replace(/\s+/g, '-')}`,
-                content: `Sent reply to ${companyName} (${showName}): "${reply.slice(0, 400)}"`,
-              });
-
-              // Auto-enter pipeline when prospect shows interest
-              if (classification === 'INTERESTED' && !existingLeadMasterId) {
-                await this.convertToLead(row, index, updatedInfo, showName, contactName, contactEmail);
-              }
-
-              // When all key fields are collected, prompt Mo to run a concept brief
-              const isReadyForBrief = BRIEF_REQUIRED_FIELDS.every(f => updatedInfo[f]);
-              if (isReadyForBrief) {
-                await sendToMo(formatType2(
-                  `Brief Ready: ${companyName}`,
-                  `All key info collected for *${companyName}* — ${showName}.\n\n` +
-                  `Size: ${updatedInfo.standSize} sqm\nBudget: ${updatedInfo.budget}\nDates: ${updatedInfo.showDates}\nWebsite: ${updatedInfo.website}\n\n` +
-                  `Run: \`/brief ${companyName} | ${showName}\` to generate the concept brief.`
-                ));
-              }
-
-              return `Reply sent to *${companyName}* (${contactEmail}). Classification: ${classification}${urgencyUsed ? ' [urgency used]' : ''}`;
-            } catch (err: any) {
-              return `Failed to send reply to ${companyName}: ${err.message}`;
-            }
-          },
-          onReject: async () => `Reply to *${companyName}* rejected. No email sent.`,
-        });
-
-        const approvalDetail =
-          `*Company:* ${companyName} (${showName})\n` +
-          `*Contact:* ${contactName} — ${contactEmail}\n` +
-          `*Classification:* ${classification}\n\n` +
-          `*Collected so far:* ${Object.entries(updatedInfo).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' | ') || 'none'}\n\n` +
+        // Alert Mo with /convert hint — no auto-reply, no approval flow
+        await sendToMo(formatType2(
+          `${classification === 'INTERESTED' ? '🔥 Interested:' : '🟡 Reply:'} ${companyName}`,
+          `*Show:* ${showName}\n*Contact:* ${contactEmail}\n*Classification:* ${classification}\n\n` +
           `*Their message:*\n${replyBody.slice(0, 400)}\n\n` +
-          `*Proposed reply:*\n${reply}`;
-
-        await sendToMo(formatType1(
-          `Sales Reply: ${companyName}`,
-          `${classification} — ${showName}`,
-          approvalDetail,
-          approvalId
+          `→ \`/convert ${contactEmail}\` to add to LEAD_MASTER pipeline`
         ));
       }
 
       const summary = newReplies > 0
-        ? `${newReplies} repl${newReplies === 1 ? 'y' : 'ies'} processed. ${escalations > 0 ? `${escalations} deal(s) ready to close — escalated to Mo.` : ''}`
-        : 'No new replies requiring action.';
+        ? `${newReplies} repl${newReplies === 1 ? 'y' : 'ies'} classified. ${escalations > 0 ? `${escalations} interested — use \`/convert [email]\` to add to pipeline.` : ''}`
+        : 'No new replies found.';
 
       if (!isScheduled) await this.respond(ctx.chatId, summary);
       return { success: true, message: summary, confidence: 'HIGH' };

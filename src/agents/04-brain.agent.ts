@@ -70,11 +70,15 @@ BAD: "Please provide the company name, show, size, budget, industry, and contact
 
 WORKFLOW GUIDANCE MODE:
 When someone mentions new leads, files, or show data, guide them through the FULL workflow:
-1. Import → \`/importleads [show]\`
-2. Outreach → \`/bulkoutreach [show]\` (creates campaign + sequence + pushes — all automatic)
-3. Monitor → \`/replies [show]\` every few days
-4. Qualify → \`/salesreplies\` when high-intent replies come in
-5. Pipeline → \`/newlead\` + \`/enrich\` + \`/brief\` for hot leads
+1. Launch → \`/launch [show]\` (finds Drive files, dedupes, gets Mo approval, pushes to Instantly)
+2. Monitor → \`/replies [show]\` every 3-4 days to score replies by intent
+3. Convert → \`/convert [email]\` for high-intent replies (adds to LEAD_MASTER pipeline)
+4. Pipeline → \`/enrich\` + \`/brief\` once converted
+
+DEPRECATED COMMANDS (still work but prefer the new flow):
+- \`/importleads\` → use \`/launch\` instead (does import + push in one step)
+- \`/bulkoutreach\` → use \`/launch\` instead
+- \`/newcampaign\` → use \`/launch\` instead
 
 Don't just answer what was asked — walk them to the finish line.
 
@@ -187,8 +191,10 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /reminders — client follow-up reminders
 - /techdeadlines — technical deadline tracker
 - /outreach — run outreach for qualified leads in OUTREACH_QUEUE (scored 6+), max 5 per run with individual approval
-- /bulkoutreach [show name] — bulk push ALL leads for a show to Instantly in one batch. Creates campaign + email sequence automatically if none exists. One approval covers all leads. Example: /bulkoutreach intersolar
-- /importleads [show name] — import exhibitor leads from Google Drive files (Excel/CSV/Google Sheets) into Lead Master. Run /bulkoutreach after. Example: /importleads gulfood
+- /launch [show name] — PREFERRED: finds Drive files, dedupes vs sent history, generates email sequence, gets Mo approval, then pushes to Instantly in one batch. Example: /launch intersolar
+- /convert [email or company] — convert a campaign reply into the LEAD_MASTER pipeline. Example: /convert john@pharma.de
+- /bulkoutreach [show name] — [DEPRECATED: use /launch instead] bulk push leads to Instantly. Example: /bulkoutreach intersolar
+- /importleads [show name] — [DEPRECATED: use /launch instead] import exhibitor leads from Drive. Example: /importleads gulfood
 - /generateemails [show name] — AI-generates a 4-step email sequence AND creates the Instantly campaign automatically. Example: /generateemails intersolar
 - /outreachstatus — live Instantly campaign stats (open rate, reply rate, bounces)
 - /replies [show name] — show and AI-score recent replies by intent. Flags high-intent leads to Mo immediately.
@@ -224,17 +230,18 @@ Don't just answer — anticipate the next step. Always give 1-2 concrete next ac
 - Show <30 days with no build start? → Escalate to Mo
 - Portal deadline <2 weeks? → Remind and ask if submitted
 - Multiple shows overlapping? → Flag contractor availability risk
-- After /enrich succeeds → "Want me to queue them for outreach with /bulkoutreach?"
+- After /enrich succeeds → "Want me to launch outreach with /launch [show]?"
 - After /brief runs → "Should I move them to 03 Concept Brief stage?"
 - After a deal is Won → "Want to capture lessons learned now?"
-- After /importleads → automatically suggest /bulkoutreach
-- After /bulkoutreach → suggest checking /replies in 3-4 days
-- After /replies shows high-intent → flag leads for immediate follow-up
+- After /launch → suggest checking /replies in 3-4 days
+- After /replies shows high-intent → flag leads and suggest /convert [email]
+- After /convert → suggest /brief [company] to generate a concept brief
 
 OUTREACH SYSTEM (Instantly.ai):
 - All outreach now runs via Instantly.ai — full API control, no manual UI work
-- /bulkoutreach [show] → creates campaign, writes emails, pushes leads, activates — everything automatic
-- /replies [show] → shows replies scored by AI intent. High-intent = alert Mo immediately
+- /launch [show] → PREFERRED: Drive files → dedup → email sequence → Mo approval → push to Instantly
+- /replies [show] → shows replies scored by AI intent. High-intent = save pending-conversion KB entry
+- /convert [email] → convert a high-intent reply to LEAD_MASTER pipeline (HOT lead)
 - /outreachstatus → live stats (open rate, reply rate, bounce health)
 - Sender health: bounce rate <3% is healthy. Alert Mo if >3%.
 - Daily capacity: depends on number of Instantly inboxes configured (50-100 per inbox/day)
@@ -404,16 +411,16 @@ export class BrainAgent extends BaseAgent {
       command: string;
       extractArgs: (m: RegExpMatchArray) => string;
     }> = [
-      // /bulkoutreach [show]  — "bulk outreach intersolar", "do bulkoutreach for gulfood", etc.
+      // /launch [show] — preferred command. Also catches "bulkoutreach" and "importleads" patterns.
       {
-        pattern: /^(?:\/bulkoutreach\s+|(?:do\s+)?bulk[\s-]?outreach\s+(?:for\s+)?|push.*leads.*?for\s+|send.*outreach.*?for\s+)(.+)$/i,
-        command: '/bulkoutreach',
-        extractArgs: m => m[1].trim(),
+        pattern: /^(?:\/launch\s+|launch\s+(?:campaign\s+(?:for\s+)?)?|(?:\/bulkoutreach\s+|(?:do\s+)?bulk[\s-]?outreach\s+(?:for\s+)?|push.*leads.*?for\s+|send.*outreach.*?for\s+)|(?:\/importleads\s+|import\s+leads?\s+(?:for\s+|from\s+(?:drive|file|sheet|excel|xlsx)?\s*(?:for\s+)?)?|load\s+leads?\s+(?:for\s+)?|search\s+(?:drive\s+)?(?:for\s+)?(?:leads?\s+(?:for\s+)?|list\s+)?|find\s+(?:leads?\s+(?:for\s+)?|exhibitor\s+(?:list\s+)?(?:for\s+)?)|get\s+leads?\s+(?:for\s+)?|add\s+leads?\s+(?:from\s+(?:drive|file|sheet|excel)?\s*(?:to\s+(?:master\s+)?sheet\s+)?(?:for\s+)?)?))(.+?)(?:\s+(?:and\s+.+|to\s+master\s+sheet|from\s+drive.*))?$/i,
+        command: '/launch',
+        extractArgs: m => (m[1] || '').trim(),
       },
-      // /importleads [show] — also catches "search drive for intersolar", "find intersolar leads", etc.
+      // /convert [email or company]
       {
-        pattern: /^(?:\/importleads\s+|import\s+leads?\s+(?:for\s+|from\s+(?:drive|file|sheet|excel|xlsx)?\s*(?:for\s+)?)?|load\s+leads?\s+(?:for\s+)?|search\s+(?:drive\s+)?(?:for\s+)?(?:leads?\s+(?:for\s+)?|list\s+)?|find\s+(?:leads?\s+(?:for\s+)?|exhibitor\s+(?:list\s+)?(?:for\s+)?)|get\s+leads?\s+(?:for\s+)?|add\s+leads?\s+(?:from\s+(?:drive|file|sheet|excel)?\s*(?:to\s+(?:master\s+)?sheet\s+)?(?:for\s+)?)?)(.+?)(?:\s+(?:and\s+.+|to\s+master\s+sheet|from\s+drive.*))?$/i,
-        command: '/importleads',
+        pattern: /^(?:\/convert\s+|convert\s+(?:lead\s+)?(?:from\s+)?)(.+)$/i,
+        command: '/convert',
         extractArgs: m => m[1].trim(),
       },
       // /replies [show]

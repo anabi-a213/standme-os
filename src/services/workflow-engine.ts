@@ -28,7 +28,7 @@ import { getAgent } from '../agents/registry';
 import { SHEETS } from '../config/sheets';
 import { appendRow, readSheet } from './google/sheets';
 import { sendToMo, formatType2, formatType3 } from './telegram/bot';
-import { saveKnowledge } from './knowledge';
+import { saveKnowledge, searchKnowledge } from './knowledge';
 import { writeSystemLog } from '../utils/system-log';
 import { logger } from '../utils/logger';
 import { pipelineRunner } from './pipeline-runner';
@@ -422,6 +422,27 @@ async function w5_morningBriefing(): Promise<void> {
         ).join('\n\n'),
       });
     }
+
+    // ── 4b. Pending campaign conversions ────────────────────────────────────
+    try {
+      const pendingConversions = await searchKnowledge('pending-conversion campaign-reply', 20);
+      const unresolved = pendingConversions.filter(e =>
+        e.tags.includes('pending-conversion') &&
+        !e.tags.includes('resolved')
+      );
+      if (unresolved.length > 0) {
+        sections.push({
+          label: `📩 PENDING CONVERSIONS — ${unresolved.length}`,
+          content: unresolved.slice(0, 8).map(e => {
+            // Extract email from source key: pending-conversion-email@domain.com
+            const email = e.source.replace('pending-conversion-', '');
+            return `  • ${email}\n    → \`/convert ${email}\``;
+          }).join('\n') +
+          (unresolved.length > 8 ? `\n  ...and ${unresolved.length - 8} more` : '') +
+          '\n\nCampaign replies not yet added to pipeline. Convert to start the sales flow.',
+        });
+      }
+    } catch { /* pending conversions are optional */ }
 
     sections.push({
       label: 'QUICK ACTIONS',

@@ -14,8 +14,9 @@ import {
 import { findExhibitorFiles, parseExhibitorFile } from '../services/drive-exhibitor';
 import { validateShow } from '../config/shows';
 import { generateOutreachEmail, generateText } from '../services/ai/client';
-import { saveKnowledge, buildKnowledgeContext, searchKnowledge, getKnowledgeBySource } from '../services/knowledge';
+import { saveKnowledge, buildKnowledgeContext, searchKnowledge, getKnowledgeBySource, updateKnowledge } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
+import { pipelineRunner } from '../services/pipeline-runner';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
 import { generateLeadId } from '../utils/lead-id';
@@ -25,7 +26,7 @@ export class OutreachAgent extends BaseAgent {
     name: 'Automated Outreach Sender',
     id: 'agent-13',
     description: 'Run personalised outreach sequences via Instantly.ai',
-    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach', '/importleads', '/instantlyverify', '/generateemails', '/replies'],
+    commands: ['/outreach', '/outreachstatus', '/campaigns', '/bulkoutreach', '/importleads', '/instantlyverify', '/generateemails', '/replies', '/launch', '/convert'],
     requiredRole: UserRole.ADMIN,
     schedule: '0 9 * * 1', // Every Monday 9am — auto-push new leads to all active campaigns
   };
@@ -38,29 +39,31 @@ export class OutreachAgent extends BaseAgent {
     if (ctx.command === '/instantlyverify')   return this.runInstantlyVerify(ctx);
     if (ctx.command === '/generateemails')    return this.runGenerateEmails(ctx);
     if (ctx.command === '/replies')           return this.showReplies(ctx);
+    if (ctx.command === '/launch')            return this.runLaunch(ctx);
+    if (ctx.command === '/convert')           return this.runConvert(ctx);
     return this.runOutreach(ctx);
   }
 
-  // ── Scheduled: every Monday 9am — auto-push new leads to all ACTIVE campaigns ──
+  // ── Scheduled: every Monday 9am — notify Mo of new leads ready to launch ──
   async runScheduled(): Promise<AgentResponse> {
-    logger.info('[Outreach] Scheduled auto-push starting...');
+    logger.info('[Outreach] Scheduled Monday briefing starting...');
 
     if (!isInstantlyConfigured()) {
-      logger.warn('[Outreach] Auto-push skipped: INSTANTLY_API_KEY not set');
-      return { success: true, message: 'Auto-push skipped: not configured', confidence: 'LOW' as any };
+      logger.warn('[Outreach] Monday briefing skipped: INSTANTLY_API_KEY not set');
+      return { success: true, message: 'Briefing skipped: not configured', confidence: 'LOW' as any };
     }
 
     let campaigns: InstantlyCampaign[] = [];
     try {
       campaigns = await listCampaigns();
     } catch (err: any) {
-      logger.warn(`[Outreach] Auto-push: could not fetch campaigns: ${err.message}`);
+      logger.warn(`[Outreach] Monday briefing: could not fetch campaigns: ${err.message}`);
       return { success: false, message: err.message, confidence: 'LOW' as any };
     }
 
     const activeCampaigns = campaigns.filter(c => c.status === CAMPAIGN_STATUS.ACTIVE);
     if (!activeCampaigns.length) {
-      logger.info('[Outreach] Auto-push: no ACTIVE campaigns — nothing to push.');
+      logger.info('[Outreach] Monday briefing: no ACTIVE campaigns.');
       return { success: true, message: 'No active campaigns', confidence: 'LOW' as any };
     }
 
@@ -73,7 +76,7 @@ export class OutreachAgent extends BaseAgent {
       logRows.slice(1).map(r => (r[4] || '').toLowerCase().trim()).filter(Boolean)
     );
 
-    const results: string[] = [];
+    const sections: string[] = [];
 
     for (const campaign of activeCampaigns) {
       const showFilter = campaign.name.toLowerCase()
@@ -83,65 +86,29 @@ export class OutreachAgent extends BaseAgent {
 
       if (!showFilter) continue;
 
-      const leads = masterRows.slice(1).filter(r => {
+      const newLeads = masterRows.slice(1).filter(r => {
         const rowShow = (r[6] || '').toLowerCase();
         if (!rowShow.includes(showFilter) && !showFilter.includes(rowShow.substring(0, 6))) return false;
         const email = (r[21] || r[4] || '').toLowerCase().trim();
         return email && email.includes('@') && !pushedEmails.has(email);
       });
 
-      if (!leads.length) continue;
-
-      const prospects: InstantlyLead[] = leads.reduce<InstantlyLead[]>((acc, r) => {
-        const dmName = r[18] || r[3] || '';
-        const parts  = dmName.trim().split(' ').filter(Boolean);
-        const raw: InstantlyLead = {
-          email:           (r[21] || r[4] || '').trim(),
-          first_name:      parts[0] || 'Team',
-          last_name:       parts.slice(1).join(' ') || '',
-          company_name:    r[2]  || '',
-          personalization: r[10] || 'your upcoming trade show stand',
-          website:         '',
-        };
-        const clean = sanitizeLead(raw);
-        if (clean) acc.push(clean);
-        return acc;
-      }, []);
-
-      try {
-        const result   = await addLeads(campaign.id, prospects);
-        const logDate  = new Date().toISOString();
-
-        // Batch-write all log rows in a single Sheets API call to avoid quota exhaustion
-        const logRows = prospects.map(p => objectToRow(SHEETS.OUTREACH_LOG, {
-          id:          `OL-AUTO-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          leadId:      '',
-          companyName: p.company_name || '',
-          emailType:   'AUTO_PUSH',
-          sentDate:    logDate,
-          status:      'SENT',
-          replyClassification: '',
-          woodpeckerId: '',
-          notes: `Auto-push → Instantly campaign ${campaign.id} (${campaign.name})`,
-        }));
-        await appendRows(SHEETS.OUTREACH_LOG, logRows).catch((err: any) =>
-          logger.warn(`[Outreach] OUTREACH_LOG batch write failed (non-fatal): ${err.message}`)
-        );
-
-        results.push(`✅ *${campaign.name}*: pushed *${result.added}* new leads (${result.skipped} skipped dupes)`);
-      } catch (err: any) {
-        results.push(`❌ *${campaign.name}*: ${err.message}`);
+      if (newLeads.length > 0) {
+        sections.push(`  • *${campaign.name}*: ${newLeads.length} new leads → \`/launch ${showFilter}\``);
       }
     }
 
-    if (results.length > 0) {
+    if (sections.length > 0) {
       await sendToMo(formatType2(
-        '📬 Weekly Auto-Push Complete',
-        results.join('\n') + '\n\nLeads are loaded into Instantly campaigns. Emails send per campaign schedule.'
+        '📬 Monday Outreach Briefing',
+        `New leads ready to push:\n\n${sections.join('\n')}\n\n` +
+        `Run the \`/launch\` commands above when ready. Mo approves before any emails are sent.`
       ));
+    } else {
+      logger.info('[Outreach] Monday briefing: no new leads to push to active campaigns.');
     }
 
-    return { success: true, message: results.join('\n') || 'Auto-push complete', confidence: 'HIGH' as any };
+    return { success: true, message: sections.length > 0 ? 'Monday briefing sent' : 'No new leads', confidence: 'HIGH' as any };
   }
 
   // ── Auto-sync LEAD_MASTER → OUTREACH_QUEUE ────────────────────────────────
@@ -881,9 +848,18 @@ export class OutreachAgent extends BaseAgent {
       let msg = `📬 *Replies (last 7 days)* — ${replies.length} total\n\n`;
 
       if (high.length) {
-        msg += `*🔥 High Intent (${high.length}) — Reply immediately:*\n`;
+        msg += `*🔥 High Intent (${high.length}) — Convert to pipeline:*\n`;
         for (const { reply } of high) {
           msg += `  • ${reply.from_email} — "${(reply.body || '').slice(0, 80)}..."\n`;
+          msg += `    → \`/convert ${reply.from_email}\`\n`;
+          // Save pending-conversion KB entry so W5 briefing can surface it
+          await saveKnowledge({
+            source: `pending-conversion-${reply.from_email.toLowerCase()}`,
+            sourceType: 'manual',
+            topic: 'pending-conversion',
+            tags: `pending-conversion,high-intent,campaign-reply`,
+            content: `High-intent campaign reply from ${reply.from_email}. Not yet converted. Reply: "${(reply.body || '').slice(0, 300)}"`,
+          }).catch(() => {});
         }
         msg += '\n';
       }
@@ -900,12 +876,12 @@ export class OutreachAgent extends BaseAgent {
 
       await this.respond(ctx.chatId, msg);
 
-      // Alert Mo to high-intent replies immediately
+      // Alert Mo to high-intent replies immediately with /convert hint
       if (high.length > 0) {
         await sendToMo(formatType2(
           `🔥 ${high.length} High-Intent Replies Need Attention`,
           high.map(({ reply }) =>
-            `*${reply.from_email}*\n"${(reply.body || '').slice(0, 150)}"`
+            `*${reply.from_email}*\n"${(reply.body || '').slice(0, 150)}"\n\`/convert ${reply.from_email}\``
           ).join('\n\n')
         ));
       }
@@ -1155,6 +1131,481 @@ export class OutreachAgent extends BaseAgent {
         delay: 12,
       },
     ];
+  }
+
+  // ── /launch [show name] — Drive → Instantly full pipeline with Mo approval ──
+
+  private async runLaunch(ctx: AgentContext): Promise<AgentResponse> {
+    if (!isInstantlyConfigured()) {
+      await this.respond(ctx.chatId, '⚠️ INSTANTLY_API_KEY not set in Railway env. Add it to enable outreach.');
+      return { success: false, message: 'Instantly not configured', confidence: 'HIGH' };
+    }
+
+    const showName = (ctx.args || '').trim();
+    if (!showName) {
+      await this.respond(ctx.chatId,
+        'Usage: `/launch [show name]`\n\n' +
+        'Finds exhibitor files in Drive, deduplicates vs sent history, gets Mo approval, then pushes to Instantly in one batch.\n\n' +
+        'Example: `/launch intersolar`'
+      );
+      return { success: false, message: 'No show name', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `🔍 Searching Google Drive for *${showName}* exhibitor files...`);
+
+    // Step 1 — Find Drive files
+    let files: Awaited<ReturnType<typeof findExhibitorFiles>> = [];
+    try {
+      files = await findExhibitorFiles(showName);
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `⚠️ Could not search Drive: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    if (!files.length) {
+      await this.respond(ctx.chatId,
+        `No exhibitor files found for "*${showName}*" in Google Drive.\n\n` +
+        `Upload an Excel/CSV file named after the show (e.g. "Intersolar 2026.xlsx") to the exhibitor folder in Drive.`
+      );
+      return { success: false, message: 'No files found', confidence: 'HIGH' };
+    }
+
+    await this.respond(ctx.chatId, `📂 Found *${files.length}* file(s). Parsing exhibitor data...`);
+
+    // Step 2 — Parse files
+    const allRecords: Awaited<ReturnType<typeof parseExhibitorFile>> = [];
+    for (const file of files) {
+      try {
+        const records = await parseExhibitorFile(file);
+        allRecords.push(...records);
+      } catch (err: any) {
+        logger.warn(`[Launch] Failed to parse "${file.name}": ${err.message}`);
+      }
+    }
+
+    if (!allRecords.length) {
+      await this.respond(ctx.chatId,
+        `Found the file(s) but could not extract any records. Make sure the file has a header row with company names and emails.`
+      );
+      return { success: false, message: 'No records parsed', confidence: 'HIGH' };
+    }
+
+    // Step 3 — Dedup vs OUTREACH_LOG and CAMPAIGN_SALES
+    const [logRows, campaignSalesRows] = await Promise.all([
+      readSheet(SHEETS.OUTREACH_LOG).catch(() => [] as string[][]),
+      readSheet(SHEETS.CAMPAIGN_SALES).catch(() => [] as string[][]),
+    ]);
+
+    const sentEmails = new Set<string>();
+    logRows.slice(1).forEach(r => {
+      const e = (r[4] || '').toLowerCase().trim();
+      if (e) sentEmails.add(e);
+    });
+    campaignSalesRows.slice(1).forEach(r => {
+      const e = (r[5] || '').toLowerCase().trim();
+      if (e) sentEmails.add(e);
+    });
+
+    // Step 4 — Find or create Instantly campaign
+    let campaign: InstantlyCampaign | null = null;
+    try {
+      campaign = await findCampaignByName(showName);
+    } catch (err: any) {
+      await this.respond(ctx.chatId, `⚠️ Could not connect to Instantly: ${err.message}`);
+      return { success: false, message: err.message, confidence: 'LOW' };
+    }
+
+    // Step 5 — Build new prospects list (deduped)
+    const showValidation = validateShow(showName);
+    const uniqueIndustries = [...new Set(allRecords.map(r => (r.industry || '').trim()).filter(Boolean))];
+
+    const industryHooks = new Map<string, string>();
+    await Promise.all(uniqueIndustries.slice(0, 10).map(async industry => {
+      const hook = await generateText(
+        `Write ONE cold email opening sentence (max 20 words) for a ${industry} company exhibiting at a major trade show. Be specific. No em dashes.`,
+        'Return only the sentence.', 60,
+      ).catch(() => '');
+      industryHooks.set(industry.toLowerCase(), hook.trim());
+    }));
+
+    const seenEmails = new Set<string>();
+    const newProspects: { lead: InstantlyLead; record: typeof allRecords[0] }[] = [];
+    let skippedAlreadySent = 0;
+
+    for (const rec of allRecords) {
+      const email = (rec.contactEmail || '').trim().toLowerCase();
+      if (!email || !email.includes('@')) continue;
+      if (sentEmails.has(email)) { skippedAlreadySent++; continue; }
+      if (seenEmails.has(email)) continue;
+      seenEmails.add(email);
+
+      const dmName = (rec.contactName || '').trim();
+      const parts  = dmName.split(' ').filter(Boolean);
+      const industry = (rec.industry || '').toLowerCase();
+
+      const raw: InstantlyLead = {
+        email,
+        first_name:  parts[0] || 'Team',
+        last_name:   parts.slice(1).join(' ') || '',
+        company_name: rec.companyName || '',
+        personalization: industryHooks.get(industry) || industry || 'your upcoming trade show stand',
+        website:     rec.website || '',
+        custom_variables: { title: rec.contactTitle || '', show: showValidation.match?.name || showName },
+      };
+      const clean = sanitizeLead(raw);
+      if (clean) newProspects.push({ lead: clean, record: rec });
+    }
+
+    if (!newProspects.length) {
+      await this.respond(ctx.chatId,
+        `Found ${allRecords.length} records but all emails were already in OUTREACH_LOG or CAMPAIGN_SALES.\n\n` +
+        `Upload a new exhibitor file with fresh contacts to send a new batch.`
+      );
+      return { success: true, message: 'All leads already sent', confidence: 'HIGH' };
+    }
+
+    // Step 6 — Generate email sequence + build approval
+    const showDisplayName = showValidation.match?.name || showName;
+    const emailSequence = await this.generateEmailSequenceSteps(showDisplayName, uniqueIndustries[0] || 'trade show');
+    const campaignName  = campaign?.name ?? `${showDisplayName} ${new Date().getFullYear()} - StandMe`;
+
+    const approvalId = `launch_${showName.replace(/\s+/g, '_')}_${Date.now()}`;
+
+    await saveKnowledge({
+      source:     `bulk-approval-${approvalId}`,
+      sourceType: 'sheet',
+      topic:      'bulk-approval-pending',
+      tags:       `bulk-approval,${showName.replace(/\s+/g, '-')},pending`,
+      content:    JSON.stringify({
+        approvalId, showFilter: showName, campaignId: campaign?.id ?? null, campaignName,
+        createNew: !campaign, emailSequence, timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+
+    const prospects = newProspects.map(p => p.lead);
+
+    // Step 7 — Register approval; onApprove does batch push + all sheet writes
+    registerApproval(approvalId, {
+      action:    `Launch ${prospects.length} ${showName} leads to "${campaignName}"`,
+      data:      { prospects, campaign, campaignName, showName, emailSequence },
+      timestamp: Date.now(),
+      onApprove: async () => {
+        try {
+          let targetCampaign = campaign;
+
+          if (!targetCampaign) {
+            const newId = await createCampaign(campaignName, emailSequence);
+            targetCampaign = { id: newId, name: campaignName, status: CAMPAIGN_STATUS.DRAFT };
+            logger.info(`[Launch] Created Instantly campaign: ${campaignName} (${newId})`);
+          }
+
+          const result = await addLeads(targetCampaign.id, prospects);
+
+          let activationWarning = '';
+          if (targetCampaign.status === CAMPAIGN_STATUS.DRAFT) {
+            try {
+              await activateCampaign(targetCampaign.id);
+            } catch (err: any) {
+              activationWarning = `\n⚠️ Campaign activation failed: ${err.message}`;
+            }
+          }
+
+          const logDate = new Date().toISOString();
+
+          // Batch-write OUTREACH_LOG
+          const olRows = prospects.map(p => objectToRow(SHEETS.OUTREACH_LOG, {
+            id:          `OL-LAUNCH-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            leadId:      '',
+            companyName: p.company_name || '',
+            emailType:   'LAUNCH_EMAIL_1',
+            sentDate:    logDate,
+            status:      'SENT',
+            replyClassification: '',
+            woodpeckerId: targetCampaign.id,
+            notes:       `Launch → Instantly campaign ${targetCampaign.id} (${targetCampaign.name}) | ${showName}`,
+          }));
+          await appendRows(SHEETS.OUTREACH_LOG, olRows).catch((err: any) =>
+            logger.warn(`[Launch] OUTREACH_LOG write failed: ${err.message}`)
+          );
+
+          // Batch-write CAMPAIGN_SALES
+          const csRows = newProspects.map((p, i) => objectToRow(SHEETS.CAMPAIGN_SALES, {
+            id:              `CS-LAUNCH-${Date.now()}-${i}`,
+            campaignId:      targetCampaign!.id,
+            showName:        showDisplayName,
+            companyName:     p.lead.company_name || '',
+            contactName:     `${p.lead.first_name} ${p.lead.last_name}`.trim(),
+            contactEmail:    p.lead.email,
+            instantlyId:     targetCampaign!.id,
+            status:          'SENT',
+            classification:  '',
+            standSize:       '',
+            budget:          '',
+            showDates:       '',
+            phone:           '',
+            requirements:    '',
+            conversationLog: '[]',
+            lastReplyDate:   '',
+            lastActionDate:  logDate,
+            leadMasterId:    '',
+            notes:           `Drive launch | ${showName}`,
+            website:         p.record.website || '',
+            logoUrl:         '',
+          }));
+          await appendRows(SHEETS.CAMPAIGN_SALES, csRows).catch((err: any) =>
+            logger.warn(`[Launch] CAMPAIGN_SALES write failed: ${err.message}`)
+          );
+
+          // Batch-write LEAD_MASTER for new companies not already there
+          const freshMasterRows = await readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]);
+          const existingCos  = new Set(freshMasterRows.slice(1).map(r => (r[2] || '').toLowerCase().trim()));
+          const existingMails = new Set(freshMasterRows.slice(1).map(r => (r[21] || r[4] || '').toLowerCase().trim()).filter(Boolean));
+
+          const lmRows: string[][] = [];
+          for (const p of newProspects) {
+            const co = (p.lead.company_name || '').trim();
+            if (!co || existingCos.has(co.toLowerCase())) continue;
+            if (existingMails.has(p.lead.email.toLowerCase())) continue;
+            const leadId = await generateLeadId();
+            lmRows.push(objectToRow(SHEETS.LEAD_MASTER, {
+              id:              leadId,
+              timestamp:       logDate,
+              companyName:     co,
+              contactName:     `${p.lead.first_name} ${p.lead.last_name}`.trim(),
+              contactEmail:    p.lead.email,
+              contactTitle:    (p.lead.custom_variables as any)?.title || '',
+              showName:        showDisplayName,
+              showCity:        showValidation.match?.city || '',
+              standSize:       '',
+              budget:          '',
+              industry:        p.record.industry || '',
+              leadSource:      'launch-campaign',
+              score:           '5',
+              scoreBreakdown:  JSON.stringify({ showFit: 2, sizeSignal: 0, industryFit: 1, dmSignal: 1, timeline: 1 }),
+              confidence:      'MEDIUM',
+              status:          'COLD',
+              trelloCardId:    '',
+              enrichmentStatus: 'PENDING',
+              dmName:          `${p.lead.first_name} ${p.lead.last_name}`.trim(),
+              dmTitle:         (p.lead.custom_variables as any)?.title || '',
+              dmLinkedIn:      '',
+              dmEmail:         p.lead.email,
+              outreachReadiness: '5',
+              language:        'en',
+              notes:           `Campaign: ${targetCampaign!.name}`,
+            }));
+            existingCos.add(co.toLowerCase());
+          }
+          if (lmRows.length > 0) {
+            await appendRows(SHEETS.LEAD_MASTER, lmRows).catch((err: any) =>
+              logger.warn(`[Launch] LEAD_MASTER write failed: ${err.message}`)
+            );
+          }
+
+          return (
+            `✅ *Campaign launched!*\n\n` +
+            `Campaign: *${targetCampaign.name}*\n` +
+            `Pushed: *${result.added}* leads\n` +
+            (result.skipped > 0 ? `Skipped: ${result.skipped} (dupes in Instantly)\n` : '') +
+            (lmRows.length > 0 ? `Lead Master: ${lmRows.length} new rows added\n` : '') +
+            activationWarning +
+            `\n📧 Emails sending per campaign schedule. Check \`/replies ${showName}\` in 3-4 days.`
+          );
+        } catch (err: any) {
+          return `❌ Launch failed: ${err.message}`;
+        }
+      },
+      onReject: async () => `Campaign launch for *${campaignName}* cancelled.`,
+    });
+
+    const campaignNote = campaign
+      ? `Using existing campaign: *${campaign.name}* [${campaignStatusLabel(campaign.status)}]`
+      : `*New campaign will be created:* "${campaignName}"`;
+
+    await sendToMo(formatType1(
+      `Launch Campaign: ${showName}`,
+      `${prospects.length} new leads → ${campaignName}`,
+      `*${prospects.length}* new leads from Drive.\n` +
+      `${skippedAlreadySent > 0 ? `${skippedAlreadySent} already sent — deduped.\n\n` : '\n'}` +
+      `${campaignNote}\n\n` +
+      `Approve to push all at once.`,
+      approvalId
+    ));
+
+    await this.respond(ctx.chatId,
+      `📤 *Approval sent to Mo.*\n\n` +
+      `*${prospects.length}* new ${showName} leads ready.\n` +
+      `${skippedAlreadySent > 0 ? `${skippedAlreadySent} already sent — deduped.\n` : ''}` +
+      `${campaignNote}\n\n` +
+      `Mo approves with \`/approve_${approvalId}\` to push all at once.`
+    );
+
+    return { success: true, message: `Launch: ${prospects.length} leads pending approval for ${showName}`, confidence: 'HIGH' };
+  }
+
+  // ── /convert [email or company] — campaign reply → LEAD_MASTER pipeline ───
+
+  private async runConvert(ctx: AgentContext): Promise<AgentResponse> {
+    const query = (ctx.args || '').trim();
+    if (!query) {
+      await this.respond(ctx.chatId,
+        'Usage: `/convert [email or company name]`\n\n' +
+        'Converts a campaign reply into a LEAD_MASTER pipeline entry and creates an EMAIL_FUNNEL row for Agent-19.\n\n' +
+        'Example: `/convert john@pharma.de`\nExample: `/convert PharmaCorp`'
+      );
+      return { success: false, message: 'No query', confidence: 'HIGH' };
+    }
+
+    // Step 1 — Find in CAMPAIGN_SALES by email or company name
+    const salesRows = await readSheet(SHEETS.CAMPAIGN_SALES).catch(() => [] as string[][]);
+    const queryLower = query.toLowerCase().trim();
+    const isEmail    = queryLower.includes('@');
+
+    let matchIndex = -1;
+    let matchRow: string[] = [];
+    for (let i = 1; i < salesRows.length; i++) {
+      const rowEmail   = (salesRows[i][5] || '').toLowerCase().trim();
+      const rowCompany = (salesRows[i][3] || '').toLowerCase().trim();
+      if (isEmail ? rowEmail === queryLower : rowCompany.includes(queryLower)) {
+        matchIndex = i + 1; // 1-indexed sheet row
+        matchRow   = salesRows[i];
+        break;
+      }
+    }
+
+    if (!matchRow.length) {
+      await this.respond(ctx.chatId,
+        `No campaign record found for "*${query}*" in CAMPAIGN_SALES.\n\n` +
+        `Run \`/replies\` to see recent campaign replies and get the email address.`
+      );
+      return { success: false, message: 'Not found in CAMPAIGN_SALES', confidence: 'HIGH' };
+    }
+
+    const companyName    = matchRow[3] || '';
+    const contactName    = matchRow[4] || '';
+    const contactEmail   = matchRow[5] || '';
+    const showName       = matchRow[2] || '';
+    const campaignId     = matchRow[1] || '';
+    const existingLeadId = matchRow[17] || '';
+
+    // Step 2 — Already converted?
+    if (existingLeadId) {
+      await this.respond(ctx.chatId,
+        `*${companyName}* is already in the pipeline as lead \`${existingLeadId}\`.\n\n` +
+        `Run \`/brief ${companyName}\` to generate a concept brief.`
+      );
+      return { success: true, message: 'Already converted', confidence: 'HIGH' };
+    }
+
+    // Step 3 — Check LEAD_MASTER dedup by email or company name
+    const masterRows = await readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]);
+    const emailLower  = contactEmail.toLowerCase().trim();
+    const existingRow = masterRows.slice(1).find(r =>
+      (r[4]  || '').toLowerCase() === emailLower ||
+      (r[21] || '').toLowerCase() === emailLower ||
+      (r[2]  || '').toLowerCase().trim() === companyName.toLowerCase().trim()
+    );
+
+    if (existingRow) {
+      const existingId = existingRow[0];
+      await updateCell(SHEETS.CAMPAIGN_SALES, matchIndex, 'R', existingId).catch(() => {});
+      await this.respond(ctx.chatId,
+        `*${companyName}* is already in Lead Master as \`${existingId}\`.\n\n` +
+        `CAMPAIGN_SALES linked. Run \`/brief ${companyName}\` to proceed.`
+      );
+      return { success: true, message: 'Already in LEAD_MASTER, linked', confidence: 'HIGH' };
+    }
+
+    const leadId = await generateLeadId();
+    const now    = new Date().toISOString();
+
+    const collectedInfo = {
+      standSize: matchRow[9]  || '',
+      budget:    matchRow[10] || '',
+      website:   matchRow[19] || '',
+    };
+
+    // Step 3 — Create LEAD_MASTER row
+    await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
+      id:              leadId,
+      timestamp:       now,
+      companyName,
+      contactName,
+      contactEmail,
+      contactTitle:    '',
+      showName,
+      showCity:        '',
+      standSize:       collectedInfo.standSize,
+      budget:          collectedInfo.budget,
+      industry:        '',
+      leadSource:      'instantly-campaign',
+      score:           '9',
+      scoreBreakdown:  JSON.stringify({ showFit: 2, sizeSignal: 2, industryFit: 1, dmSignal: 2, timeline: 2 }),
+      confidence:      'HIGH',
+      status:          'HOT',
+      trelloCardId:    '',
+      enrichmentStatus: 'DONE',
+      dmName:          contactName,
+      dmTitle:         '',
+      dmLinkedIn:      '',
+      dmEmail:         contactEmail,
+      outreachReadiness: 'CONTACTED',
+      language:        'en',
+      notes:           `Campaign reply converted. Campaign: ${campaignId}. Website: ${collectedInfo.website || '—'}`,
+    }));
+
+    // Step 4 — Create EMAIL_FUNNEL row so Agent-19 can continue the conversation
+    await appendRow(SHEETS.EMAIL_FUNNEL, objectToRow(SHEETS.EMAIL_FUNNEL, {
+      id:              `EF-${Date.now()}`,
+      leadId,
+      companyName,
+      contactName,
+      contactEmail,
+      gmailThreadId:   '',
+      lastMessageId:   '',
+      funnelStage:     'QUALIFYING',
+      lastContact:     now,
+      sentCount:       '0',
+      showName,
+      standSize:       collectedInfo.standSize,
+      budget:          collectedInfo.budget,
+      notes:           `Converted from Instantly campaign reply`,
+      conversationLog: '[]',
+    })).catch((err: any) => logger.warn(`[Convert] EMAIL_FUNNEL write failed: ${err.message}`));
+
+    // Step 5 — Start pipeline tracker
+    pipelineRunner.start(leadId, companyName);
+
+    // Step 6 — Link CAMPAIGN_SALES back to the lead
+    await updateCell(SHEETS.CAMPAIGN_SALES, matchIndex, 'R', leadId).catch(() => {});
+
+    // Mark pending-conversion KB entry as resolved
+    await updateKnowledge(`pending-conversion-${emailLower}`, {
+      tags:    'pending-conversion,resolved',
+      content: `Converted to LEAD_MASTER (${leadId}) on ${now}. Company: ${companyName}`,
+    }).catch(() => {});
+
+    await sendToMo(formatType2(
+      `Pipeline Entry: ${companyName}`,
+      `*${companyName}* added to pipeline from Instantly campaign reply.\n\n` +
+      `Lead ID: ${leadId} (HOT)\n` +
+      `Contact: ${contactName} — ${contactEmail}\n` +
+      `${collectedInfo.standSize ? `Stand: ${collectedInfo.standSize} sqm\n` : ''}` +
+      `${collectedInfo.budget ? `Budget: ${collectedInfo.budget}\n` : ''}` +
+      `\nRun \`/brief ${companyName}\` to generate a concept brief.`
+    ));
+
+    await this.respond(ctx.chatId,
+      `✅ *${companyName}* converted to pipeline!\n\n` +
+      `Lead ID: \`${leadId}\` (HOT)\n` +
+      `Show: ${showName}\n` +
+      `Contact: ${contactName} — ${contactEmail}\n` +
+      `${collectedInfo.standSize ? `Stand: ${collectedInfo.standSize} sqm\n` : ''}` +
+      `${collectedInfo.budget ? `Budget: ${collectedInfo.budget}\n` : ''}` +
+      `\nNext: \`/brief ${companyName}\` to generate concept brief.`
+    );
+
+    return { success: true, message: `Converted ${companyName} to pipeline (${leadId})`, confidence: 'HIGH' };
   }
 
   private async updateLogStatus(logId: string, status: string, ref: string): Promise<void> {
