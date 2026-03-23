@@ -4,10 +4,11 @@ import { UserRole } from '../config/access';
 import { TRELLO_CONFIG } from '../config/trello';
 import {
   getBoardCardsWithListNames,
-  findListByName,
+  getBoardLists,
   moveCard,
   addComment,
   TrelloCard,
+  TrelloList,
 } from '../services/trello/client';
 import { formatType2 } from '../services/telegram/bot';
 import { agentEventBus } from '../services/agent-event-bus';
@@ -27,11 +28,19 @@ export class CardManagerAgent extends BaseAgent {
     const args = ctx.args?.trim();
 
     if (!args) {
+      const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+      let stagesText = TRELLO_CONFIG.pipelineStages.map(s => `  • ${s}`).join('\n');
+      if (boardId) {
+        try {
+          const liveLists = await getBoardLists(boardId);
+          if (liveLists.length > 0) stagesText = liveLists.map(l => `  • ${l.name}`).join('\n');
+        } catch { /* fall back to hardcoded list */ }
+      }
       await this.respond(
         ctx.chatId,
         `Usage: \`/movecard [client name] | [target stage]\`\n\n` +
-        `Pipeline stages:\n` +
-        TRELLO_CONFIG.pipelineStages.map(s => `  • ${s}`).join('\n')
+        `Pass stage as number ("03"), keyword ("concept brief"), or ordinal ("third").\n\n` +
+        `Pipeline stages:\n${stagesText}`
       );
       return { success: false, message: 'No args provided', confidence: 'LOW' };
     }
@@ -89,15 +98,16 @@ export class CardManagerAgent extends BaseAgent {
 
     const match = matches[0];
 
-    // Find the target list
-    const targetList = await findListByName(boardId, targetStageName);
+    // Resolve the target stage: fetch live lists, match by numeric prefix or keyword
+    const { list: targetList, liveLists } = await this.resolveStage(boardId, targetStageName);
 
     if (!targetList) {
+      const stagesText = liveLists.length > 0
+        ? liveLists.map(l => `  • ${l.name}`).join('\n')
+        : TRELLO_CONFIG.pipelineStages.map(s => `  • ${s}`).join('\n');
       await this.respond(
         ctx.chatId,
-        `Stage "*${targetStageName}*" not found.\n\n` +
-        `Available stages:\n` +
-        TRELLO_CONFIG.pipelineStages.map(s => `  • ${s}`).join('\n')
+        `Stage "*${targetStageName}*" not found.\n\nAvailable stages:\n${stagesText}`
       );
       return { success: false, message: `Stage not found: ${targetStageName}`, confidence: 'LOW' };
     }
@@ -157,6 +167,49 @@ export class CardManagerAgent extends BaseAgent {
       confidence: 'HIGH',
       data: { cardId: match.id, from: fromStage, to: targetList.name },
     };
+  }
+
+  /**
+   * Fetch live board lists and resolve a user-supplied stage identifier to the
+   * correct TrelloList without guessing or hardcoding stage names.
+   *
+   * Matching priority (uses the FULL name returned by the API):
+   *   1. Numeric prefix: "3" | "03" | "stage 3" → matches list whose name starts with "03"
+   *   2. Ordinal word: "third" → "03", "fourth" → "04", etc.
+   *   3. Keyword substring fallback (case-insensitive): "concept brief" → "03 Concept Brief"
+   */
+  private async resolveStage(
+    boardId: string,
+    input: string,
+  ): Promise<{ list: TrelloList | null; liveLists: TrelloList[] }> {
+    const liveLists = await getBoardLists(boardId);
+    const q = input.toLowerCase().trim();
+
+    // Extract numeric value from input: "3", "03", "stage 3", "step 3"
+    const numMatch = q.match(/\b0?(\d{1,2})\b/);
+    const targetPrefix = numMatch ? numMatch[1].padStart(2, '0') : null;
+
+    // Map ordinal words to two-digit prefixes
+    const ORDINALS: Record<string, string> = {
+      first: '01', second: '02', third: '03', fourth: '04',
+      fifth: '05', sixth: '06', seventh: '07',
+    };
+    const ordEntry = Object.entries(ORDINALS).find(([w]) => q.includes(w));
+    const prefix = targetPrefix ?? (ordEntry ? ordEntry[1] : null);
+
+    const list =
+      liveLists.find(l => {
+        const lName = l.name.toLowerCase();
+        // 1. Numeric prefix match: "03" in "03 Concept Brief" or "03 — Concept Brief"
+        if (prefix) {
+          const lPre = lName.match(/^0?(\d{1,2})/)?.[1]?.padStart(2, '0');
+          if (lPre === prefix) return true;
+        }
+        // 2. Keyword substring match
+        return lName.includes(q);
+      }) ?? null;
+
+    return { list, liveLists };
   }
 
   private findCards(cards: TrelloCard[], search: string): TrelloCard[] {
