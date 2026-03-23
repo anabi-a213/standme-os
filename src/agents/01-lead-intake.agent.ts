@@ -8,6 +8,7 @@ import { appendRow, readSheet, updateCell, rowToObject, objectToRow, sheetUrl } 
 import { createCard, findListByName } from '../services/trello/client';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { detectLanguage, generateText } from '../services/ai/client';
+import { logger } from '../utils/logger';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { registerApproval } from '../services/approvals';
 import { agentEventBus } from '../services/agent-event-bus';
@@ -116,6 +117,30 @@ export class LeadIntakeAgent extends BaseAgent {
       return { success: false, message: 'Concurrent lead creation blocked', confidence: 'LOW' };
     }
 
+    // Hard block on exact company name match — prevent duplicate rows
+    try {
+      const exactRows = await readSheet(SHEETS.LEAD_MASTER);
+      const exactMatch = exactRows.slice(1).find(r =>
+        (r[2] || '').toLowerCase().trim() === companyName.toLowerCase().trim()
+      );
+      if (exactMatch) {
+        conflictGuard.release(lockKey);
+        const existingId = exactMatch[0];
+        await this.respond(ctx.chatId,
+          `⚠️ *${companyName}* already exists in Lead Master as \`${existingId}\`.\n\n` +
+          `Use \`/brief ${companyName}\` to continue with the existing lead.\n` +
+          `Or \`/updatelead ${companyName}\` to add new information.`
+        );
+        return {
+          success: false,
+          message: `Duplicate: ${companyName} already exists as ${existingId}`,
+          confidence: 'HIGH',
+        };
+      }
+    } catch {
+      // Never block intake if this check fails
+    }
+
     // Write to Lead Master Sheet
     try {
       await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, leadData));
@@ -140,30 +165,41 @@ export class LeadIntakeAgent extends BaseAgent {
       content: `${companyName} (${industry || 'unknown industry'}) attending ${showName || 'unknown show'}. Lead score: ${scoreResult.total}/10 (${scoreResult.status}). Contact: ${contactName || 'unknown'}. Budget: ${budget || 'unknown'}. Stand: ${standSize || 'unknown'} sqm. Language: ${language}.`,
     });
 
-    // Create Trello card for HOT/WARM leads
+    // Create Trello card for all leads — COLD leads still need a card
+    // so /brief and other agents can post comments to it
     let trelloCardId = '';
-    if (scoreResult.status === 'HOT' || scoreResult.status === 'WARM') {
-      const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
-      const listName = '01 — New Inquiry';
-      const list = await findListByName(boardId, listName);
+    const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+    const listName = '01 — New Inquiry';
+    const list = await findListByName(boardId, listName);
 
-      if (list) {
-        const card = await createCard(
-          list.id,
-          `[${leadId}] ${companyName} — ${showName || 'Unknown Show'}`,
-          `Lead ID: ${leadId}\nScore: ${scoreResult.total}/10 (${scoreResult.status})\n` +
-          `Company: ${companyName}\nContact: ${contactName || 'N/A'}\n` +
-          `Show: ${showName || 'N/A'} (${showValidation.match?.city || 'N/A'})\n` +
-          `Size: ${standSize || 'N/A'} sqm\nBudget: ${budget || 'N/A'}\n` +
-          `Industry: ${industry || 'N/A'}\nConfidence: ${showValidation.confidence}\n` +
-          `\nScore Breakdown:\n` +
-          `  Show Fit: ${scoreResult.breakdown.showFit}/2\n` +
-          `  Size Signal: ${scoreResult.breakdown.sizeSignal}/2\n` +
-          `  Industry Fit: ${scoreResult.breakdown.industryFit}/2\n` +
-          `  DM Signal: ${scoreResult.breakdown.dmSignal}/2\n` +
-          `  Timeline: ${scoreResult.breakdown.timeline}/2`
-        );
-        trelloCardId = card.id;
+    if (list) {
+      const card = await createCard(
+        list.id,
+        `[${leadId}] ${companyName} — ${showName || 'Unknown Show'}`,
+        `Lead ID: ${leadId}\nScore: ${scoreResult.total}/10 (${scoreResult.status})\n` +
+        `Company: ${companyName}\nContact: ${contactName || 'N/A'}\n` +
+        `Show: ${showName || 'N/A'} (${showValidation.match?.city || 'N/A'})\n` +
+        `Size: ${standSize || 'N/A'} sqm\nBudget: ${budget || 'N/A'}\n` +
+        `Industry: ${industry || 'N/A'}\nConfidence: ${showValidation.confidence}\n` +
+        `\nScore Breakdown:\n` +
+        `  Show Fit: ${scoreResult.breakdown.showFit}/2\n` +
+        `  Size Signal: ${scoreResult.breakdown.sizeSignal}/2\n` +
+        `  Industry Fit: ${scoreResult.breakdown.industryFit}/2\n` +
+        `  DM Signal: ${scoreResult.breakdown.dmSignal}/2\n` +
+        `  Timeline: ${scoreResult.breakdown.timeline}/2`
+      );
+      trelloCardId = card.id;
+
+      // Write trelloCardId back to the row we just created
+      // so /brief and other agents can find it immediately
+      try {
+        const rows = await readSheet(SHEETS.LEAD_MASTER);
+        const rowIdx = rows.findIndex(r => r[0] === leadId);
+        if (rowIdx >= 0) {
+          await updateCell(SHEETS.LEAD_MASTER, rowIdx + 1, 'Q', trelloCardId);
+        }
+      } catch (err: any) {
+        logger.warn(`[LeadIntake] Could not save trelloCardId: ${err.message}`);
       }
     }
 
@@ -321,25 +357,36 @@ export class LeadIntakeAgent extends BaseAgent {
   private async checkDuplicate(company: string, email?: string, show?: string): Promise<string | null> {
     try {
       const rows = await readSheet(SHEETS.LEAD_MASTER);
-      for (const row of rows.slice(1)) { // skip header
-        const existingCompany = (row[2] || '').toLowerCase();
-        const existingEmail = (row[4] || '').toLowerCase();
+      const newCompanyNorm = company.toLowerCase().trim();
+      const newDomain = email?.split('@')[1]?.toLowerCase();
 
-        // Fuzzy company match
-        if (existingCompany && company.toLowerCase().includes(existingCompany.substring(0, 5))) {
-          return `${row[2]} (${row[4]})`;
+      for (const row of rows.slice(1)) {
+        const existingCompany = (row[2] || '').toLowerCase().trim();
+        const existingEmail   = (row[4] || '').toLowerCase().trim();
+
+        // Exact company name match (case-insensitive)
+        if (existingCompany === newCompanyNorm) {
+          return `${row[2]} (exact name match)`;
         }
+
+        // Company name contains match (either direction)
+        if (existingCompany.length > 4 && (
+          newCompanyNorm.includes(existingCompany) ||
+          existingCompany.includes(newCompanyNorm)
+        )) {
+          return `${row[2]} (partial name match)`;
+        }
+
         // Email domain match
-        if (email && existingEmail) {
-          const newDomain = email.split('@')[1];
-          const existDomain = existingEmail.split('@')[1];
-          if (newDomain && existDomain && newDomain === existDomain) {
-            return `${row[2]} (${row[4]})`;
+        if (newDomain && existingEmail.includes('@')) {
+          const existingDomain = existingEmail.split('@')[1];
+          if (newDomain === existingDomain) {
+            return `${row[2]} (same email domain)`;
           }
         }
       }
     } catch {
-      // Don't block lead intake if dupe check fails
+      // Never block intake if dupe check fails
     }
     return null;
   }
