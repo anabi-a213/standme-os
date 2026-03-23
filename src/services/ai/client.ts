@@ -10,14 +10,14 @@ function getAIClient(): Anthropic {
   return _client;
 }
 
-export async function generateText(prompt: string, systemPrompt?: string, maxTokens = 2000): Promise<string> {
+export async function generateText(prompt: string, systemPrompt?: string, maxTokens = 2000, timeoutMs = 30000): Promise<string> {
   return retry(async () => {
     const response = await getAIClient().messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: maxTokens,
       ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: [{ role: 'user', content: prompt }],
-    }, { timeout: 30000 });
+    }, { timeout: timeoutMs });
 
     const block = response.content[0];
     return block.type === 'text' ? block.text : '';
@@ -226,7 +226,8 @@ Write with confidence. Every sentence earns its place. No em dashes. No filler.`
   return generateText(
     prompt,
     'You are StandMe\'s senior creative director. You have 15 years designing exhibition stands across MENA and Europe. You write briefs that win projects. Your language is precise, visual, and confident. Never use em dashes. Never use corporate filler.',
-    tier === 1 ? 2000 : 3500
+    tier === 1 ? 2000 : 4500,
+    60000,
   );
 }
 
