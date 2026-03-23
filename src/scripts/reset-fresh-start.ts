@@ -23,28 +23,35 @@
  */
 
 import * as dotenv from 'dotenv';
-dotenv.config();
+import * as path from 'path';
+// Load .env from the src/ root regardless of where the script is invoked from
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 import { google, sheets_v4 } from 'googleapis';
 import axios from 'axios';
 import { getGoogleAuth } from '../services/google/auth';
 
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || '';
-const TRELLO_KEY = process.env.TRELLO_API_KEY || '';
+const DEFAULT_SHEET_ID = process.env.SPREADSHEET_ID || '';
+const TRELLO_KEY  = process.env.TRELLO_API_KEY || '';
 const TRELLO_TOKEN = process.env.TRELLO_TOKEN || '';
 const TRELLO_BOARD = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
 
+function sheetId(envKey: string): string {
+  return process.env[envKey] || DEFAULT_SHEET_ID;
+}
+
 // ── Sheets to wipe (keep header row 1) ──────────────────────────────
+// Each entry includes the env key for its spreadsheet ID
 const SHEETS_TO_CLEAR = [
-  { tab: 'Leads',         name: 'LEAD_MASTER'     },
-  { tab: 'EmailFunnel',   name: 'EMAIL_FUNNEL'    },
-  { tab: 'Queue',         name: 'OUTREACH_QUEUE'  },
-  { tab: 'OutreachLog',   name: 'OUTREACH_LOG'    },
-  { tab: 'CampaignSales', name: 'CAMPAIGN_SALES'  },
-  { tab: 'SystemLog',     name: 'SYSTEM_LOG'      },
-  { tab: 'WorkflowLog',   name: 'WORKFLOW_LOG'    },
-  { tab: 'Hub',           name: 'CROSS_AGENT_HUB' },
-  { tab: 'Lessons',       name: 'LESSONS_LEARNED' },
+  { tab: 'Leads',         name: 'LEAD_MASTER',     sid: sheetId('SHEET_LEAD_MASTER')     },
+  { tab: 'EmailFunnel',   name: 'EMAIL_FUNNEL',    sid: sheetId('SPREADSHEET_ID')         },
+  { tab: 'Queue',         name: 'OUTREACH_QUEUE',  sid: sheetId('SHEET_OUTREACH_QUEUE')  },
+  { tab: 'OutreachLog',   name: 'OUTREACH_LOG',    sid: sheetId('SHEET_OUTREACH_LOG')    },
+  { tab: 'CampaignSales', name: 'CAMPAIGN_SALES',  sid: sheetId('SHEET_CAMPAIGN_SALES')  },
+  { tab: 'SystemLog',     name: 'SYSTEM_LOG',      sid: sheetId('SHEET_SYSTEM_LOG')      },
+  { tab: 'WorkflowLog',   name: 'WORKFLOW_LOG',    sid: DEFAULT_SHEET_ID                 },
+  { tab: 'Hub',           name: 'CROSS_AGENT_HUB', sid: sheetId('SHEET_CROSS_AGENT_HUB') },
+  { tab: 'Lessons',       name: 'LESSONS_LEARNED', sid: sheetId('SHEET_LESSONS_LEARNED') },
 ];
 
 // ── KB: source prefixes that are lead-specific ───────────────────────
@@ -60,10 +67,10 @@ const KB_REMOVE_SOURCE_PREFIXES = [
 const KB_REMOVE_TAGS = ['brief', 'concept', 'lesson'];
 
 // ── Clear one sheet (rows 2 onwards, keep header) ────────────────────
-async function clearSheet(sheets: sheets_v4.Sheets, tab: string, name: string): Promise<void> {
+async function clearSheet(sheets: sheets_v4.Sheets, tab: string, name: string, sid: string): Promise<void> {
   try {
     await sheets.spreadsheets.values.clear({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: sid,
       range: `${tab}!A2:ZZ`,
     });
     console.log(`  ✅ ${name} (${tab})`);
@@ -74,8 +81,9 @@ async function clearSheet(sheets: sheets_v4.Sheets, tab: string, name: string): 
 
 // ── Selectively clean Knowledge Base ────────────────────────────────
 async function cleanKnowledgeBase(sheets: sheets_v4.Sheets): Promise<void> {
+  const KB_SHEET_ID = process.env.SHEET_KNOWLEDGE_BASE || DEFAULT_SHEET_ID;
   const resp = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: KB_SHEET_ID,
     range: 'Knowledge!A:G',
   });
   const rows = (resp.data.values || []) as string[][];
@@ -109,13 +117,13 @@ async function cleanKnowledgeBase(sheets: sheets_v4.Sheets): Promise<void> {
 
   // Rewrite the sheet: clear then write back kept rows
   await sheets.spreadsheets.values.clear({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: KB_SHEET_ID,
     range: 'Knowledge!A:G',
   });
 
   if (toKeep.length > 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: KB_SHEET_ID,
       range: 'Knowledge!A1',
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: toKeep },
@@ -173,7 +181,7 @@ async function main(): Promise<void> {
   console.log('  StandMe OS — Fresh Start Reset');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-  if (!SPREADSHEET_ID) {
+  if (!DEFAULT_SHEET_ID) {
     console.error('❌ SPREADSHEET_ID not set in .env — aborting');
     process.exit(1);
   }
@@ -183,8 +191,8 @@ async function main(): Promise<void> {
 
   // 1. Clear sheets
   console.log('📊  Clearing Google Sheets...');
-  for (const { tab, name } of SHEETS_TO_CLEAR) {
-    await clearSheet(sheets, tab, name);
+  for (const { tab, name, sid } of SHEETS_TO_CLEAR) {
+    await clearSheet(sheets, tab, name, sid);
   }
 
   // 2. Selective KB clean
