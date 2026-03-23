@@ -106,13 +106,22 @@ export async function generateBrief(context: {
     ? STAND_TYPE_CONSTRAINTS[context.standType.toLowerCase()] || ''
     : '';
 
-  // Tier 1: basic single-concept brief with explicit assumptions
-  const assumptionsBlock = tier === 1
-    ? `\nASSUMPTIONS (not confirmed by client — flag each one):
-- Stand size: ASSUMED ~36 sqm (typical for this industry at this show)
-- Budget: ASSUMED mid-range (confirm before proceeding)
-- Stand type: ASSUMED inline or corner
-Mark each assumption clearly in the brief with [ASSUMED].`
+  // Assumptions block — always injected so the brief works even with partial data.
+  // Claude must infer realistic values from show + industry context, not leave blanks.
+  const missingFields: string[] = [];
+  if (!context.standSize)  missingFields.push('stand size');
+  if (!context.budget)     missingFields.push('budget');
+  if (!context.standType)  missingFields.push('stand type');
+  if (!context.mainGoal)   missingFields.push('client goal');
+
+  const assumptionsBlock = missingFields.length > 0
+    ? `\nASSUMPTIONS REQUIRED — the following were not confirmed by the client: ${missingFields.join(', ')}.
+For each missing field, make the most realistic assumption based on:
+  1. The show (${context.showName || 'the show'} in ${context.showCity || 'the city'}) — what is typical stand size and budget for this show?
+  2. The industry (${context.industry || 'this sector'}) — what do companies in this space typically spend and need?
+  3. Any other data provided above.
+Make a specific assumption (e.g. "36 sqm inline" not "unknown size") and mark it [ASSUMED].
+The brief must be fully usable as-is — never leave a field blank or say "to be confirmed".`
     : '';
 
   const conceptsToWrite = tier === 1 ? 1 : 2;
@@ -156,15 +165,18 @@ Describe the stand from the visitor's perspective walking past the main aisle:
 
 ## Design Concept A: [Give it a descriptive name, e.g. "The Open Forum" or "Brand Fortress"]
 Write a single buildable exhibition stand concept using the anatomy guide above.
-Cover: floor plan zones, back wall treatment, flooring, overhead (if any), reception counter,
-key display element, meeting solution, lighting, hero graphic.
-Mark any assumptions with [ASSUMED]. Note what changes once size/budget are confirmed.`
+If any data is missing, assume the most realistic value for this show and industry — never
+leave a blank. Cover: floor plan zones, back wall treatment, flooring, overhead (if any),
+reception counter, key display element, meeting solution, lighting, hero graphic.
+Mark every assumption with [ASSUMED] so the client knows what to confirm.`
     : `${standAnatomyGuide}
 
 ## Design Concept A: The Refined Direction — [Give it a descriptive name]
 A clean, confident exhibition stand. Write as a stand designer briefing the build team.
+For any missing data, assume the most realistic value for ${context.showName || 'this show'} and
+the ${context.industry || 'this'} industry — commit to a specific assumption, mark it [ASSUMED].
 Cover all anatomy elements:
-- Floor plan: how the ${context.standSize || '[size]'} sqm is divided into zones
+- Floor plan: how the ${context.standSize ? context.standSize + ' sqm' : '[ASSUMED size]'} is divided into zones
 - Back wall / hero graphic: material, colour, graphic treatment
 - Flooring: material and finish
 - Overhead: fascia, truss, or none — and why
