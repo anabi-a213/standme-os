@@ -72,6 +72,13 @@ export async function sendToMo(message: string, parseMode: 'Markdown' | 'HTML' =
     await bot.sendMessage(parseInt(moId), message, { parse_mode: parseMode });
   } catch (err: any) {
     logger.error(`Failed to send to Mo: ${err.message}`);
+    // Retry without markdown — prevents message loss when AI-generated content
+    // contains unescaped special chars (e.g. * or _ in brief text)
+    try {
+      await bot.sendMessage(parseInt(moId), message);
+    } catch (err2: any) {
+      logger.error(`Failed to send to Mo (plain): ${err2.message}`);
+    }
   }
 }
 

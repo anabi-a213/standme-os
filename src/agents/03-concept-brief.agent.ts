@@ -125,18 +125,29 @@ export class ConceptBriefAgent extends BaseAgent {
         continue; // skip to next concept
       }
 
-      // Upload master to Drive → permanent URL for the results gallery
+      // Upload master to Drive when we have base64 (text-to-image path).
+      // Mystic returns cdnUrl only (base64 is ''), so skip Drive upload and
+      // use cdnUrl directly — avoids uploading an empty/corrupt file.
       let masterUrl = '';
-      try {
-        const { publicUrl } = await uploadBase64ImageToDrive(
-          base64,
-          `${companyName}-concept-${label}-master.jpg`,
-          folderId || undefined,
-        );
-        masterUrl = publicUrl;
+      if (base64) {
+        try {
+          const { publicUrl } = await uploadBase64ImageToDrive(
+            base64,
+            `${companyName}-concept-${label}-master.jpg`,
+            folderId || undefined,
+          );
+          masterUrl = publicUrl;
+          results.push({ concept: label, angle: 'master', url: masterUrl });
+        } catch (err: any) {
+          errors.push(`Concept ${label} master upload: ${err.message}`);
+          continue;
+        }
+      } else if (cdnUrl) {
+        // Mystic: CDN URL is the master — no Drive upload needed
+        masterUrl = cdnUrl;
         results.push({ concept: label, angle: 'master', url: masterUrl });
-      } catch (err: any) {
-        errors.push(`Concept ${label} master upload: ${err.message}`);
+      } else {
+        errors.push(`Concept ${label} master: no image data returned`);
         continue;
       }
 

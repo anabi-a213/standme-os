@@ -76,8 +76,12 @@ export async function generateMasterImage(
       logger.info(`[Freepik] Mystic COMPLETED response: ${JSON.stringify(pollResp.data).slice(0, 1500)}`);
 
       const d = pollResp.data?.data;
+      // Mystic returns generated as an array of strings: ["https://..."]
+      // Other Freepik endpoints return objects: [{url:"..."}]
+      // Handle both formats.
+      const gen0: any = d?.generated?.[0];
       const rawUrl: string =
-        d?.generated?.[0]?.url ??
+        (typeof gen0 === 'string' ? gen0 : gen0?.url as string | undefined) ??
         pollResp.data?.generated?.[0]?.url ??
         d?.images?.[0]?.url ??
         d?.url ??
