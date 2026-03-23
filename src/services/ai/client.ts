@@ -126,54 +126,120 @@ Clear, polished direction. Describe spatial experience: approach, first impressi
 Meaningfully different. Different spatial logic or brand story. Push further. Same detail level.`;
 
   const freepikPrompts = tier >= 2
-    ? `\n## Render Prompts (for Freepik AI — read every word carefully)
+    ? `\n## Render Prompts (for Freepik AI — follow every rule exactly)
 
-You are writing prompts for a photorealistic AI image generator that will produce the client's first visual impression of their exhibition stand. These prompts must be built from the actual client data above — never generic.
+You are writing prompts that will be sent directly to the Freepik Mystic
+photorealistic AI model to generate the client's first visual impression
+of their exhibition stand. These must describe a stand that is:
+  - REAL and BUILDABLE — no floating structures, no impossible geometry,
+    no fantasy materials. Everything described must be physically
+    constructable with real exhibition stand materials and budgets wood in many difrent finshes .
+  - CLIENT-SPECIFIC — built entirely from the actual data provided above.
+    Never use generic descriptions.
+  - VISUALLY IMPRESSIVE — wow-factor comes from great design , not fantasy.
+    Drama through lighting, materials, spatial hierarchy, and brand colour.
 
-Use ALL of this data in the prompts:
-- Company name and industry
-- Stand size and type (island/corner/peninsula/inline)
-- Main goal (meetings/brand awareness/product launch/lead gen)
-- Brand colours (if known — use exact colour names)
-- Must-have elements (if known)
-- Show name and city (affects lighting, audience, atmosphere)
-- Budget signal (high budget = premium materials, low = smart design)
+═══════════════════════════════════════
+BUILDABILITY RULES — never violate these:
+═══════════════════════════════════════
+- Stand must sit on the floor. No suspended platforms, no floating walls.
+- All walls and structures must be supported (no unsupported cantilevers
+  over 1.5m).
+- Use only real exhibition materials: wood  in paint or any finsh ,
+  tension fabric graphic walls, modular display panels, timber or
+  laminate flooring on raised platform, acrylic or tempered glass,
+  powder-coated steel, LED lightboxes, fabric-stretch graphics,
+  MDF/laminate cladding, modular meeting pods, LED strip lighting.
+- Meeting rooms: enclosed or semi-enclosed pods with clear or frosted
+  glass walls — not open "zones".
+- LED walls are allowed but must be mounted on a solid back wall or
+  structural frame, not floating.
+- when requaerd Ceiling structures: fabric canopy or fascia signage suspended from
+  truss — not solid ceilings unless stand is in a venue with rigging.
+- For budget signals: low budget = smart fabric graphics + standard
+  wood painted  + vinyl flooring. High budget = premium timber, glass, LED,
+  custom fabrication.
 
-Exhibition stand photography rules you must follow:
-- Always: "photorealistic architectural visualisation, exhibition stand, trade show floor, professional lighting, ultra sharp, 8K, wide establishing shot showing full stand in context"
-- Always include people: "visitors and staff at the stand, business attire, busy trade show atmosphere"
-- Always specify materials: name actual materials (brushed aluminium, backlit fabric, tempered glass, oak veneer, powder-coated steel, LED wall, etc.)
-- Never: "modern", "sleek", "innovative" — these are meaningless. Describe what you actually see.
-- Stand type affects composition:
-  - island: "four open sides, central focal point, visible from all aisles, 360-degree brand presence"
-  - corner: "two open faces at 90 degrees, strong corner anchor, high visibility from two aisles"
-  - peninsula: "three open sides, back wall anchor, traffic from three directions"
-  - inline: "single aisle face, depth zones drawing visitors in, back wall as hero visual"
+═══════════════════════════════════════
+PROMPT CONSTRUCTION RULES:
+═══════════════════════════════════════
+Required anchor phrase (always include):
+"photorealistic architectural visualisation, exhibition stand,
+trade show floor, professional even lighting, ultra sharp,
+4K, wide establishing shot showing the full stand in context,
+Canon 24mm lens, f/8 aperture"
 
-CONCEPT A must be: The refined, premium direction
-- Clean architecture, high-end materials
-- Colour palette directly from the brand
-- Lighting that creates atmosphere (warm/cool based on brand)
-- The stand as a calm, confident brand statement
-- Example structure: "[company] exhibition stand at [show], [sqm] [type] stand, [brand colour] backlit fabric walls, [material] flooring, [material] meeting pods, [specific feature from brief], visitors engaging with staff, professional trade show lighting, photorealistic architectural visualisation, 8K, wide shot"
+Always include people:
+"business visitors browsing the stand, staff in branded uniforms
+at the counter, busy trade show atmosphere, visitors walking past"
 
-CONCEPT B must be: The bold, high-impact direction
-- Meaningfully different spatial logic or visual language
-- One dramatic hero element that stops foot traffic
-- Could be: full LED wall, suspended signage, bold colour contrast, unexpected material, experiential activation
-- Same brand but louder expression
-- Example structure: same data points but different design language — describe what makes it visually different
+Always name real materials — never write "premium materials" or
+"high-end finishes". Say: "brushed aluminium frame, white tension
+fabric graphic walls, light oak laminate flooring on 10cm raised
+platform, frosted glass meeting pod, LED lightbox header panel"
 
-Both prompts must be on a SINGLE LINE with no line breaks.
-Start each with the label exactly as shown:
-FREEPIK_PROMPT_A: [prompt]
-FREEPIK_PROMPT_B: [prompt]
+Never use these words: modern, sleek, innovative, futuristic,
+cutting-edge, stunning, impressive, unique, state-of-the-art.
+Describe what you see, not how it feels.
 
-BAD example (do not do this):
-FREEPIK_PROMPT_A: Modern sleek exhibition stand with innovative design for tech company, professional lighting
+Stand type composition rules (use the client's actual stand type):
+  - island: "four open sides, central product display plinth,
+    360-degree fabric graphic walls, open traffic flow from all aisles"
+  - corner: "two open aisle faces at 90 degrees, corner header sign,
+    reception counter facing main aisle, display wall on back"
+  - peninsula: "three open sides, solid back wall with hero graphic,
+    open front and two sides, raised platform perimeter"
+  - inline: "single aisle-facing open side, back wall as hero brand
+    graphic, side walls with product display shelving,
+    depth zones drawing visitors from aisle to consultation area"
 
-GOOD example:
-FREEPIK_PROMPT_A: Star Box Coffee exhibition stand at Gulfood Dubai, 50sqm island stand with four open sides, warm amber backlit fabric walls in brand coffee-brown and cream tones, reclaimed wood flooring, brass accent fixtures, central coffee bar sampling station with overhead pendant lighting, branded cup display wall, baristas serving visitors in black uniforms, busy trade show floor atmosphere, photorealistic architectural visualisation, 8K, wide establishing shot`
+═══════════════════════════════════════
+CONCEPT RULES:
+═══════════════════════════════════════
+Use ALL of this client data:
+  - Company name: ${context.clientName}
+  - Industry: ${context.industry}
+  - Show: ${context.showName}, ${context.showCity}
+  - Stand size: ${context.standSize} sqm
+  - Stand type: ${context.standType || 'island'}
+  - Client goal: ${context.mainGoal || 'brand awareness and lead generation'}
+  - Brand colours: ${context.brandColours || 'unknown — infer from industry'}
+  - Must-have elements: ${context.mustHaveElements || 'none specified'}
+  - Budget signal: ${context.budget || 'mid-range'}
+  - Staff count: ${context.staffCount || '4-6 staff'}
+
+CONCEPT A — The Refined Direction:
+  Calm, confident brand statement. Clean spatial layout.
+  Premium materials for the budget level. Warm or cool lighting
+  that matches brand colours. One clear hero visual element
+  (large format graphic wall, backlit logo panel, or product display).
+  The stand looks expensive but achievable.
+  Format: "[ClientName] exhibition stand at [ShowName] [City],
+  [sqm] [type] stand, [brand colour] tension fabric back wall,
+  [material] flooring on raised platform, [specific feature],
+  [meeting solution], [lighting], staff in [brand colour] uniforms,
+  busy trade show atmosphere, [anchor phrase]"
+
+CONCEPT B — The Bold Direction:
+  Same stand footprint and type, but a meaningfully different
+  design language. One strong hero element that stops foot traffic —
+  choose ONE of: full-height LED video wall on back panel,
+  bold contrasting colour block geometry, dramatic overhead truss
+  with suspended fabric canopy and brand logo, or product hero
+  display as the central architectural feature.
+  Must still be 100% buildable. Bolder, not bigger.
+  Same data used, different visual story.
+
+Both prompts must be a SINGLE LINE with no line breaks.
+Output exactly:
+FREEPIK_PROMPT_A: [full prompt]
+FREEPIK_PROMPT_B: [full prompt]
+
+BAD (do not do this):
+FREEPIK_PROMPT_A: Modern sleek stand for tech company with innovative design
+
+GOOD:
+FREEPIK_PROMPT_A: Star Box Coffee exhibition stand at Gulfood Dubai 2025, 50sqm island stand, four open sides, warm coffee-brown tension fabric graphic walls with cream brand logo, light oak laminate flooring on 10cm raised platform, central circular coffee sampling bar with brass pendant lighting overhead, baristas in black branded uniforms serving espresso samples, LED lightbox header panel with tagline, branded cup display shelf on side panel, business visitors at the bar, busy trade show floor, photorealistic architectural visualisation, exhibition stand, professional even lighting, ultra sharp, 4K, wide establishing shot, Canon 24mm lens`
     : '';
 
   const prompt = `You are writing a Tier ${tier} concept brief for an exhibition stand project at StandMe.

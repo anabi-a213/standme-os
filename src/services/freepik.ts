@@ -15,41 +15,95 @@ function headers(): Record<string, string> {
   return { 'x-freepik-api-key': key, 'Content-Type': 'application/json' };
 }
 
+const MYSTIC_POLL_INTERVAL_MS = 5000;
+const MYSTIC_MAX_POLLS = 24; // 120s
+
 /**
- * Generate a single master image from a text prompt.
+ * Generate a single master image from a text prompt using the Mystic API.
+ * Mystic is async: submit → poll until COMPLETED → extract CDN URL.
  * Returns:
- *   base64  — raw base64 JPEG (for Drive upload)
- *   cdnUrl  — Freepik CDN URL if the API returned one (preferred input for changeCameraAngle)
- *   seed    — pass to changeCameraAngle for consistent lighting
+ *   base64  — always empty string (Mystic returns a URL, not base64)
+ *   cdnUrl  — Freepik CDN URL of the generated image (passed to changeCameraAngle)
+ *   seed    — always undefined (Mystic does not expose a seed)
  */
 export async function generateMasterImage(
   prompt: string,
 ): Promise<{ base64: string; cdnUrl: string; seed: number | undefined }> {
-  const resp = await axios.post(
-    `${BASE}/text-to-image`,
-    {
-      prompt,
-      num_images: 1,
-      image: { size: 'landscape_4_3' },
-      styling: { style: 'photo' },
-    },
-    { headers: headers(), timeout: 60_000 },
-  );
-
-  const data = resp.data?.data;
-  const base64: string  = data?.[0]?.base64 ?? '';
-  // Freepik change-camera rejects HTTP URLs — always upgrade to HTTPS
-  const cdnUrl: string  = (data?.[0]?.url ?? '').replace(/^http:\/\//i, 'https://');
-
-  if (!base64 && !cdnUrl) {
-    throw new Error('Freepik text-to-image returned no image data. Check your API plan limits.');
+  // Submit to Mystic
+  let submitResp: any;
+  try {
+    submitResp = await axios.post(
+      `${BASE}/mystic`,
+      {
+        prompt,
+        resolution: '2k',
+        aspect_ratio: 'widescreen_16_9',
+        model: 'realism',
+        hdr: 60,
+        creative_detailing: 40,
+        filter_nsfw: true,
+      },
+      { headers: headers(), timeout: 60_000 },
+    );
+  } catch (err: any) {
+    const detail = err.response
+      ? JSON.stringify(err.response.data).slice(0, 800)
+      : err.message;
+    logger.error(`[Freepik] Mystic submit HTTP ${err.response?.status ?? '?'}: ${detail}`);
+    throw new Error(`Freepik Mystic submit failed (${err.response?.status ?? 'network'}): ${detail}`);
   }
 
-  // Only pass seed when it's a valid value — change-camera requires seed >= 1
-  const rawSeed = resp.data?.meta?.seed;
-  const seed: number | undefined = (typeof rawSeed === 'number' && rawSeed >= 1) ? rawSeed : undefined;
-  logger.info(`[Freepik] Master image generated (seed: ${seed ?? 'none'}) — CDN URL: ${cdnUrl ? 'yes' : 'no'}`);
-  return { base64, cdnUrl, seed };
+  const taskId: string = submitResp.data?.data?.task_id ?? submitResp.data?.task_id ?? '';
+  if (!taskId) {
+    throw new Error(`Freepik Mystic: no task_id returned. Response: ${JSON.stringify(submitResp.data).slice(0, 500)}`);
+  }
+  logger.info(`[Freepik] Mystic task submitted: ${taskId}`);
+
+  // Poll until COMPLETED
+  for (let poll = 0; poll < MYSTIC_MAX_POLLS; poll++) {
+    await new Promise(r => setTimeout(r, MYSTIC_POLL_INTERVAL_MS));
+
+    const pollResp = await axios.get(
+      `${BASE}/mystic/${taskId}`,
+      { headers: headers(), timeout: 15_000 },
+    );
+
+    const status: string = pollResp.data?.data?.status ?? pollResp.data?.status ?? '';
+    logger.info(`[Freepik] Mystic task ${taskId} poll ${poll + 1}/${MYSTIC_MAX_POLLS}: ${status}`);
+
+    if (status === 'COMPLETED') {
+      // Dump full response so we can verify the real shape in Railway logs
+      logger.info(`[Freepik] Mystic COMPLETED response: ${JSON.stringify(pollResp.data).slice(0, 1500)}`);
+
+      const d = pollResp.data?.data;
+      const rawUrl: string =
+        d?.generated?.[0]?.url ??
+        pollResp.data?.generated?.[0]?.url ??
+        d?.images?.[0]?.url ??
+        d?.url ??
+        '';
+
+      if (!rawUrl) {
+        throw new Error(`Freepik Mystic task ${taskId} completed but returned no URL.`);
+      }
+
+      // Freepik change-camera rejects HTTP URLs — always upgrade to HTTPS
+      const cdnUrl = rawUrl.replace(/^http:\/\//i, 'https://');
+      logger.info(`[Freepik] Mystic master image ready — CDN URL: ${cdnUrl.slice(0, 80)}`);
+      return { base64: '', cdnUrl, seed: undefined };
+    }
+
+    if (status === 'FAILED') {
+      const detail = JSON.stringify(pollResp.data).slice(0, 500);
+      logger.error(`[Freepik] Mystic task ${taskId} FAILED: ${detail}`);
+      throw new Error(`Freepik Mystic task ${taskId} failed: ${detail}`);
+    }
+    // PENDING / IN_PROGRESS — keep polling
+  }
+
+  throw new Error(
+    `Freepik Mystic task ${taskId} timed out after ${MYSTIC_MAX_POLLS * MYSTIC_POLL_INTERVAL_MS / 1000}s.`,
+  );
 }
 
 /**
@@ -134,14 +188,14 @@ export async function changeCameraAngle(
       logger.info(`[Freepik] COMPLETED response: ${JSON.stringify(pollResp.data).slice(0, 1500)}`);
 
       // Defensive fallback chain — Freepik has changed the response shape across API versions
-      const d = pollResp.data;
+      const d = pollResp.data?.data;
       const url: string =
-        d?.data?.generated?.[0]?.url ||
-        d?.data?.images?.[0]?.url    ||
-        d?.data?.output?.[0]?.url    ||
-        d?.data?.result?.url         ||
-        d?.data?.url                 ||
-        d?.generated?.[0]?.url       ||
+        d?.generated?.[0]?.url       ??
+        d?.images?.[0]?.url          ??
+        d?.output?.[0]?.url          ??
+        d?.result?.url               ??
+        d?.url                       ??
+        pollResp.data?.generated?.[0]?.url ??
         '';
       if (!url) throw new Error(`Freepik change-camera task ${taskId} completed but returned no URL.`);
       return { url };
