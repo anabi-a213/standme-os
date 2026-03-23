@@ -12,6 +12,7 @@ import { sendToMo, formatType1, formatType2, sendToTeam } from '../services/tele
 import { pipelineRunner } from '../services/pipeline-runner';
 import { displayValue } from '../utils/confidence';
 import { generateMasterImage, changeCameraAngle, isFreepikConfigured } from '../services/freepik';
+import { logger } from '../utils/logger';
 import axios from 'axios';
 
 export class ConceptBriefAgent extends BaseAgent {
