@@ -3,7 +3,7 @@ import { logger } from '../utils/logger';
 
 const BASE = 'https://api.freepik.com/v1/ai';
 const POLL_INTERVAL_MS = 4000;
-const MAX_POLLS = 15;
+const MAX_POLLS = 30;
 
 export function isFreepikConfigured(): boolean {
   return !!process.env.FREEPIK_API_KEY;
@@ -130,7 +130,19 @@ export async function changeCameraAngle(
     logger.info(`[Freepik] task ${taskId} poll ${poll + 1}/${MAX_POLLS}: ${status}`);
 
     if (status === 'COMPLETED') {
-      const url: string = pollResp.data?.data?.generated?.[0]?.url ?? '';
+      // Dump full response once so we can see the real shape in production logs
+      logger.info(`[Freepik] COMPLETED response: ${JSON.stringify(pollResp.data).slice(0, 1500)}`);
+
+      // Defensive fallback chain — Freepik has changed the response shape across API versions
+      const d = pollResp.data;
+      const url: string =
+        d?.data?.generated?.[0]?.url ||
+        d?.data?.images?.[0]?.url    ||
+        d?.data?.output?.[0]?.url    ||
+        d?.data?.result?.url         ||
+        d?.data?.url                 ||
+        d?.generated?.[0]?.url       ||
+        '';
       if (!url) throw new Error(`Freepik change-camera task ${taskId} completed but returned no URL.`);
       return { url };
     }
