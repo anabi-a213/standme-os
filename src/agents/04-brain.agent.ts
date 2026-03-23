@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet } from '../services/google/sheets';
-import { getBoardCardsWithListNames } from '../services/trello/client';
+import { getBoardCardsWithListNames, getBoardLists, addComment } from '../services/trello/client';
 import { generateText, generateChat, detectLanguage } from '../services/ai/client';
 import { saveThreadEntry, setActiveFocus } from '../services/thread-context';
 import { formatType3, sendToTeam } from '../services/telegram/bot';
@@ -172,6 +172,8 @@ If you are unsure whether a command exists — it does NOT exist. Do not suggest
 3. NEVER write "I'll trigger...", "Let me execute...", "I will launch...", "I'm going to run..." — these are FAKE. Either run it with [ACTION:] or don't.
 4. If the user asks to run a command: ONE line response + [ACTION: /command args]. Nothing else. No explanation.
 5. NEVER fake success or describe what will happen. Let the actual command result speak.
+6. PIPELINE STAGE MATCHING: When calling /movecard, pass the numeric prefix ONLY — not the full stage name. The system resolves the full name from Trello's live list automatically. ✅ Correct: [ACTION: /movecard Pharma Corp | 03] ❌ Wrong: [ACTION: /movecard Pharma Corp | 03 Concept Brief]
+7. TIMEOUT RULE: If live data timed out, do NOT issue [ACTION:] tags for any write operation (movecard, newlead, enrich, brief). Tell Mo "Live data timed out — please retry in a moment."
 
 MULTI-STEP FLOW RULES:
 - "search drive for intersolar leads" → [ACTION: /importleads intersolar]
@@ -213,7 +215,7 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /dealanalysis — won/lost deal patterns analysis
 - /findfile [name] — search Google Drive
 - /indexdrive — re-index Google Drive
-- /movecard [client] | [stage] — move pipeline card (e.g. /movecard Pharma Corp | 04 Proposal Sent)
+- /movecard [client] | [stage] — move pipeline card. Pass numeric prefix only: /movecard Pharma Corp | 04  (system finds the full stage name automatically)
 - /crossboard — cross-board health check across all Trello boards
 - /post /caption /campaign /casestudy /portfolio /insight /contentplan — marketing content
 - /healthcheck — test all connected services (Trello, Sheets, Claude, Telegram)
@@ -459,7 +461,34 @@ export class BrainAgent extends BaseAgent {
         command: '/deadlines',
         extractArgs: () => '',
       },
+      // /movecard — "move [card] to [stage]", "move [card] to stage N", explicit /movecard
+      {
+        pattern: /^(?:\/movecard\s+(.+)\|(.+)|move\s+(.+?)\s+to\s+(?:stage\s+)?(\S+(?:\s+\S+)?))$/i,
+        command: '/movecard',
+        extractArgs: m => {
+          if (m[1] && m[2]) return `${m[1].trim()} | ${m[2].trim()}`;  // /movecard X | Y
+          return `${(m[3] || '').trim()} | ${(m[4] || '').trim()}`; // "move X to Y"
+        },
+      },
+      // /enrich [company] — "enrich [company]", "enrich leads for [company]", bare /enrich
+      {
+        pattern: /^(?:\/enrich(?:\s+(.+))?|enrich\s+(?:lead(?:s)?\s+(?:for\s+)?)?(.+))$/i,
+        command: '/enrich',
+        extractArgs: m => (m[1] || m[2] || '').trim(),
+      },
     ];
+
+    // ── Full Lead Setup Flow ───────────────────────────────────────────────────
+    // "set up lead for X", "full setup for X", "setup X in pipeline" — runs the
+    // full enrich → move → brief → comment sequence without waiting for Claude.
+    const setupMatch = message.trim().match(
+      /^(?:set\s*up\s+(?:lead\s+(?:for\s+)?)?|full\s+setup\s+(?:for\s+)?|setup\s+(?:lead\s+(?:for\s+)?)?)(.+?)(?:\s+in\s+pipeline)?$/i
+    );
+    if (setupMatch) {
+      const company = setupMatch[1].trim();
+      return this.runLeadSetupFlow(ctx, company);
+    }
+    // ── End Full Lead Setup Flow ───────────────────────────────────────────────
 
     for (const route of directRoutes) {
       const m = message.trim().match(route.pattern);
@@ -660,7 +689,15 @@ export class BrainAgent extends BaseAgent {
         const command = actionMatch[1].toLowerCase();
         const args = actionMatch[2].trim();
 
-        if (BRAIN_BLOCKED_COMMANDS.has(command)) {
+        // Write commands must not execute when live data timed out — the AI
+        // may have acted on stale or missing context.
+        const WRITE_COMMANDS = new Set(['/movecard', '/newlead', '/enrich', '/brief', '/convert', '/launch']);
+        if (dataTimedOut && WRITE_COMMANDS.has(command)) {
+          logger.warn(`[Brain] Blocked write command ${command} — live data timed out`);
+          await this.respond(ctx.chatId,
+            `⚠️ Live data timed out — *${command}* was not executed. Please retry in a moment.`
+          );
+        } else if (BRAIN_BLOCKED_COMMANDS.has(command)) {
           // Log the blocked auto-trigger but do NOT execute it
           logger.warn(`[Brain] Blocked auto-trigger of heavy command: ${command}`);
         } else {
@@ -1315,5 +1352,96 @@ INSIGHT: [company or person] | [type: budget|dm|preference|competitor|decision|s
 
     await this.respond(ctx.chatId, lines.join('\n'));
     return { success: true, message: 'System status shown', confidence: 'HIGH' };
+  }
+
+  // ── Full Lead Setup Flow ───────────────────────────────────────────────────
+  // Triggered by "set up lead for [company]" / "full setup for [company]"
+  // Runs: enrich → move to 02 Qualifying → generate concept brief → add brief URL as Trello comment → confirm
+  private async runLeadSetupFlow(ctx: AgentContext, company: string): Promise<AgentResponse> {
+    await this.respond(ctx.chatId, `Setting up *${company}* in the pipeline — running all steps now...`);
+
+    const steps: string[] = [];
+    let briefDocUrl = '';
+
+    // Step 1 — Enrich
+    try {
+      const enrichAgent = getAgent('/enrich');
+      if (enrichAgent) {
+        const enrichCtx: AgentContext = { ...ctx, command: '/enrich', args: company };
+        const enrichResult = await enrichAgent.run(enrichCtx);
+        steps.push(enrichResult.success ? `✅ Enriched` : `⚠️ Enrich: ${enrichResult.message}`);
+      } else {
+        steps.push('⚠️ Enrich agent not found');
+      }
+    } catch (err: any) {
+      steps.push(`❌ Enrich failed: ${err.message}`);
+    }
+
+    // Step 2 — Move to 02 Qualifying
+    try {
+      const cardAgent = getAgent('/movecard');
+      if (cardAgent) {
+        const moveCtx: AgentContext = { ...ctx, command: '/movecard', args: `${company} | 02` };
+        const moveResult = await cardAgent.run(moveCtx);
+        steps.push(moveResult.success ? `✅ Moved to Qualifying` : `⚠️ Move: ${moveResult.message}`);
+      } else {
+        steps.push('⚠️ Card manager agent not found');
+      }
+    } catch (err: any) {
+      steps.push(`❌ Move failed: ${err.message}`);
+    }
+
+    // Step 3 — Generate concept brief
+    try {
+      const briefAgent = getAgent('/brief');
+      if (briefAgent) {
+        const briefCtx: AgentContext = { ...ctx, command: '/brief', args: company };
+        const briefResult = await briefAgent.run(briefCtx);
+        steps.push(briefResult.success ? `✅ Brief generated` : `⚠️ Brief: ${briefResult.message}`);
+        // Try to extract Drive document URL from result data
+        if (briefResult.data?.docUrl) briefDocUrl = briefResult.data.docUrl as string;
+        else if (briefResult.data?.url) briefDocUrl = briefResult.data.url as string;
+      } else {
+        steps.push('⚠️ Brief agent not found');
+      }
+    } catch (err: any) {
+      steps.push(`❌ Brief failed: ${err.message}`);
+    }
+
+    // Step 4 — Add brief URL as Trello comment (if we got a URL and a card exists)
+    if (briefDocUrl) {
+      try {
+        const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+        if (boardId) {
+          const { getBoardCardsWithListNames: getCards } = await import('../services/trello/client');
+          const cards = await getCards(boardId);
+          const q = company.toLowerCase();
+          const card = cards.find(c =>
+            c.name.toLowerCase().includes(q) || q.includes(c.name.toLowerCase().slice(0, 8))
+          );
+          if (card) {
+            await addComment(card.id, `📄 Concept Brief: ${briefDocUrl}`);
+            steps.push(`✅ Brief URL added to Trello card`);
+          } else {
+            steps.push(`⚠️ Could not find Trello card to attach brief URL`);
+          }
+        }
+      } catch (err: any) {
+        steps.push(`⚠️ Brief comment failed: ${err.message}`);
+      }
+    }
+
+    const allOk = steps.every(s => s.startsWith('✅'));
+    const summary = allOk
+      ? `✅ *${company}* is fully set up in the pipeline.\n\n${steps.join('\n')}`
+      : `*${company}* setup complete with notes:\n\n${steps.join('\n')}`;
+
+    await this.respond(ctx.chatId, summary);
+    return {
+      success: allOk,
+      message: `Lead setup flow for ${company}: ${steps.length} steps`,
+      confidence: 'HIGH',
+      data: { company, briefDocUrl },
+    };
   }
 }
