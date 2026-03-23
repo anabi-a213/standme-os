@@ -784,15 +784,18 @@ export async function uploadBase64ImageToDrive(
   if (!fileId) throw new Error(`uploadBase64ImageToDrive: Drive did not return a file ID for "${fileName}".`);
 
   // Make publicly readable BEFORE returning the URL — Freepik change-camera
-  // needs a clean direct URL with no cookie/redirect. webContentLink redirects;
-  // the uc?id=...&export=download format serves the file directly.
+  // requires a direct HTTPS image URL with no redirects or auth.
+  // lh3.googleusercontent.com/d/{fileId} is Google's direct image CDN —
+  // it serves the file without redirect, no cookies needed, pure HTTPS.
+  // uc?id=...&export=download and webContentLink both redirect through a
+  // virus-scan page that Freepik cannot follow.
   await drive.permissions.create({
     fileId,
     supportsAllDrives: true,
     requestBody: { role: 'reader', type: 'anyone' },
   });
 
-  const publicUrl = `https://drive.google.com/uc?id=${fileId}&export=download`;
+  const publicUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
 
   logger.info(`[Drive] Image uploaded: ${fileName} → ${fileId}`);
   return { fileId, publicUrl };

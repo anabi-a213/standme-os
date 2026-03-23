@@ -114,11 +114,10 @@ export class ConceptBriefAgent extends BaseAgent {
     ]) {
       // Generate master image
       let base64: string            = '';
-      let cdnUrl: string            = '';
       let seed:   number | undefined;
       try {
         await this.respond(ctx.chatId, `⏳ Concept ${label}: generating master image...`);
-        ({ base64, cdnUrl, seed } = await generateMasterImage(prompt));
+        ({ base64, seed } = await generateMasterImage(prompt));
       } catch (err: any) {
         errors.push(`Concept ${label} master: ${err.message}`);
         continue; // skip to next concept
@@ -141,10 +140,10 @@ export class ConceptBriefAgent extends BaseAgent {
 
       await this.respond(ctx.chatId, `✅ Concept ${label} master done. Generating 3 angles...`);
 
-      // Image to pass to change-camera:
-      // Prefer the Freepik CDN URL — their API always accepts their own CDN.
-      // Fall back to raw base64 (no data URI wrapper — Freepik rejects data: scheme).
-      const imageForFreepik = cdnUrl || base64;
+      // image-change-camera only accepts public HTTPS URLs — never base64.
+      // masterUrl is the lh3.googleusercontent.com/d/{fileId} Drive CDN URL,
+      // which is direct HTTPS with no redirects — the format Freepik requires.
+      const imageForFreepik = masterUrl;
 
       // Run the 3 non-front angles in parallel via Promise.allSettled
       const angleSettled = await Promise.allSettled(
