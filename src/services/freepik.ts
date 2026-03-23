@@ -17,12 +17,14 @@ function headers(): Record<string, string> {
 
 /**
  * Generate a single master image from a text prompt.
- * Returns the base64-encoded JPEG and the seed used (pass seed to
- * changeCameraAngle for consistent lighting across all angles).
+ * Returns:
+ *   base64  — raw base64 JPEG (for Drive upload)
+ *   cdnUrl  — Freepik CDN URL if the API returned one (preferred input for changeCameraAngle)
+ *   seed    — pass to changeCameraAngle for consistent lighting
  */
 export async function generateMasterImage(
   prompt: string,
-): Promise<{ base64: string; seed: number }> {
+): Promise<{ base64: string; cdnUrl: string; seed: number }> {
   const resp = await axios.post(
     `${BASE}/text-to-image`,
     {
@@ -35,43 +37,65 @@ export async function generateMasterImage(
   );
 
   const data = resp.data?.data;
-  const base64: string = data?.[0]?.base64 ?? data?.[0]?.url ?? '';
-  if (!base64) {
+  const base64: string  = data?.[0]?.base64 ?? '';
+  const cdnUrl: string  = data?.[0]?.url    ?? '';
+
+  if (!base64 && !cdnUrl) {
     throw new Error('Freepik text-to-image returned no image data. Check your API plan limits.');
   }
 
   const seed: number = resp.data?.meta?.seed ?? 0;
-  logger.info(`[Freepik] Master image generated (seed: ${seed})`);
-  return { base64, seed };
+  logger.info(`[Freepik] Master image generated (seed: ${seed}) — CDN URL: ${cdnUrl ? 'yes' : 'no'}`);
+  return { base64, cdnUrl, seed };
 }
 
 /**
  * Submit a change-camera request, then poll until COMPLETED.
- * imageUrl must be a public HTTPS URL (NOT base64).
- * Returns the public URL of the angle-shifted image.
+ *
+ * imageData priority (caller should pass the best available):
+ *   1. Freepik CDN URL (cdnUrl from generateMasterImage) — always works
+ *   2. Any other public HTTPS URL
+ *   3. Raw base64 string (no data URI prefix — Freepik rejects data: URIs)
+ *
+ * Returns the Freepik CDN URL of the angle-shifted image.
  */
 export async function changeCameraAngle(
-  imageUrl: string,
+  imageData: string,
   horizontalAngle: number,
   verticalAngle: number,
   zoom: number,
   seed?: number,
 ): Promise<{ url: string }> {
-  logger.info(`[Freepik] Submitting change-camera for: ${imageUrl}`);
+  // Pass URLs as-is. Pass base64 as raw string — do NOT wrap in data:image/jpeg;base64,
+  // Freepik's API rejects the data URI format and returns HTTP 400.
+  const imageField = imageData; // URL or raw base64, both sent directly
 
-  // Submit
-  const submitResp = await axios.post(
-    `${BASE}/image-change-camera`,
-    {
-      image: imageUrl,
-      horizontal_angle: horizontalAngle,
-      vertical_angle: verticalAngle,
-      zoom,
-      output_format: 'jpeg',
-      ...(seed !== undefined ? { seed } : {}),
-    },
-    { headers: headers(), timeout: 30_000 },
+  logger.info(
+    `[Freepik] Submitting change-camera (h=${horizontalAngle} v=${verticalAngle} z=${zoom}) ` +
+    `via ${imageData.startsWith('http') ? 'URL' : 'base64'}`
   );
+
+  // Submit — capture Freepik's error body on failure for real diagnostics
+  let submitResp: any;
+  try {
+    submitResp = await axios.post(
+      `${BASE}/image-change-camera`,
+      {
+        image: imageField,
+        horizontal_angle: horizontalAngle,
+        vertical_angle: verticalAngle,
+        zoom,
+        ...(seed !== undefined ? { seed } : {}),
+      },
+      { headers: headers(), timeout: 30_000 },
+    );
+  } catch (err: any) {
+    const detail = err.response
+      ? JSON.stringify(err.response.data).slice(0, 800)
+      : err.message;
+    logger.error(`[Freepik] change-camera submit HTTP ${err.response?.status ?? '?'}: ${detail}`);
+    throw new Error(`Freepik change-camera submit failed (${err.response?.status ?? 'network'}): ${detail}`);
+  }
 
   const taskId: string = submitResp.data?.data?.task_id ?? '';
   if (!taskId) {

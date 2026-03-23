@@ -113,17 +113,18 @@ export class ConceptBriefAgent extends BaseAgent {
       { prompt: promptB, label: 'B' },
     ]) {
       // Generate master image
-      let base64 = '';
-      let seed   = 0;
+      let base64  = '';
+      let cdnUrl  = '';
+      let seed    = 0;
       try {
         await this.respond(ctx.chatId, `⏳ Concept ${label}: generating master image...`);
-        ({ base64, seed } = await generateMasterImage(prompt));
+        ({ base64, cdnUrl, seed } = await generateMasterImage(prompt));
       } catch (err: any) {
         errors.push(`Concept ${label} master: ${err.message}`);
         continue; // skip to next concept
       }
 
-      // Upload master to Drive → get a stable public HTTPS URL
+      // Upload master to Drive → permanent URL for the results gallery
       let masterUrl = '';
       try {
         const { publicUrl } = await uploadBase64ImageToDrive(
@@ -140,12 +141,16 @@ export class ConceptBriefAgent extends BaseAgent {
 
       await this.respond(ctx.chatId, `✅ Concept ${label} master done. Generating 3 angles...`);
 
+      // Image to pass to change-camera:
+      // Prefer the Freepik CDN URL — their API always accepts their own CDN.
+      // Fall back to raw base64 (no data URI wrapper — Freepik rejects data: scheme).
+      const imageForFreepik = cdnUrl || base64;
+
       // Run the 3 non-front angles in parallel via Promise.allSettled
-      // Pass raw base64 directly — avoids Drive URL fetch issues
       const angleSettled = await Promise.allSettled(
         ANGLES.slice(1).map(async (angle) => {
           const { url: freepikUrl } = await changeCameraAngle(
-            base64, angle.h, angle.v, angle.z, seed,
+            imageForFreepik, angle.h, angle.v, angle.z, seed,
           );
           // Re-download from Freepik CDN and re-upload to Drive for permanent URLs
           const imgResp = await axios.get<ArrayBuffer>(freepikUrl, { responseType: 'arraybuffer', timeout: 30_000 });
