@@ -42,7 +42,7 @@ export class ProjectStatusAgent extends BaseAgent {
       unconfiguredBoards.push('Sales Pipeline (TRELLO_BOARD_SALES_PIPELINE)');
     }
 
-    // Other boards summary
+    // Other boards summary — 300ms between each to avoid Trello rate limits
     for (const [key, envKey] of [['DESIGN', 'TRELLO_BOARD_DESIGN'], ['OPERATION', 'TRELLO_BOARD_OPERATION'], ['PRODUCTION', 'TRELLO_BOARD_PRODUCTION']]) {
       const boardId = process.env[envKey];
       if (!boardId) { unconfiguredBoards.push(`${key} (TRELLO_BOARD_${key})`); continue; }
@@ -56,6 +56,7 @@ export class ProjectStatusAgent extends BaseAgent {
       } catch {
         sections.push({ label: key, content: '  Could not fetch' });
       }
+      await new Promise(r => setTimeout(r, 300));
     }
 
     // Technical deadlines

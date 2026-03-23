@@ -1,6 +1,10 @@
 import axios, { AxiosInstance } from 'axios';
 import { retry } from '../../utils/retry';
 import { TRELLO_CONFIG } from '../../config/trello';
+import { logger } from '../../utils/logger';
+
+const boardCache = new Map<string, { data: TrelloCard[]; fetchedAt: number }>();
+const CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes
 
 // Hard guard: prevent any write operation on read-only boards
 function assertWritable(boardEnvKey: string): void {
@@ -74,7 +78,7 @@ export async function getBoardCards(boardId: string): Promise<TrelloCard[]> {
 // Only call this for SALES_PIPELINE lists — will throw otherwise
 export async function createCard(listId: string, name: string, desc: string, due?: string, boardEnvKey = 'TRELLO_BOARD_SALES_PIPELINE'): Promise<TrelloCard> {
   assertWritable(boardEnvKey);
-  return retry(async () => {
+  const result = await retry(async () => {
     const resp = await getTrelloClient().post('/cards', {
       idList: listId,
       name,
@@ -83,6 +87,8 @@ export async function createCard(listId: string, name: string, desc: string, due
     });
     return resp.data;
   }, 'createCard');
+  invalidateBoardCache(process.env.TRELLO_BOARD_SALES_PIPELINE || '');
+  return result;
 }
 
 export async function addComment(cardId: string, text: string): Promise<void> {
@@ -101,6 +107,7 @@ export async function moveCard(cardId: string, listId: string, boardEnvKey = 'TR
       idList: listId,
     });
   }, 'moveCard');
+  invalidateBoardCache(process.env.TRELLO_BOARD_SALES_PIPELINE || '');
 }
 
 export async function getCard(cardId: string): Promise<TrelloCard> {
@@ -119,20 +126,35 @@ export async function getListCards(listId: string): Promise<TrelloCard[]> {
   }, 'getListCards');
 }
 
-// ---- Helper: get all cards with list names ----
+// ---- Helper: get all cards with list names (cached, 3-min TTL) ----
 
-export async function getBoardCardsWithListNames(boardId: string): Promise<TrelloCard[]> {
+export async function getBoardCardsWithListNames(
+  boardId: string,
+  forceRefresh = false,
+): Promise<TrelloCard[]> {
+  const cached = boardCache.get(boardId);
+  if (!forceRefresh && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    logger.info(`[Trello] Cache hit: ${boardId}`);
+    return cached.data;
+  }
+
   const [lists, cards] = await Promise.all([
     getBoardLists(boardId),
     getBoardCards(boardId),
   ]);
-
   const listMap = new Map(lists.map(l => [l.id, l.name]));
-
-  return cards.map(card => ({
+  const result = cards.map(card => ({
     ...card,
     listName: listMap.get(card.idList) || 'Unknown',
   }));
+  boardCache.set(boardId, { data: result, fetchedAt: Date.now() });
+  logger.info(`[Trello] Fetched+cached: ${boardId} (${result.length} cards)`);
+  return result;
+}
+
+export function invalidateBoardCache(boardId: string): void {
+  boardCache.delete(boardId);
+  logger.info(`[Trello] Cache cleared: ${boardId}`);
 }
 
 // ---- Find list by name ----

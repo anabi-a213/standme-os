@@ -64,6 +64,7 @@ export class CrossBoardAgent extends BaseAgent {
           content: `  Error: ${err.message}`,
         });
       }
+      await new Promise(r => setTimeout(r, 300));
     }
 
     // Cross-reference: Won on Sales but no Operation/Production activity
