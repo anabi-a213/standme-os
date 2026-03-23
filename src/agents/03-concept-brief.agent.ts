@@ -146,13 +146,21 @@ export class ConceptBriefAgent extends BaseAgent {
       const imageForFreepik = masterUrl;
 
       // Run the 3 non-front angles in parallel via Promise.allSettled
+      const freepikApiKey = process.env.FREEPIK_API_KEY || '';
       const angleSettled = await Promise.allSettled(
         ANGLES.slice(1).map(async (angle) => {
           const { url: freepikUrl } = await changeCameraAngle(
             imageForFreepik, angle.h, angle.v, angle.z, seed,
           );
           // Re-download from Freepik CDN and re-upload to Drive for permanent URLs
-          const imgResp = await axios.get<ArrayBuffer>(freepikUrl, { responseType: 'arraybuffer', timeout: 30_000 });
+          logger.info(`[ConceptBrief] Downloading angle ${angle.label}: ${freepikUrl.slice(0, 80)}`);
+          const imgResp = await axios.get<ArrayBuffer>(freepikUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30_000,
+            // Freepik CDN may require the API key header
+            headers: freepikApiKey ? { 'x-freepik-api-key': freepikApiKey } : {},
+          });
+          logger.info(`[ConceptBrief] Downloaded angle ${angle.label}: ${imgResp.data.byteLength} bytes`);
           const b64 = Buffer.from(imgResp.data).toString('base64');
           const { publicUrl } = await uploadBase64ImageToDrive(
             b64,
@@ -169,7 +177,9 @@ export class ConceptBriefAgent extends BaseAgent {
         if (settled.status === 'fulfilled') {
           results.push(settled.value);
         } else {
-          errors.push(`Concept ${label} ${nonFrontAngles[i].label}: ${settled.reason?.message ?? settled.reason}`);
+          const errMsg = settled.reason?.message ?? String(settled.reason);
+          logger.error(`[ConceptBrief] Angle render failed — Concept ${label} ${nonFrontAngles[i].label}: ${errMsg}`);
+          errors.push(`Concept ${label} ${nonFrontAngles[i].label}: ${errMsg}`);
         }
       }
     }
