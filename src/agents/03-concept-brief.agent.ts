@@ -140,6 +140,10 @@ export class ConceptBriefAgent extends BaseAgent {
 
       await this.respond(ctx.chatId, `✅ Concept ${label} master done. Generating 3 angles...`);
 
+      // Give Drive 2 seconds to propagate the public permission before
+      // Freepik's change-camera endpoint tries to fetch the image URL
+      await new Promise(r => setTimeout(r, 2000));
+
       // Run the 3 non-front angles in parallel via Promise.allSettled
       const angleSettled = await Promise.allSettled(
         ANGLES.slice(1).map(async (angle) => {

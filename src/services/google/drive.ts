@@ -776,23 +776,23 @@ export async function uploadBase64ImageToDrive(
   const created = await drive.files.create({
     requestBody: fileMetadata,
     media: { mimeType: 'image/jpeg', body: stream },
-    fields: 'id, webContentLink',
+    fields: 'id',
     supportsAllDrives: true,
   });
 
   const fileId = created.data.id || '';
   if (!fileId) throw new Error(`uploadBase64ImageToDrive: Drive did not return a file ID for "${fileName}".`);
 
-  // Make publicly readable so Freepik change-camera can fetch it via HTTPS
+  // Make publicly readable BEFORE returning the URL — Freepik change-camera
+  // needs a clean direct URL with no cookie/redirect. webContentLink redirects;
+  // the uc?id=...&export=download format serves the file directly.
   await drive.permissions.create({
     fileId,
     supportsAllDrives: true,
-    requestBody: { type: 'anyone', role: 'reader' },
+    requestBody: { role: 'reader', type: 'anyone' },
   });
 
-  const publicUrl =
-    created.data.webContentLink ||
-    `https://drive.google.com/uc?export=download&id=${fileId}`;
+  const publicUrl = `https://drive.google.com/uc?id=${fileId}&export=download`;
 
   logger.info(`[Drive] Image uploaded: ${fileName} → ${fileId}`);
   return { fileId, publicUrl };

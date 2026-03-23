@@ -57,6 +57,8 @@ export async function changeCameraAngle(
   zoom: number,
   seed?: number,
 ): Promise<{ url: string }> {
+  logger.info(`[Freepik] Submitting change-camera for: ${imageUrl}`);
+
   // Submit
   const submitResp = await axios.post(
     `${BASE}/image-change-camera`,
@@ -97,7 +99,9 @@ export async function changeCameraAngle(
     }
 
     if (status === 'FAILED') {
-      throw new Error(`Freepik change-camera task ${taskId} failed on the server.`);
+      const detail = JSON.stringify(pollResp.data).slice(0, 500);
+      logger.error(`[Freepik] Task ${taskId} FAILED: ${detail}`);
+      throw new Error(`Freepik task ${taskId} failed: ${detail}`);
     }
     // PENDING / IN_PROGRESS — keep polling
   }
