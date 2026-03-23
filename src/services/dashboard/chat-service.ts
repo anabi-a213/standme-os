@@ -127,6 +127,13 @@ async function buildLiveDataContext(): Promise<string> {
     if (upcoming.length > 0) lines.push(`\nDEADLINES NEXT 21 DAYS: ${upcoming.map(r => r[1]).join(', ')}`);
   }
 
+  // If ALL Sheets calls timed out (returned null), signal caller to abort rather than
+  // proceeding with empty data — this is different from "not configured" (which throws).
+  if (leadsRows === null && deadlinesRows === null) {
+    const err = Object.assign(new Error('Live data APIs timed out (7s per call)'), { code: 'LIVE_DATA_TIMEOUT' });
+    throw err;
+  }
+
   const result = lines.length > 0 ? lines.join('\n') : '';
 
   // Cache for 60 seconds
@@ -287,14 +294,29 @@ export async function processChat(
       result = await reconstructBulkApproval(approvalId).catch(() => null);
     }
 
-    const responseText = result ?? (
-      approvalId.startsWith('bulkoutreach_')
-        ? '⚠️ Approval expired and could not be reconstructed. Run `/bulkoutreach [show]` again to get a fresh approval request.'
-        : '⚠️ Approval not found — it may have expired (24h limit) or the ID is incorrect.'
-    );
+    let responseText = result;
+    if (responseText === null) {
+      // Look up KB metadata so Mo knows exactly what this approval was for
+      let actionDesc = '';
+      try {
+        const kbEntries = await searchKnowledge(`pending-approval-${approvalId}`, 3);
+        const entry = kbEntries.find(e => e.source === `pending-approval-${approvalId}`);
+        if (entry) {
+          const meta = JSON.parse(entry.content || '{}');
+          if (meta.action) actionDesc = `\n\nThis was: **${meta.action}**`;
+        }
+      } catch { /* KB lookup is best-effort */ }
 
-    onChunk(responseText);
-    session.history.push({ role: 'assistant', content: responseText, timestamp: new Date().toISOString() });
+      const isLaunch = approvalId.startsWith('bulkoutreach_') || approvalId.startsWith('launch_');
+      const rerunHint = isLaunch
+        ? '\n\nRe-run `/launch [show]` to get a fresh approval token.'
+        : '\n\nRe-run the original command to get a fresh approval token.';
+
+      responseText = `⚠️ Approval not found — the server may have restarted since this was issued.${actionDesc}${rerunHint}`;
+    }
+
+    onChunk(responseText!);
+    session.history.push({ role: 'assistant', content: responseText!, timestamp: new Date().toISOString() });
     return;
   }
   // ─────────────────────────────────────────────────────────────────────────
@@ -310,14 +332,32 @@ export async function processChat(
     }
   } catch { /* silent — KB is optional context */ }
 
-  // Fetch live data — parallel calls inside, 9s outer safety net
+  // Fetch live data — parallel calls inside, 9s outer safety net.
+  // On timeout: abort with a clear message rather than silently sending stale/empty data.
   let liveData = '';
+  let liveDataFailed = false;
   try {
     liveData = await Promise.race([
       buildLiveDataContext(),
-      new Promise<string>(resolve => setTimeout(() => resolve(''), 9000)),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(Object.assign(new Error('Live data fetch exceeded 9s'), { code: 'LIVE_DATA_TIMEOUT' })), 9000)
+      ),
     ]);
-  } catch { /* silent */ }
+  } catch (err: any) {
+    if ((err as any)?.code === 'LIVE_DATA_TIMEOUT') {
+      liveDataFailed = true;
+      logger.warn(`[DashboardChat] Live data unavailable: ${err.message}`);
+    }
+    // Other errors (API misconfigured, auth failure, etc.) — let the AI proceed;
+    // the connection-status block in the system prompt already handles these.
+  }
+
+  if (liveDataFailed) {
+    const errMsg = '⚠️ Live data unavailable — Trello/Sheets did not respond in time. Please retry in a moment.';
+    onChunk(errMsg);
+    session.history.push({ role: 'assistant', content: errMsg, timestamp: new Date().toISOString() });
+    return;
+  }
 
   // Build message history for Claude (keep last MAX_HISTORY)
   // Append knowledge base context to the current user message if found

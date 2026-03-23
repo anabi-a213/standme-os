@@ -46,7 +46,7 @@ import { WoodpeckerSyncAgent } from './agents/20-woodpecker-sync.agent';
 import { initWorkflowEngine } from './services/workflow-engine';
 import { pipelineRunner } from './services/pipeline-runner';
 import { loadThreadsFromKB } from './services/thread-context';
-import { scanPendingApprovalsFromKB } from './services/approvals';
+import { scanPendingApprovalsFromKB, getApprovalMetaFromKB } from './services/approvals';
 
 
 async function main() {
@@ -332,11 +332,23 @@ async function main() {
       }
 
       if (result === null) {
-        // Still null — truly expired or unknown approval
-        const hint = approvalId.startsWith('bulkoutreach_')
-          ? ' Run `/bulkoutreach [show]` again to get a fresh approval request.'
-          : '';
-        await bot.sendMessage(msg.chat.id, `⚠️ Approval not found — it may have expired (24h limit) or the ID is incorrect.${hint}`, { parse_mode: 'Markdown' });
+        // Look up KB metadata so Mo knows exactly what this approval was for
+        let actionDesc = '';
+        try {
+          const meta = await getApprovalMetaFromKB(approvalId);
+          if (meta?.action) actionDesc = `\n\nThis was: *${meta.action}*`;
+        } catch { /* best-effort */ }
+
+        const isLaunch = approvalId.startsWith('bulkoutreach_') || approvalId.startsWith('launch_');
+        const rerunHint = isLaunch
+          ? '\n\nRe-run `/launch [show]` to get a fresh approval token.'
+          : '\n\nRe-run the original command to get a fresh approval token.';
+
+        await bot.sendMessage(
+          msg.chat.id,
+          `⚠️ Approval not found — the server may have restarted since this was issued.${actionDesc}${rerunHint}`,
+          { parse_mode: 'Markdown' }
+        );
       } else {
         await bot.sendMessage(msg.chat.id, result, { parse_mode: 'Markdown' });
       }

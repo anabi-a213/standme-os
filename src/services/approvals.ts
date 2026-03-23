@@ -175,6 +175,25 @@ export async function handleApproval(id: string, approved: boolean): Promise<str
   return result;
 }
 
+/**
+ * Look up KB metadata for a specific approval ID so callers can tell Mo
+ * exactly what action was pending after a restart.
+ * Returns null if not found or already executed.
+ */
+export async function getApprovalMetaFromKB(id: string): Promise<{ action: string } | null> {
+  try {
+    const entries = await searchKnowledge(`pending-approval-${id}`, 3);
+    const entry = entries.find(e => e.source === `pending-approval-${id}`);
+    if (!entry) return null;
+    const data = JSON.parse(entry.content || '{}');
+    if (data.status === 'EXECUTED') return null;
+    if (Date.now() - (data.timestamp || 0) > 86400000) return null;
+    return data.action ? { action: data.action } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function hasPending(id: string): boolean {
   return pendingApprovals.has(id);
 }

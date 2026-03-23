@@ -888,6 +888,7 @@ export class CampaignBuilderAgent extends BaseAgent {
         }
       }
 
+      let writeFailures = 0;
       for (const { row, index } of activeRecords) {
         const salesId      = row[0] || '';
         const showName     = row[2] || '';
@@ -914,19 +915,30 @@ export class CampaignBuilderAgent extends BaseAgent {
           ? intentRaw.trim().toUpperCase() : 'NEEDS_MORE_INFO';
 
         const now = new Date().toISOString();
-        await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H',
-          classification === 'NOT_INTERESTED' ? 'NOT_INTERESTED' : 'REPLIED');
-        await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', classification);
-        await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', now);
 
-        // Save reply to KB for learning
+        // Update CAMPAIGN_SALES — if Sheets write fails, skip this record rather than
+        // alerting Mo about a reply we couldn't actually record
+        try {
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'H',
+            classification === 'NOT_INTERESTED' ? 'NOT_INTERESTED' : 'REPLIED');
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'I', classification);
+          await updateCell(SHEETS.CAMPAIGN_SALES, index, 'Q', now);
+        } catch (err: any) {
+          logger.warn(`[CampaignBuilder] CAMPAIGN_SALES write failed for ${contactEmail}: ${err.message}`);
+          writeFailures++;
+          continue; // skip Mo alert — the record wasn't updated
+        }
+
+        // Save reply to KB for learning (non-critical — log failures but don't abort)
         await saveKnowledge({
           source: `sales-reply-${salesId}`,
           sourceType: 'manual',
           topic: `${companyName}-${showName}`,
           tags: `sales-reply,${classification.toLowerCase()},${showName.toLowerCase().replace(/\s+/g, '-')}`,
           content: `Reply from ${companyName} (${contactEmail}) at ${showName}: "${replyBody.slice(0, 200)}" | Classification: ${classification}`,
-        }).catch(() => {});
+        }).catch((err: any) =>
+          logger.warn(`[CampaignBuilder] sales-reply KB write failed for ${contactEmail}: ${err.message}`)
+        );
 
         newReplies++;
         if (classification === 'NOT_INTERESTED') continue;
@@ -938,7 +950,9 @@ export class CampaignBuilderAgent extends BaseAgent {
           topic: 'pending-conversion',
           tags: `pending-conversion,${classification.toLowerCase()},campaign-reply`,
           content: `Campaign reply from ${companyName} (${contactEmail}) at ${showName}. Classification: ${classification}. Not yet converted to pipeline. Reply: "${replyBody.slice(0, 300)}"`,
-        }).catch(() => {});
+        }).catch((err: any) =>
+          logger.warn(`[CampaignBuilder] pending-conversion KB write failed for ${contactEmail}: ${err.message}`)
+        );
 
         escalations++;
 
@@ -951,9 +965,12 @@ export class CampaignBuilderAgent extends BaseAgent {
         ));
       }
 
+      const writeWarn = writeFailures > 0
+        ? ` ⚠️ ${writeFailures} record${writeFailures > 1 ? 's' : ''} skipped — Sheets write failed (check Railway logs).`
+        : '';
       const summary = newReplies > 0
-        ? `${newReplies} repl${newReplies === 1 ? 'y' : 'ies'} classified. ${escalations > 0 ? `${escalations} interested — use \`/convert [email]\` to add to pipeline.` : ''}`
-        : 'No new replies found.';
+        ? `${newReplies} repl${newReplies === 1 ? 'y' : 'ies'} classified. ${escalations > 0 ? `${escalations} interested — use \`/convert [email]\` to add to pipeline.` : ''}${writeWarn}`
+        : `No new replies found.${writeWarn}`;
 
       if (!isScheduled) await this.respond(ctx.chatId, summary);
       return { success: true, message: summary, confidence: 'HIGH' };

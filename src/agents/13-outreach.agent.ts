@@ -1311,6 +1311,7 @@ export class OutreachAgent extends BaseAgent {
           }
 
           const logDate = new Date().toISOString();
+          const writeErrors: string[] = [];
 
           // Batch-write OUTREACH_LOG
           const olRows = prospects.map(p => objectToRow(SHEETS.OUTREACH_LOG, {
@@ -1324,9 +1325,10 @@ export class OutreachAgent extends BaseAgent {
             woodpeckerId: targetCampaign.id,
             notes:       `Launch → Instantly campaign ${targetCampaign.id} (${targetCampaign.name}) | ${showName}`,
           }));
-          await appendRows(SHEETS.OUTREACH_LOG, olRows).catch((err: any) =>
-            logger.warn(`[Launch] OUTREACH_LOG write failed: ${err.message}`)
-          );
+          await appendRows(SHEETS.OUTREACH_LOG, olRows).catch((err: any) => {
+            logger.warn(`[Launch] OUTREACH_LOG write failed: ${err.message}`);
+            writeErrors.push('OutreachLog');
+          });
 
           // Batch-write CAMPAIGN_SALES
           const csRows = newProspects.map((p, i) => objectToRow(SHEETS.CAMPAIGN_SALES, {
@@ -1352,9 +1354,10 @@ export class OutreachAgent extends BaseAgent {
             website:         p.record.website || '',
             logoUrl:         '',
           }));
-          await appendRows(SHEETS.CAMPAIGN_SALES, csRows).catch((err: any) =>
-            logger.warn(`[Launch] CAMPAIGN_SALES write failed: ${err.message}`)
-          );
+          await appendRows(SHEETS.CAMPAIGN_SALES, csRows).catch((err: any) => {
+            logger.warn(`[Launch] CAMPAIGN_SALES write failed: ${err.message}`);
+            writeErrors.push('CampaignSales');
+          });
 
           // Batch-write LEAD_MASTER for new companies not already there
           const freshMasterRows = await readSheet(SHEETS.LEAD_MASTER).catch(() => [] as string[][]);
@@ -1397,10 +1400,15 @@ export class OutreachAgent extends BaseAgent {
             existingCos.add(co.toLowerCase());
           }
           if (lmRows.length > 0) {
-            await appendRows(SHEETS.LEAD_MASTER, lmRows).catch((err: any) =>
-              logger.warn(`[Launch] LEAD_MASTER write failed: ${err.message}`)
-            );
+            await appendRows(SHEETS.LEAD_MASTER, lmRows).catch((err: any) => {
+              logger.warn(`[Launch] LEAD_MASTER write failed: ${err.message}`);
+              writeErrors.push('LeadMaster');
+            });
           }
+
+          const writeWarning = writeErrors.length > 0
+            ? `\n\n⚠️ Sheet write failures: ${writeErrors.join(', ')}. Emails are sending but check Railway logs — you may need to re-run \`/launch\` to fix the records.`
+            : '';
 
           return (
             `✅ *Campaign launched!*\n\n` +
@@ -1409,7 +1417,8 @@ export class OutreachAgent extends BaseAgent {
             (result.skipped > 0 ? `Skipped: ${result.skipped} (dupes in Instantly)\n` : '') +
             (lmRows.length > 0 ? `Lead Master: ${lmRows.length} new rows added\n` : '') +
             activationWarning +
-            `\n📧 Emails sending per campaign schedule. Check \`/replies ${showName}\` in 3-4 days.`
+            `\n📧 Emails sending per campaign schedule. Check \`/replies ${showName}\` in 3-4 days.` +
+            writeWarning
           );
         } catch (err: any) {
           return `❌ Launch failed: ${err.message}`;
@@ -1555,6 +1564,7 @@ export class OutreachAgent extends BaseAgent {
     }));
 
     // Step 4 — Create EMAIL_FUNNEL row so Agent-19 can continue the conversation
+    let emailFunnelOk = true;
     await appendRow(SHEETS.EMAIL_FUNNEL, objectToRow(SHEETS.EMAIL_FUNNEL, {
       id:              `EF-${Date.now()}`,
       leadId,
@@ -1571,19 +1581,26 @@ export class OutreachAgent extends BaseAgent {
       budget:          collectedInfo.budget,
       notes:           `Converted from Instantly campaign reply`,
       conversationLog: '[]',
-    })).catch((err: any) => logger.warn(`[Convert] EMAIL_FUNNEL write failed: ${err.message}`));
+    })).catch((err: any) => {
+      logger.warn(`[Convert] EMAIL_FUNNEL write failed: ${err.message}`);
+      emailFunnelOk = false;
+    });
 
     // Step 5 — Start pipeline tracker
     pipelineRunner.start(leadId, companyName);
 
     // Step 6 — Link CAMPAIGN_SALES back to the lead
-    await updateCell(SHEETS.CAMPAIGN_SALES, matchIndex, 'R', leadId).catch(() => {});
+    await updateCell(SHEETS.CAMPAIGN_SALES, matchIndex, 'R', leadId).catch((err: any) =>
+      logger.warn(`[Convert] CAMPAIGN_SALES link failed: ${err.message}`)
+    );
 
     // Mark pending-conversion KB entry as resolved
     await updateKnowledge(`pending-conversion-${emailLower}`, {
       tags:    'pending-conversion,resolved',
       content: `Converted to LEAD_MASTER (${leadId}) on ${now}. Company: ${companyName}`,
-    }).catch(() => {});
+    }).catch((err: any) =>
+      logger.warn(`[Convert] KB pending-conversion update failed: ${err.message}`)
+    );
 
     await sendToMo(formatType2(
       `Pipeline Entry: ${companyName}`,
@@ -1602,6 +1619,7 @@ export class OutreachAgent extends BaseAgent {
       `Contact: ${contactName} — ${contactEmail}\n` +
       `${collectedInfo.standSize ? `Stand: ${collectedInfo.standSize} sqm\n` : ''}` +
       `${collectedInfo.budget ? `Budget: ${collectedInfo.budget}\n` : ''}` +
+      (!emailFunnelOk ? `\n⚠️ Email funnel row could not be written — Agent-19 won't see this lead. Run \`/convert ${query}\` again to retry.\n` : '') +
       `\nNext: \`/brief ${companyName}\` to generate concept brief.`
     );
 
