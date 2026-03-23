@@ -1,0 +1,22 @@
+# Environment variables — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+public/dashboard-build/
+
+# Dependencies
+node_modules/
+dashboard-app/node_modules/
+
+# Logs
+*.log
+standme-os*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
