@@ -18,6 +18,7 @@ import { saveKnowledge, buildKnowledgeContext, searchKnowledge, getKnowledgeBySo
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
+import { generateLeadId } from '../utils/lead-id';
 
 export class OutreachAgent extends BaseAgent {
   config: AgentConfig = {
@@ -406,7 +407,7 @@ export class OutreachAgent extends BaseAgent {
       const showFit   = showValidation.valid ? 2 : 1;
       const score     = showFit + industryFit + dmSignal + 1;
       const status    = score >= 8 ? 'HOT' : score >= 5 ? 'WARM' : score >= 3 ? 'COLD' : 'DISQUALIFIED';
-      const leadId    = `SM-${Date.now()}-${i}`;
+      const leadId    = await generateLeadId();
       const notes     = [
         rec.boothNumber ? `Booth: ${rec.boothNumber}` : '',
         rec.website     ? `Website: ${rec.website}`   : '',

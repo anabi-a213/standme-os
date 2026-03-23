@@ -39,6 +39,7 @@ import { searchEmailsByQuery, sendEmail, bulkSearchEmails } from '../services/go
 import { registerApproval } from '../services/approvals';
 import { sendToMo, formatType1, formatType2, formatType3 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
+import { generateLeadId } from '../utils/lead-id';
 
 const SALES_INFO_FIELDS = ['standSize', 'budget', 'showDates', 'phone', 'website', 'requirements', 'logoUrl'];
 // Fields that must be present before we can start a concept brief
@@ -391,7 +392,7 @@ export class CampaignBuilderAgent extends BaseAgent {
     for (const { exhibitor, contact } of verified) {
       const industry = exhibitor.industry || showAnalysis.industries[0] || 'Trade Show';
       const snippet1 = await getIndustryHook(industry);
-      const leadId   = `SM-${Date.now()}-${Math.random().toString(36).slice(2, 5)}-D`;
+      const leadId   = await generateLeadId();
       entries.push({ exhibitor, contact, industry, snippet1, leadId });
     }
 
@@ -1579,7 +1580,7 @@ ${emailsText}`;
     }
 
     try {
-      const leadId = `SM-${Date.now()}-C`; // C suffix = campaign origin
+      const leadId = await generateLeadId();
 
       await appendRow(SHEETS.LEAD_MASTER, objectToRow(SHEETS.LEAD_MASTER, {
         id: leadId,

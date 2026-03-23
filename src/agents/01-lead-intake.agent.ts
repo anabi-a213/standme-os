@@ -12,6 +12,7 @@ import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
 import { pipelineRunner } from '../services/pipeline-runner';
+import { generateLeadId } from '../utils/lead-id';
 
 export class LeadIntakeAgent extends BaseAgent {
   config: AgentConfig = {
@@ -75,7 +76,7 @@ export class LeadIntakeAgent extends BaseAgent {
     });
 
     const language = await detectLanguage(args);
-    const leadId = `SM-${Date.now()}`;
+    const leadId = await generateLeadId();
 
     // Build lead record
     const leadData: Record<string, string> = {
@@ -147,7 +148,7 @@ export class LeadIntakeAgent extends BaseAgent {
       if (list) {
         const card = await createCard(
           list.id,
-          `${companyName} — ${showName || 'Unknown Show'}`,
+          `[${leadId}] ${companyName} — ${showName || 'Unknown Show'}`,
           `Lead ID: ${leadId}\nScore: ${scoreResult.total}/10 (${scoreResult.status})\n` +
           `Company: ${companyName}\nContact: ${contactName || 'N/A'}\n` +
           `Show: ${showName || 'N/A'} (${showValidation.match?.city || 'N/A'})\n` +

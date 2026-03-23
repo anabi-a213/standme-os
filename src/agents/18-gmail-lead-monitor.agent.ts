@@ -18,6 +18,7 @@ import { registerApproval } from '../services/approvals';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
 import { pipelineRunner } from '../services/pipeline-runner';
+import { generateLeadId } from '../utils/lead-id';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -408,7 +409,7 @@ Return ONLY the JSON object. No explanation.`;
     d: ExtractedLead,
     showValidation: { valid: boolean; match: any; confidence: string }
   ): Promise<string> {
-    const leadId = `SM-${Date.now()}`;
+    const leadId = await generateLeadId();
     const language = d.contactEmail.includes('.de') ? 'de' :
                      d.contactEmail.includes('.fr') ? 'fr' : 'en';
 
@@ -465,7 +466,7 @@ Return ONLY the JSON object. No explanation.`;
     if (list) {
       const card = await createCard(
         list.id,
-        `${d.companyName} — ${d.showName || 'New Inquiry'}`,
+        `[${leadId}] ${d.companyName} — ${d.showName || 'New Inquiry'}`,
         `Lead ID: ${leadId}\nSource: Website/Email ⭐\n` +
         `Company: ${d.companyName}\nContact: ${d.contactName} <${d.contactEmail}>\n` +
         `Show: ${d.showName || 'TBC'}\nSize: ${d.standSize || 'TBC'} sqm\n` +
