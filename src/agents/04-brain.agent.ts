@@ -522,8 +522,19 @@ export class BrainAgent extends BaseAgent {
           `There are *${pending.length}* pending approvals — type the exact command for the one you want:\n\n${list}`
         );
         return { success: true, message: 'Multiple pending approvals — listed', confidence: 'HIGH' };
+      } else {
+        // 0 pending approvals.
+        // If Mo used an explicit approval word (not just conversational "yes/ok"), tell them clearly
+        // rather than letting Claude hallucinate a fake confirmation.
+        const isExplicitApproval = /^(approve|approved|اعتمد|موافق|اعتمادها)/i.test(message.trim());
+        if (isExplicitApproval) {
+          await this.respond(ctx.chatId,
+            'No pending approvals right now. If you wanted to approve a lead or action, check for the `/approve_[id]` command from the original notification and tap it — or re-run the command that triggered the request.'
+          );
+          return { success: true, message: 'No pending approvals', confidence: 'HIGH' };
+        }
+        // Conversational "yes/ok/go" with no pending — fall through to normal Brain response
       }
-      // If 0 pending, fall through to normal Brain response
     }
 
     const lang = await detectLanguage(message);

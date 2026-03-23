@@ -4,11 +4,12 @@ import { Lead, LeadScoreResult, ScoreBreakdown } from '../types/lead';
 import { UserRole } from '../config/access';
 import { validateShow } from '../config/shows';
 import { SHEETS } from '../config/sheets';
-import { appendRow, readSheet, rowToObject, objectToRow, sheetUrl } from '../services/google/sheets';
+import { appendRow, readSheet, updateCell, rowToObject, objectToRow, sheetUrl } from '../services/google/sheets';
 import { createCard, findListByName } from '../services/trello/client';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { detectLanguage, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
+import { registerApproval } from '../services/approvals';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
 import { pipelineRunner } from '../services/pipeline-runner';
@@ -176,6 +177,32 @@ export class LeadIntakeAgent extends BaseAgent {
       (trelloCardId ? `Trello card created ✅` : `No Trello card (score too low)`);
 
     if (scoreResult.status === 'HOT') {
+      // Register the approval callbacks BEFORE sending the buttons to Mo — this makes
+      // /approve_<leadId> and /reject_<leadId> (and Brain natural-language "approve") actually work.
+      registerApproval(leadId, {
+        action: `HOT Lead: ${companyName} — ${showName || 'Unknown Show'} (${scoreResult.total}/10)`,
+        data: { leadId, companyName, showName, score: scoreResult.total },
+        timestamp: Date.now(),
+        onApprove: async () => {
+          // Move lead to QUALIFYING
+          try {
+            const rows = await readSheet(SHEETS.LEAD_MASTER);
+            const rowIdx = rows.findIndex(r => r[0] === leadId);
+            if (rowIdx >= 0) await updateCell(SHEETS.LEAD_MASTER, rowIdx + 1, 'P', 'QUALIFYING');
+          } catch { /* non-critical — lead is already created */ }
+          return `✅ *${companyName}* approved — moved to Qualifying.\n\nNext: \`/brief ${companyName}\` to generate a concept brief.`;
+        },
+        onReject: async () => {
+          // Mark as DISQUALIFIED
+          try {
+            const rows = await readSheet(SHEETS.LEAD_MASTER);
+            const rowIdx = rows.findIndex(r => r[0] === leadId);
+            if (rowIdx >= 0) await updateCell(SHEETS.LEAD_MASTER, rowIdx + 1, 'P', 'DISQUALIFIED');
+          } catch { /* non-critical */ }
+          return `❌ *${companyName}* disqualified and removed from pipeline.`;
+        },
+      });
+
       await sendToMo(formatType1(
         `HOT Lead: ${companyName}`,
         `Score ${scoreResult.total}/10`,
