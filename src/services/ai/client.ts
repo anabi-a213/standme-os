@@ -116,14 +116,70 @@ Mark each assumption clearly in the brief with [ASSUMED].`
     : '';
 
   const conceptsToWrite = tier === 1 ? 1 : 2;
-  const conceptsInstruction = tier === 1
-    ? `## Design Concept A: [Give it a real name]
-One single concept direction. Describe the spatial experience visually. Mark any assumptions with [ASSUMED]. Note what would change once size and budget are confirmed.`
-    : `## Design Concept A: The Refined Option — [Give it a real name]
-Clear, polished direction. Describe spatial experience: approach, first impression, movement through, stopping moment. Materials, lighting, key visual. Why this works.
 
-## Design Concept B: The Bold Option — [Give it a real name]
-Meaningfully different. Different spatial logic or brand story. Push further. Same detail level.`;
+  // Exhibition stand anatomy reference — injected into every concept instruction
+  // so Claude writes stand specs, not interior design or marketing copy.
+  const standAnatomyGuide = `
+EXHIBITION STAND ANATOMY — write every concept using these building blocks:
+
+STRUCTURE & FLOOR PLAN
+- Floor: raised platform (50–100mm MDF deck) or flat with vinyl/carpet
+- Walls: back wall, side walls (for corner/inline/peninsula), open aisle faces
+- Overhead: fascia header sign, suspended truss, fabric canopy (if venue allows rigging), or none
+- Ceiling: only fabric canopy or branded truss — never a solid ceiling
+
+ZONES (assign each sqm a purpose)
+- Reception / welcome counter: first touch-point from the main aisle
+- Product / service display area: shelving, plinths, demo screens, product stands
+- Meeting / consultation area: enclosed or semi-open pod, 2–4 seat table
+- Brand hero wall: largest graphic surface, dominant brand colour + logo
+- Optional: demo station, bar/sampling counter, storage room
+
+MATERIALS (name real ones — never write "premium" or "high-quality")
+  Walls: tension fabric with dye-sublimation print, MDF with vinyl wrap, timber slat cladding,
+         laminate panels, painted MDF, LED lightbox panels
+  Floors: laminate on raised platform, vinyl with print, carpet tile, polished concrete effect
+  Structure: powder-coated aluminium extrusion, timber frame, steel tube
+  Furniture: reception counter (backlit or solid), bar stools, meeting chairs, display plinths
+  Lighting: LED spotlights on track, LED strip behind frosted acrylic, LED lightbox headers,
+            pendant lights over sampling bars, uplighting on back wall
+
+VISITOR JOURNEY
+Describe the stand from the visitor's perspective walking past the main aisle:
+1. Approach (10m away): what catches their eye — header sign, hero graphic, lighting
+2. Stop (3m): what makes them pause — product, person, activity, open invitation
+3. Enter: what draws them in — counter position, open floor plan, demo activity
+4. Stay: meeting pod, product interaction, sampling, consultation`;
+
+  const conceptsInstruction = tier === 1
+    ? `${standAnatomyGuide}
+
+## Design Concept A: [Give it a descriptive name, e.g. "The Open Forum" or "Brand Fortress"]
+Write a single buildable exhibition stand concept using the anatomy guide above.
+Cover: floor plan zones, back wall treatment, flooring, overhead (if any), reception counter,
+key display element, meeting solution, lighting, hero graphic.
+Mark any assumptions with [ASSUMED]. Note what changes once size/budget are confirmed.`
+    : `${standAnatomyGuide}
+
+## Design Concept A: The Refined Direction — [Give it a descriptive name]
+A clean, confident exhibition stand. Write as a stand designer briefing the build team.
+Cover all anatomy elements:
+- Floor plan: how the ${context.standSize || '[size]'} sqm is divided into zones
+- Back wall / hero graphic: material, colour, graphic treatment
+- Flooring: material and finish
+- Overhead: fascia, truss, or none — and why
+- Reception: counter position, material, backlit or solid
+- Display: how the product/service is shown (plinths, shelves, screens)
+- Meeting: enclosed pod or open meeting corner, capacity
+- Lighting: track spots, LED strips, lightbox, pendant — where and why
+- One signature detail that makes this stand memorable at this show
+
+## Design Concept B: The Bold Direction — [Give it a descriptive name]
+Same footprint and budget. Meaningfully different design language — not just a colour swap.
+Use the same anatomy structure. The difference must be in the spatial logic or the hero element:
+choose ONE bold move (full-height LED video wall, dramatic truss with suspended canopy,
+bold colour-block geometry on all wall faces, or a product activation as the central
+architectural feature). Every other element must still be 100% buildable and budgeted.`;
 
   const freepikPrompts = tier >= 2
     ? `\n## Render Prompts (for Freepik AI — follow every rule exactly)
