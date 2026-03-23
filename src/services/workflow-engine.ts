@@ -25,6 +25,8 @@
 import cron from 'node-cron';
 import { agentEventBus, AgentEvent } from './agent-event-bus';
 import { getAgent } from '../agents/registry';
+import { isInstantlyConfigured } from './instantly/client';
+import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { appendRow, readSheet } from './google/sheets';
 import { sendToMo, formatType2, formatType3 } from './telegram/bot';
@@ -480,6 +482,29 @@ async function w5_morningBriefing(): Promise<void> {
   }
 }
 
+// ── Poller: every 3h — poll Instantly for new replies (Growth plan workaround) ──
+// Replaces the webhook dependency (requires Hypergrowth $97/mo plan).
+// When Mo upgrades to Hypergrowth the webhook in index.ts will activate
+// automatically — the INSTANTLY_WEBHOOK_ENABLED env var enables it.
+
+async function pollInstantlyReplies(): Promise<void> {
+  if (!isInstantlyConfigured()) return;
+
+  const agent = getAgent('/salesreplies');
+  if (!agent) return;
+
+  logger.info('[Poller] Polling Instantly for new replies...');
+
+  await agent.run({
+    userId:   'SYSTEM',
+    chatId:   parseInt(process.env.MO_TELEGRAM_ID || '0'),
+    command:  'scheduled',
+    args:     '',
+    role:     UserRole.ADMIN,
+    language: 'en',
+  });
+}
+
 // ── Init ────────────────────────────────────────────────────────────────────
 
 /**
@@ -519,10 +544,18 @@ export function initWorkflowEngine(): void {
     );
   }, { timezone: 'Europe/Berlin' });
 
-  logger.info('[WorkflowEngine] ✓ 5 workflows active (W1-W5) | 2 cron jobs registered');
+  // Poller: every 3 hours — poll Instantly for replies (Growth plan, no webhook access)
+  cron.schedule('0 */3 * * *', () => {
+    pollInstantlyReplies().catch(err =>
+      logger.error(`[Poller] Instantly poll failed: ${err.message}`)
+    );
+  }, { timezone: 'Europe/Berlin' });
+
+  logger.info('[WorkflowEngine] ✓ 5 workflows active (W1-W5) | 3 cron jobs registered');
   logger.info('[WorkflowEngine]   W1: HOT/WARM manual leads only → auto-enrich (3 min delay)');
   logger.info('[WorkflowEngine]   W2: Deal won → lesson + case study prompt');
   logger.info('[WorkflowEngine]   W3: Mon 9am → scoring modifiers from lessons → KB');
   logger.info('[WorkflowEngine]   W4: Lead enriched (readiness≥7) → notify Mo');
   logger.info('[WorkflowEngine]   W5: Daily 7am → morning briefing + stale lead rescue');
+  logger.info('[WorkflowEngine]   Poller: every 3h → poll Instantly for replies (Growth plan mode)');
 }

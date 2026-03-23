@@ -422,6 +422,14 @@ async function main() {
 
     res.sendStatus(200);
 
+    // Polling mode guard — webhook requires Hypergrowth plan ($97/mo).
+    // On Growth plan ($37/mo) the poller in workflow-engine.ts handles replies every 3h.
+    // Set INSTANTLY_WEBHOOK_ENABLED=true in Railway env when upgrading to Hypergrowth.
+    if (!process.env.INSTANTLY_WEBHOOK_SECRET && !process.env.INSTANTLY_WEBHOOK_ENABLED) {
+      logger.info('[Webhook] Instantly webhook received but polling mode is active (set INSTANTLY_WEBHOOK_ENABLED=true on Hypergrowth plan to enable real-time processing)');
+      return;
+    }
+
     const secret = process.env.INSTANTLY_WEBHOOK_SECRET;
     if (secret && req.headers['x-instantly-secret'] !== secret) {
       logger.warn('[Webhook] Instantly: invalid secret, ignoring');
