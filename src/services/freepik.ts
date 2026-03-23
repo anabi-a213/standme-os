@@ -38,7 +38,8 @@ export async function generateMasterImage(
 
   const data = resp.data?.data;
   const base64: string  = data?.[0]?.base64 ?? '';
-  const cdnUrl: string  = data?.[0]?.url    ?? '';
+  // Freepik change-camera rejects HTTP URLs — always upgrade to HTTPS
+  const cdnUrl: string  = (data?.[0]?.url ?? '').replace(/^http:\/\//i, 'https://');
 
   if (!base64 && !cdnUrl) {
     throw new Error('Freepik text-to-image returned no image data. Check your API plan limits.');
@@ -68,9 +69,11 @@ export async function changeCameraAngle(
   zoom: number,
   seed?: number,
 ): Promise<{ url: string }> {
-  // Pass URLs as-is. Pass base64 as raw string — do NOT wrap in data:image/jpeg;base64,
-  // Freepik's API rejects the data URI format and returns HTTP 400.
-  const imageField = imageData; // URL or raw base64, both sent directly
+  // Pass base64 as raw string — do NOT wrap in data:image/jpeg;base64,
+  // URLs must be HTTPS — Freepik rejects HTTP URLs with 400.
+  const imageField = imageData.startsWith('http://')
+    ? imageData.replace(/^http:\/\//i, 'https://')
+    : imageData;
 
   logger.info(
     `[Freepik] Submitting change-camera (h=${horizontalAngle} v=${verticalAngle} z=${zoom}) ` +
