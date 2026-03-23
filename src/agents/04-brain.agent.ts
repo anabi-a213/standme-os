@@ -946,6 +946,14 @@ export class BrainAgent extends BaseAgent {
       detail: hasInstantly ? 'INSTANTLY_API_KEY set ✓' : 'MISSING: INSTANTLY_API_KEY — add in Railway env to enable outreach',
     });
 
+    // Freepik AI — optional, needed for /renders
+    const hasFreepik = !!process.env.FREEPIK_API_KEY;
+    checks.push({
+      name: 'Freepik AI (renders)',
+      ok: hasFreepik,
+      detail: hasFreepik ? 'FREEPIK_API_KEY set ✓' : '⚠️ FREEPIK_API_KEY missing — /renders will not work. Get key at freepik.com/api',
+    });
+
     // Google Auth — system uses OAuth2 (CLIENT_ID + CLIENT_SECRET + REFRESH_TOKEN)
     const hasOAuth = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
     checks.push({

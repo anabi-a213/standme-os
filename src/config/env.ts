@@ -43,6 +43,9 @@ const envSchema = z.object({
   // Anthropic (Claude)
   ANTHROPIC_API_KEY: z.string().min(1),
 
+  // Freepik AI — for /renders command (automatic image generation)
+  FREEPIK_API_KEY: z.string().optional().default(''),
+
   // Gmail
   GMAIL_LABEL: z.string().default('standme-inquiries'),
   SEND_FROM_EMAIL: z.string().default('info@standme.de'),

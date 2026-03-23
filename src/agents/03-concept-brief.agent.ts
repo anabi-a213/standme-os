@@ -4,13 +4,15 @@ import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, findRowByValue, appendRow, objectToRow, updateCell } from '../services/google/sheets';
 import { addComment } from '../services/trello/client';
-import { createGoogleDoc } from '../services/google/drive';
+import { createGoogleDoc, uploadBase64ImageToDrive } from '../services/google/drive';
 import { getFolderIdForCategory } from '../config/drive-folders';
 import { generateBrief, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext, searchKnowledgeForCompany } from '../services/knowledge';
 import { sendToMo, formatType1, formatType2, sendToTeam } from '../services/telegram/bot';
 import { pipelineRunner } from '../services/pipeline-runner';
 import { displayValue } from '../utils/confidence';
+import { generateMasterImage, changeCameraAngle, isFreepikConfigured } from '../services/freepik';
+import axios from 'axios';
 
 export class ConceptBriefAgent extends BaseAgent {
   config: AgentConfig = {
@@ -22,57 +24,215 @@ export class ConceptBriefAgent extends BaseAgent {
   };
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
-    if (ctx.command === '/renders') return this.queueRenders(ctx);
+    if (ctx.command === '/renders') return this.generateConceptRenders(ctx);
     return this.runBrief(ctx);
   }
 
-  // ─── /renders [company] — queue render request ────────────────────────────
-  private async queueRenders(ctx: AgentContext): Promise<AgentResponse> {
+  // ─── /renders [company] — generate 8 AI renders via Freepik API ─────────
+  private async generateConceptRenders(ctx: AgentContext): Promise<AgentResponse> {
+    // 1. Validate inputs
     const company = (ctx.args || '').trim();
     if (!company) {
       await this.respond(ctx.chatId,
         'Usage: `/renders [company name]`\n\n' +
-        'Renders are queued and generated when the brief reaches Tier 3 (stand type confirmed).\n' +
-        'Make sure stand type is set: `/updatelead [Company] | standType=island`'
+        'Generates 2 concepts × 4 camera angles = 8 images automatically via Freepik AI.'
       );
       return { success: false, message: 'No company specified', confidence: 'LOW' };
     }
 
+    if (!isFreepikConfigured()) {
+      await this.respond(ctx.chatId,
+        '⚠️ *FREEPIK_API_KEY not set.*\n\n' +
+        'Get your API key at freepik.com → API section, then add it to Railway Variables as `FREEPIK_API_KEY`.'
+      );
+      return { success: false, message: 'FREEPIK_API_KEY not configured', confidence: 'HIGH' };
+    }
+
+    // 2. Find lead
     const leadRow = await this.fuzzyFindLead(company);
     if (!leadRow) {
-      await this.respond(ctx.chatId, `Lead "${company}" not found.`);
+      await this.respond(ctx.chatId, `Lead "${company}" not found in the system.`);
       return { success: false, message: 'Lead not found', confidence: 'HIGH' };
     }
 
-    const standType = displayValue(leadRow.data[26] || ''); // col AA
-    const briefTier = leadRow.data[33] || '';               // col AH
+    const companyName  = leadRow.data[2];
+    const trelloCardId = leadRow.data[16];
+    const leadId       = leadRow.data[0];
+    const standType    = displayValue(leadRow.data[26] || '');
+    const standSize    = displayValue(leadRow.data[8]  || '');
+    const showName     = displayValue(leadRow.data[6]  || '');
 
-    if (!standType) {
-      await this.respond(ctx.chatId,
-        `⚠️ Stand type not confirmed for *${leadRow.data[2]}*.\n\n` +
-        `Renders need stand type to generate accurate spatial images.\n` +
-        `Set it first: \`/updatelead ${leadRow.data[2]} | standType=island\` (or peninsula/corner/inline)`
-      );
-      return { success: false, message: 'Stand type missing', confidence: 'MEDIUM' };
+    // 3. Build prompts — try KB first, fall back to lead data
+    let promptA = '';
+    let promptB = '';
+
+    try {
+      const kbEntries = await searchKnowledgeForCompany(companyName, 'brief freepik render', leadId || undefined);
+      const kbText = kbEntries.map(e => e.content).join('\n');
+      const matchA = kbText.match(/FREEPIK_PROMPT_A:\s*(.+?)(?=FREEPIK_PROMPT_B:|$)/s);
+      const matchB = kbText.match(/FREEPIK_PROMPT_B:\s*(.+?)$/s);
+      if (matchA) promptA = matchA[1].trim();
+      if (matchB) promptB = matchB[1].trim();
+    } catch { /* non-fatal — use fallback */ }
+
+    if (!promptA || !promptB) {
+      const sType = standType || 'island';
+      const size  = standSize || '60';
+      const show  = showName  || 'trade show';
+      const base  = `Exhibition stand for ${companyName} at ${show}, ${sType} stand, ${size}sqm, ` +
+        `premium materials, photorealistic architectural render, busy trade show floor, ` +
+        `people in background for scale, 8K quality`;
+      promptA = `${base}, clean minimal design, white and glass, modern and elegant`;
+      promptB = `${base}, bold dark materials, strong brand statement, dramatic lighting`;
     }
 
-    // Queue renders — write to LEAD_MASTER col AI (rendersGenerated = QUEUED)
-    await updateCell(SHEETS.LEAD_MASTER, leadRow.row, 'AI', 'QUEUED').catch(() => {});
-    await sendToMo(formatType2(
-      `Renders Queued: ${leadRow.data[2]}`,
-      `Stand type: *${standType}*\nBrief tier: ${briefTier || 'not set'}\n\n` +
-      `Freepik render prompts are in the concept brief (look for the Render Prompts section).\n` +
-      `Copy the prompt and generate in Freepik AI → save to Drive → run: \`/updatelead ${leadRow.data[2]} | rendersDriveUrl=https://...\``
-    ));
+    // 4. Camera angles — chosen for exhibition stands
+    // Each angle shows how a trade show visitor would naturally see the stand
+    const ANGLES = [
+      { label: 'front',    h: 0,   v: 10, z: 5 },  // straight on, eye level
+      { label: 'corner',   h: 40,  v: 20, z: 4 },  // 40° side — best reveals depth
+      { label: 'elevated', h: 20,  v: 50, z: 5 },  // bird's eye, shows floor plan
+      { label: 'approach', h: 330, v: 5,  z: 3 },  // wide approaching shot, drama
+    ];
 
+    // 5. Get target folder
+    const folderId = getFolderIdForCategory('brief') || '';
+
+    // 6. Announce start
     await this.respond(ctx.chatId,
-      `📸 Render request queued for *${leadRow.data[2]}*.\n` +
-      `Stand type: ${standType}\n\n` +
-      `Mo has been notified with the Freepik prompts from the brief.\n` +
-      `_(Renders are generated manually in Freepik AI — this system queues and tracks the request.)_`
+      `🎨 Generating renders for *${companyName}*...\n` +
+      `2 concepts × 4 angles = 8 images. Takes ~4 minutes.`
     );
 
-    return { success: true, message: 'Render request queued', confidence: 'HIGH' };
+    const results: Array<{ concept: string; angle: string; url: string }> = [];
+    const errors:  string[] = [];
+
+    // 7. Loop over both concepts
+    for (const { prompt, label } of [
+      { prompt: promptA, label: 'A' },
+      { prompt: promptB, label: 'B' },
+    ]) {
+      // Generate master image
+      let base64 = '';
+      let seed   = 0;
+      try {
+        await this.respond(ctx.chatId, `⏳ Concept ${label}: generating master image...`);
+        ({ base64, seed } = await generateMasterImage(prompt));
+      } catch (err: any) {
+        errors.push(`Concept ${label} master: ${err.message}`);
+        continue; // skip to next concept
+      }
+
+      // Upload master to Drive → get a stable public HTTPS URL
+      let masterUrl = '';
+      try {
+        const { publicUrl } = await uploadBase64ImageToDrive(
+          base64,
+          `${companyName}-concept-${label}-master.jpg`,
+          folderId || undefined,
+        );
+        masterUrl = publicUrl;
+        results.push({ concept: label, angle: 'master', url: masterUrl });
+      } catch (err: any) {
+        errors.push(`Concept ${label} master upload: ${err.message}`);
+        continue;
+      }
+
+      await this.respond(ctx.chatId, `✅ Concept ${label} master done. Generating 3 angles...`);
+
+      // Run the 3 non-front angles in parallel via Promise.allSettled
+      const angleSettled = await Promise.allSettled(
+        ANGLES.slice(1).map(async (angle) => {
+          const { url: freepikUrl } = await changeCameraAngle(
+            masterUrl, angle.h, angle.v, angle.z, seed,
+          );
+          // Re-download from Freepik CDN and re-upload to Drive for permanent URLs
+          const imgResp = await axios.get<ArrayBuffer>(freepikUrl, { responseType: 'arraybuffer', timeout: 30_000 });
+          const b64 = Buffer.from(imgResp.data).toString('base64');
+          const { publicUrl } = await uploadBase64ImageToDrive(
+            b64,
+            `${companyName}-concept-${label}-${angle.label}.jpg`,
+            folderId || undefined,
+          );
+          return { concept: label, angle: angle.label, url: publicUrl };
+        }),
+      );
+
+      for (const settled of angleSettled) {
+        if (settled.status === 'fulfilled') {
+          results.push(settled.value);
+        } else {
+          errors.push(`Concept ${label} angle: ${settled.reason?.message ?? settled.reason}`);
+        }
+      }
+    }
+
+    // 8. If zero images generated, return failure
+    if (results.length === 0) {
+      await this.respond(ctx.chatId,
+        `❌ All render attempts failed for *${companyName}*.\n\n` +
+        errors.map(e => `• ${e}`).join('\n')
+      );
+      return { success: false, message: 'All Freepik calls failed', confidence: 'HIGH' };
+    }
+
+    // 9. Build folder URL
+    const driveUrl = folderId
+      ? `https://drive.google.com/drive/folders/${folderId}`
+      : 'https://drive.google.com';
+
+    // 10. Post Trello comment
+    if (trelloCardId) {
+      const conceptA = results.filter(r => r.concept === 'A');
+      const conceptB = results.filter(r => r.concept === 'B');
+      const fmt = (arr: typeof results) =>
+        arr.map(r => `• ${r.angle}: ${r.url}`).join('\n');
+      await addComment(
+        trelloCardId,
+        `🎨 AI Renders — ${companyName}\n\n` +
+        `CONCEPT A\n${fmt(conceptA)}\n\n` +
+        `CONCEPT B\n${fmt(conceptB)}\n\n` +
+        `Drive folder: ${driveUrl}`,
+      ).catch(() => { /* non-fatal */ });
+    }
+
+    // 11. Update LEAD_MASTER cols AI + AJ
+    await updateCell(SHEETS.LEAD_MASTER, leadRow.row, 'AI', 'true').catch(() => {});
+    await updateCell(SHEETS.LEAD_MASTER, leadRow.row, 'AJ', driveUrl).catch(() => {});
+
+    // 12. Save to Knowledge Base
+    await saveKnowledge({
+      source: `renders-${leadId}`,
+      sourceType: 'drive',
+      topic: companyName,
+      tags: `renders,freepik,${companyName.toLowerCase().replace(/\s+/g, '-')}`,
+      content: `${results.length} AI renders generated for ${companyName}. Drive folder: ${driveUrl}`,
+    }).catch(() => {});
+
+    // 13. Advance pipeline
+    if (leadId) {
+      pipelineRunner.advance(leadId, {
+        rendersGenerated: 'true',
+        rendersDriveUrl: driveUrl,
+      });
+    }
+
+    // 14. Final confirmation
+    const errorNote = errors.length > 0 ? `\n⚠️ ${errors.length} image(s) failed` : '';
+    await this.respond(ctx.chatId,
+      `✅ *Renders done: ${companyName}*\n` +
+      `Generated: ${results.length}/8 images${errorNote}\n\n` +
+      `📁 Drive: ${driveUrl}\n` +
+      (trelloCardId ? `🃏 Posted to Trello card\n` : '') +
+      `\nNext: design team reviews → apply StandMe branding → send to client`
+    );
+
+    return {
+      success: true,
+      message: `${results.length} renders generated for ${companyName}`,
+      confidence: 'HIGH',
+      data: { rendersDriveUrl: driveUrl, count: results.length },
+    };
   }
 
   // ─── /brief [company] — run brief with tier system ────────────────────────

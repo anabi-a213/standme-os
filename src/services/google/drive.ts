@@ -1,4 +1,5 @@
 import { google, drive_v3 } from 'googleapis';
+import { Readable } from 'stream';
 import { getGoogleAuth } from './auth';
 import { retry } from '../../utils/retry';
 import { logger } from '../../utils/logger';
@@ -751,4 +752,48 @@ export async function createGoogleDoc(name: string, content: string, folderId?: 
   await shareWithTeam(docId);
 
   return { id: docId, url };
+}
+
+// ---- Upload a base64-encoded image to Drive and make it publicly readable ----
+// Used by the Freepik render pipeline to persist AI-generated images permanently.
+// Returns fileId and a stable public download URL.
+
+export async function uploadBase64ImageToDrive(
+  base64: string,
+  fileName: string,
+  folderId?: string,
+): Promise<{ fileId: string; publicUrl: string }> {
+  const drive = getDriveClient();
+
+  // Strip data-URI prefix if present ("data:image/jpeg;base64,...")
+  const raw = base64.replace(/^data:[^;]+;base64,/, '');
+  const buffer = Buffer.from(raw, 'base64');
+  const stream = Readable.from(buffer);
+
+  const fileMetadata: drive_v3.Schema$File = { name: fileName };
+  if (folderId) fileMetadata.parents = [folderId];
+
+  const created = await drive.files.create({
+    requestBody: fileMetadata,
+    media: { mimeType: 'image/jpeg', body: stream },
+    fields: 'id, webContentLink',
+    supportsAllDrives: true,
+  });
+
+  const fileId = created.data.id || '';
+  if (!fileId) throw new Error(`uploadBase64ImageToDrive: Drive did not return a file ID for "${fileName}".`);
+
+  // Make publicly readable so Freepik change-camera can fetch it via HTTPS
+  await drive.permissions.create({
+    fileId,
+    supportsAllDrives: true,
+    requestBody: { type: 'anyone', role: 'reader' },
+  });
+
+  const publicUrl =
+    created.data.webContentLink ||
+    `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+  logger.info(`[Drive] Image uploaded: ${fileName} → ${fileId}`);
+  return { fileId, publicUrl };
 }
