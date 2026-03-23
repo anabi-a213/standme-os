@@ -3,7 +3,7 @@ import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
 import { readSheet, findRowByValue, appendRow, objectToRow, updateCell } from '../services/google/sheets';
-import { addComment } from '../services/trello/client';
+import { addComment, getBoardCardsWithListNames } from '../services/trello/client';
 import { createGoogleDoc, uploadBase64ImageToDrive } from '../services/google/drive';
 import { getFolderIdForCategory } from '../config/drive-folders';
 import { generateBrief, generateText } from '../services/ai/client';
@@ -413,9 +413,27 @@ export class ConceptBriefAgent extends BaseAgent {
       `brief_${leadRow.data[0]}`
     ));
 
-    // Comment on Trello card
-    if (trelloCardId) {
-      await addComment(trelloCardId, `BRIEF COMPLETE — ${doc.url} — ${new Date().toISOString().split('T')[0]}`);
+    // Comment on Trello card — resolve card ID if missing from sheet
+    let resolvedCardId = trelloCardId;
+    if (!resolvedCardId) {
+      try {
+        const boardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+        if (boardId) {
+          const cards = await getBoardCardsWithListNames(boardId);
+          const match = cards.find(c =>
+            (leadId && c.name.includes(leadId)) ||
+            c.name.toLowerCase().includes(companyName.toLowerCase())
+          );
+          if (match) {
+            resolvedCardId = match.id;
+            // Write back to sheet so next time it's available immediately
+            await updateCell(SHEETS.LEAD_MASTER, leadRow.row, 'Q', resolvedCardId).catch(() => {});
+          }
+        }
+      } catch { /* non-fatal — comment is a nice-to-have */ }
+    }
+    if (resolvedCardId) {
+      await addComment(resolvedCardId, `BRIEF COMPLETE — ${doc.url} — ${new Date().toISOString().split('T')[0]}`).catch(() => {});
     }
 
     // Alert team
