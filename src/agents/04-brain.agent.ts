@@ -21,6 +21,15 @@ const PROCESS_START = Date.now();
 // Conversation memory: last 15 messages per user
 const conversations = new Map<string, { role: 'user' | 'assistant'; content: string }[]>();
 
+// 60-second cache for buildDataContext — prevents hammering Trello/Sheets on every message
+let _dataCtxCache: { ts: number; result: { data: string; issues: string[] } } | null = null;
+const DATA_CTX_TTL = 60_000;
+
+/** Resolve a promise within `ms` milliseconds; on timeout returns `fallback` instead of throwing. */
+function withCallTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([p, new Promise<T>(resolve => setTimeout(() => resolve(fallback), ms))]);
+}
+
 function buildSystemPrompt(): string {
   return `You are StandMe Brain — the living intelligence of StandMe, a full-service exhibition stand design & build company operating across MENA and Europe.
 
@@ -575,15 +584,25 @@ export class BrainAgent extends BaseAgent {
     }, 12000);
 
     try {
-      // Build live data snapshot for context (max 8s — don't let slow APIs hang the bot)
+      // Build live data snapshot for context.
+      // buildDataContext() now runs all calls in parallel with 5s per-call timeouts,
+      // so it will always return within ~5s. The 10s outer safety net here should
+      // never fire under normal conditions.
       let dataTimedOut = false;
-      const { data: dataContext, issues: dataIssues } = await Promise.race([
-        this.buildDataContext(),
-        new Promise<{ data: string; issues: string[] }>(resolve => setTimeout(() => {
-          dataTimedOut = true;
-          resolve({ data: 'No live data available.', issues: [] });
-        }, 8000)),
-      ]);
+      let dataContext = 'No live data available.';
+      let dataIssues: string[] = [];
+      try {
+        const result = await Promise.race([
+          this.buildDataContext(),
+          new Promise<{ data: string; issues: string[] }>((_, reject) =>
+            setTimeout(() => reject(new Error('outer-timeout')), 10_000)
+          ),
+        ]);
+        dataContext = result.data;
+        dataIssues = result.issues;
+      } catch {
+        dataTimedOut = true;
+      }
 
       // Pull relevant knowledge base entries — scoped by active company focus when available
       // to prevent cross-client data leakage in multi-company pipelines
@@ -661,14 +680,14 @@ export class BrainAgent extends BaseAgent {
       this.detectAndSaveInsights(ctx.userId, message, response).catch(() => { /* silent */ });
 
       // Report any data source issues to Mo as a separate diagnostic message
-      const allIssues: string[] = [...dataIssues];
-      if (dataTimedOut) allIssues.push('Live data timed out (>8s) — Trello/Sheets may be slow');
-      if (allIssues.length > 0) {
+      // Only send if there was a hard outer timeout — per-call timeouts are normal
+      // (slow API) and don't warrant a noisy alert. They're already tracked in dataIssues.
+      if (dataTimedOut) {
         const { sendToMo } = await import('../services/telegram/bot');
         await sendToMo(
-          `⚠️ *Data source issues detected*\n\n${allIssues.map(i => `• ${i}`).join('\n')}\n\n_Your response was sent using cached/partial data._`,
+          `⚠️ *Live data timed out (>10s)*\n\nAll external API calls exceeded their limits. Response used cached/no data.\n\nIf this happens repeatedly, check Railway logs for Trello/Sheets errors.`,
           'Markdown'
-        );
+        ).catch(() => {});
       }
 
       // Trigger agent action if requested
@@ -737,19 +756,37 @@ export class BrainAgent extends BaseAgent {
   }
 
   private async buildDataContext(): Promise<{ data: string; issues: string[] }> {
+    // Return cached result if fresh (60s TTL) — prevents hammering APIs on every message
+    if (_dataCtxCache && Date.now() - _dataCtxCache.ts < DATA_CTX_TTL) {
+      return _dataCtxCache.result;
+    }
+
     const lines: string[] = [];
     const issues: string[] = [];
+    const PER_CALL_TIMEOUT = 5000; // 5s per individual API call
 
-    try {
-      // Pipeline snapshot
-      const salesBoardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
-      if (salesBoardId) {
-        const cards = await getBoardCardsWithListNames(salesBoardId);
+    const salesBoardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
+
+    // Run ALL external calls in parallel — no sequential awaiting
+    const [cards, leads, deadlines, queue] = await Promise.all([
+      salesBoardId
+        ? withCallTimeout(getBoardCardsWithListNames(salesBoardId), PER_CALL_TIMEOUT, null)
+        : Promise.resolve(null),
+      withCallTimeout(readSheet(SHEETS.LEAD_MASTER), PER_CALL_TIMEOUT, null),
+      withCallTimeout(readSheet(SHEETS.TECHNICAL_DEADLINES), PER_CALL_TIMEOUT, null),
+      withCallTimeout(readSheet(SHEETS.OUTREACH_QUEUE), PER_CALL_TIMEOUT, null),
+    ]);
+
+    // Trello pipeline snapshot
+    if (cards === null) {
+      issues.push('Trello: timed out (>5s)');
+    } else {
+      try {
         const byStage = new Map<string, number>();
         const now = new Date();
         const overdue: string[] = [];
-        const stalledDeals: string[] = [];   // Proposal/Negotiation > 21 days inactive
-        const coldQualifying: string[] = []; // Qualifying > 14 days inactive
+        const stalledDeals: string[] = [];
+        const coldQualifying: string[] = [];
 
         for (const card of cards) {
           const stage = card.listName || 'Unknown';
@@ -757,8 +794,6 @@ export class BrainAgent extends BaseAgent {
           if (card.due && new Date(card.due) < now) {
             overdue.push(`${card.name} (${stage})`);
           }
-
-          // Velocity tracking via dateLastActivity
           const lastActivity = (card as any).dateLastActivity
             ? new Date((card as any).dateLastActivity)
             : null;
@@ -779,44 +814,50 @@ export class BrainAgent extends BaseAgent {
         if (overdue.length > 0) lines.push(`  OVERDUE: ${overdue.join(', ')}`);
         if (stalledDeals.length > 0) lines.push(`  ⚠️ STALLED (>21d): ${stalledDeals.join(', ')}`);
         if (coldQualifying.length > 0) lines.push(`  🥶 COLD QUALIFYING (>14d): ${coldQualifying.join(', ')}`);
+      } catch (err: any) {
+        issues.push(`Trello: ${err.message}`);
       }
-    } catch (err: any) {
-      issues.push(`Trello: ${err.message}`);
     }
 
-    try {
-      // Recent leads
-      const leads = await readSheet(SHEETS.LEAD_MASTER);
-      const dataRows = leads.slice(1).filter(r => r[2]);
-      if (dataRows.length > 0) {
-        lines.push(`\nRECENT LEADS (${dataRows.length} total):`);
-        dataRows.slice(-5).forEach(r => {
-          lines.push(`  ${r[2] || '?'} | ${r[6] || 'no show'} | Score:${r[12] || '?'} | ${r[15] || '?'}`);
+    // Recent leads
+    if (leads === null) {
+      issues.push('Leads sheet: timed out (>5s)');
+    } else {
+      try {
+        const dataRows = leads.slice(1).filter(r => r[2]);
+        if (dataRows.length > 0) {
+          lines.push(`\nRECENT LEADS (${dataRows.length} total):`);
+          dataRows.slice(-5).forEach(r => {
+            lines.push(`  ${r[2] || '?'} | ${r[6] || 'no show'} | Score:${r[12] || '?'} | ${r[15] || '?'}`);
+          });
+        }
+      } catch (err: any) {
+        issues.push(`Leads sheet: ${err.message}`);
+      }
+    }
+
+    // Upcoming deadlines
+    if (deadlines === null) {
+      issues.push('Deadlines sheet: timed out (>5s)');
+    } else {
+      try {
+        const now = new Date();
+        const upcoming = deadlines.slice(1).filter(r => {
+          const dates = [r[3], r[4], r[5], r[6], r[7], r[8], r[9]].filter(Boolean);
+          return dates.some(d => {
+            const diff = (new Date(d).getTime() - now.getTime()) / 86400000;
+            return diff >= 0 && diff <= 21;
+          });
         });
+        if (upcoming.length > 0) {
+          lines.push(`\nDEADLINES IN NEXT 21 DAYS: ${upcoming.map(r => r[1]).join(', ')}`);
+        }
+      } catch (err: any) {
+        issues.push(`Deadlines sheet: ${err.message}`);
       }
-    } catch (err: any) {
-      issues.push(`Leads sheet: ${err.message}`);
     }
 
-    try {
-      // Upcoming deadlines
-      const deadlines = await readSheet(SHEETS.TECHNICAL_DEADLINES);
-      const now = new Date();
-      const upcoming = deadlines.slice(1).filter(r => {
-        const dates = [r[3], r[4], r[5], r[6], r[7], r[8], r[9]].filter(Boolean);
-        return dates.some(d => {
-          const diff = (new Date(d).getTime() - now.getTime()) / 86400000;
-          return diff >= 0 && diff <= 21;
-        });
-      });
-      if (upcoming.length > 0) {
-        lines.push(`\nDEADLINES IN NEXT 21 DAYS: ${upcoming.map(r => r[1]).join(', ')}`);
-      }
-    } catch (err: any) {
-      issues.push(`Deadlines sheet: ${err.message}`);
-    }
-
-    // Pending approvals — Mo needs to know if something is waiting for their decision
+    // Pending approvals — in-memory, always fast
     try {
       const { getPendingApprovals } = await import('../services/approvals');
       const pending = getPendingApprovals();
@@ -827,22 +868,27 @@ export class BrainAgent extends BaseAgent {
           lines.push(`  /approve_${p.id} — ${p.action} (${ageMin}m ago)`);
         }
       }
-    } catch { /* non-fatal — approval service may not be initialised yet */ }
-
-    // Outreach queue — leads staged and waiting for bulk push
-    try {
-      const queue = await readSheet(SHEETS.OUTREACH_QUEUE);
-      const ready = queue.slice(1).filter(r => (r[7] || '').toUpperCase() === 'READY');
-      if (ready.length > 0) {
-        const shows = [...new Set(ready.map(r => r[5]).filter(Boolean))];
-        lines.push(`\nOUTREACH QUEUE: ${ready.length} leads ready${shows.length ? ` (${shows.join(', ')})` : ''} — run /bulkoutreach to push`);
-      }
     } catch { /* non-fatal */ }
 
-    return {
+    // Outreach queue
+    if (queue !== null) {
+      try {
+        const ready = queue.slice(1).filter(r => (r[7] || '').toUpperCase() === 'READY');
+        if (ready.length > 0) {
+          const shows = [...new Set(ready.map(r => r[5]).filter(Boolean))];
+          lines.push(`\nOUTREACH QUEUE: ${ready.length} leads ready${shows.length ? ` (${shows.join(', ')})` : ''} — run /bulkoutreach to push`);
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    const result = {
       data: lines.length > 0 ? lines.join('\n') : 'No live data available.',
       issues,
     };
+
+    // Cache the result (even partial results are better than nothing)
+    _dataCtxCache = { ts: Date.now(), result };
+    return result;
   }
 
   private async runHealthCheck(ctx: AgentContext): Promise<AgentResponse> {
