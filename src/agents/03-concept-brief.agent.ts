@@ -140,15 +140,12 @@ export class ConceptBriefAgent extends BaseAgent {
 
       await this.respond(ctx.chatId, `✅ Concept ${label} master done. Generating 3 angles...`);
 
-      // Give Drive 2 seconds to propagate the public permission before
-      // Freepik's change-camera endpoint tries to fetch the image URL
-      await new Promise(r => setTimeout(r, 2000));
-
       // Run the 3 non-front angles in parallel via Promise.allSettled
+      // Pass raw base64 directly — avoids Drive URL fetch issues
       const angleSettled = await Promise.allSettled(
         ANGLES.slice(1).map(async (angle) => {
           const { url: freepikUrl } = await changeCameraAngle(
-            masterUrl, angle.h, angle.v, angle.z, seed,
+            base64, angle.h, angle.v, angle.z, seed,
           );
           // Re-download from Freepik CDN and re-upload to Drive for permanent URLs
           const imgResp = await axios.get<ArrayBuffer>(freepikUrl, { responseType: 'arraybuffer', timeout: 30_000 });
@@ -162,11 +159,13 @@ export class ConceptBriefAgent extends BaseAgent {
         }),
       );
 
-      for (const settled of angleSettled) {
+      const nonFrontAngles = ANGLES.slice(1);
+      for (let i = 0; i < angleSettled.length; i++) {
+        const settled = angleSettled[i];
         if (settled.status === 'fulfilled') {
           results.push(settled.value);
         } else {
-          errors.push(`Concept ${label} angle: ${settled.reason?.message ?? settled.reason}`);
+          errors.push(`Concept ${label} ${nonFrontAngles[i].label}: ${settled.reason?.message ?? settled.reason}`);
         }
       }
     }
@@ -222,7 +221,9 @@ export class ConceptBriefAgent extends BaseAgent {
     }
 
     // 14. Final confirmation
-    const errorNote = errors.length > 0 ? `\n⚠️ ${errors.length} image(s) failed` : '';
+    const errorNote = errors.length > 0
+      ? `\n⚠️ ${errors.length} image(s) failed:\n${errors.map(e => `• ${e}`).join('\n')}`
+      : '';
     await this.respond(ctx.chatId,
       `✅ *Renders done: ${companyName}*\n` +
       `Generated: ${results.length}/8 images${errorNote}\n\n` +
