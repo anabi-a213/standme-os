@@ -23,9 +23,16 @@ export class DealAnalyserAgent extends BaseAgent {
     const leads = await readSheet(SHEETS.LEAD_MASTER);
 
     if (lessons.length <= 1 && leads.length <= 1) {
-      await this.respond(ctx.chatId, 'Not enough data for analysis yet.');
+      await this.respond(ctx.chatId,
+        'No pipeline data yet.\n\nAdd leads with `/newlead` or wait for inbound emails to be detected.\n' +
+        'Run `/dealanalysis` again once you have at least one lead or lesson logged.'
+      );
       return { success: true, message: 'Insufficient data', confidence: 'HIGH' };
     }
+
+    // Determine analysis depth based on data volume
+    const totalDeals = lessons.length - 1;
+    const analysisDepth = totalDeals >= 3 ? 'full' : totalDeals === 2 ? 'preliminary' : 'early';
 
     // Analyze by shows — won/lost from LESSONS_LEARNED (col E = outcome: WON/LOST)
     // Pipeline status from LEAD_MASTER (col P = status: HOT/WARM/COLD/DISQUALIFIED)
@@ -87,12 +94,19 @@ export class DealAnalyserAgent extends BaseAgent {
     const lostDeals = [...showCounts.values()].reduce((sum, v) => sum + v.lost, 0);
     const totalHot = hotLeads;
 
+    const depthNote = analysisDepth === 'early'
+      ? 'This is an early-stage analysis based on limited data (1 deal). Flag patterns, not conclusions.'
+      : analysisDepth === 'preliminary'
+      ? 'This is a preliminary analysis based on 2 deals. Note patterns but caution on generalising.'
+      : 'This is a full analysis based on 3+ deals.';
+
     const insight = await generateText(
       `StandMe pipeline data for this week:\n\n` +
       `Shows breakdown: ${JSON.stringify(Object.fromEntries(showCounts))}\n` +
       `Industries: ${JSON.stringify(Object.fromEntries(industryCounts))}\n` +
       `Lead sources: ${JSON.stringify(Object.fromEntries(sourceCounts))}\n` +
       `Won: ${wonDeals} | Lost: ${lostDeals} | Hot active: ${totalHot} | Lessons logged: ${lessons.length - 1}\n\n` +
+      `${depthNote}\n\n` +
       `Write ONE sharp insight that Mo should act on this week. Not a summary of the data. An actual recommendation based on what the numbers suggest. Where should the team focus? What pattern is emerging? What is being left on the table?\n\n` +
       `2-3 sentences max. Direct. No em dashes. No filler.`,
       'You are a sharp sales strategist who knows the exhibition industry. You read data and tell people what it actually means for the business, not what the numbers say on the surface.',
@@ -111,7 +125,7 @@ export class DealAnalyserAgent extends BaseAgent {
 
     // Save per-show performance so campaign builder can use it
     for (const [show, data] of showCounts) {
-      if (data.total >= 3) {
+      if (data.total >= 1) {
         await saveKnowledge({
           source: 'deal-analyser-show',
           sourceType: 'sheet',

@@ -113,13 +113,39 @@ export class ContractorCoordAgent extends BaseAgent {
 
   private async listContractors(ctx: AgentContext): Promise<AgentResponse> {
     const rows = await readSheet(SHEETS.CONTRACTOR_DB);
+    const filter = (ctx.args || '').toLowerCase().trim();
+
     if (rows.length <= 1) {
-      await this.respond(ctx.chatId, 'No contractors in database yet.');
+      await this.respond(ctx.chatId,
+        'No contractors in database yet.\n\n' +
+        '*To build your contractor network, start with:*\n' +
+        '  1. Stand carpenters / builders (per region: Dubai, Germany, Spain, France)\n' +
+        '  2. Graphics printers (large-format, per show city)\n' +
+        '  3. AV / LED wall installers\n' +
+        '  4. Electricians (certified per venue)\n' +
+        '  5. Logistics / freight (especially DWTC-approved for Dubai)\n\n' +
+        'Add your first: `/addcontractor name | company | specialty | region | phone | email`'
+      );
       return { success: true, message: 'Empty contractor DB', confidence: 'HIGH' };
     }
 
-    const list = rows.slice(1).map(r => `  ${r[1] || '?'} — ${r[2] || '?'} (${r[3] || '?'}) — ${r[4] || '?'}`).join('\n');
-    await this.respond(ctx.chatId, `*Contractors:*\n${list}`);
+    let data = rows.slice(1);
+    if (filter) data = data.filter(r =>
+      (r[3] || '').toLowerCase().includes(filter) || // specialty
+      (r[4] || '').toLowerCase().includes(filter)    // region
+    );
+
+    if (!data.length) {
+      await this.respond(ctx.chatId,
+        `No contractors found matching "${filter}".\n\n` +
+        `Try: /contractors (no filter) or /contractors [specialty] or /contractors [region]\n` +
+        `Add one: /addcontractor name | company | specialty | region | phone | email`
+      );
+      return { success: true, message: 'No matching contractors', confidence: 'HIGH' };
+    }
+
+    const list = data.map(r => `  ${r[1] || '?'} — ${r[2] || '?'} (${r[3] || '?'}) — ${r[4] || '?'}`).join('\n');
+    await this.respond(ctx.chatId, `*Contractors${filter ? ` — ${filter}` : ''}:*\n${list}`);
     return { success: true, message: 'Contractor list shown', confidence: 'HIGH' };
   }
 }

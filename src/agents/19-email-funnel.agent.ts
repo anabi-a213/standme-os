@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, updateCell } from '../services/google/sheets';
+import { readSheet, updateCell, appendRow, objectToRow } from '../services/google/sheets';
 import { sendEmail } from '../services/google/gmail';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2, formatType3 } from '../services/telegram/bot';
@@ -261,6 +261,43 @@ export class EmailFunnelAgent extends BaseAgent {
         return { row: i + 1, data: rows[i] };
       }
     }
+
+    // Auto-create EMAIL_FUNNEL row from LEAD_MASTER if a matching lead exists
+    try {
+      const leads = await readSheet(SHEETS.LEAD_MASTER);
+      const leadRow = leads.slice(1).find(r =>
+        (r[2] || '').toLowerCase().includes(q) ||
+        (r[4] || '').toLowerCase().includes(q)
+      );
+      if (leadRow) {
+        const newRow = objectToRow(SHEETS.EMAIL_FUNNEL, {
+          id: `EF-${Date.now()}`,
+          leadId: leadRow[0] || '',
+          companyName: leadRow[2] || '',
+          contactName: leadRow[3] || '',
+          contactEmail: leadRow[4] || '',
+          gmailThreadId: '',
+          lastMessageId: '',
+          funnelStage: 'NEW_INQUIRY',
+          lastContactDate: leadRow[1] || new Date().toISOString(),
+          emailsSent: '0',
+          showName: leadRow[6] || '',
+          standSize: leadRow[8] || '',
+          budget: leadRow[9] || '',
+          notes: 'Auto-created by Agent-19 from LEAD_MASTER (no EMAIL_FUNNEL record existed)',
+          conversationLog: '[]',
+        });
+        await appendRow(SHEETS.EMAIL_FUNNEL, newRow);
+        // Re-read to get the row index
+        const updated = await readSheet(SHEETS.EMAIL_FUNNEL).catch(() => [] as string[][]);
+        for (let i = updated.length - 1; i >= 1; i--) {
+          if ((updated[i][2] || '').toLowerCase().includes(q)) {
+            return { row: i + 1, data: updated[i] };
+          }
+        }
+      }
+    } catch { /* non-fatal — if auto-create fails, return null */ }
+
     return null;
   }
 

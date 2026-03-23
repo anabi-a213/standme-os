@@ -90,7 +90,7 @@ export async function updateRange(config: SheetConfig, range: string, values: st
 
 export async function findRowByValue(config: SheetConfig, column: string, value: string): Promise<{ row: number; data: string[] } | null> {
   const rows = await readSheet(config);
-  const colIndex = column.charCodeAt(0) - 'A'.charCodeAt(0);
+  const colIndex = colLetterToIndex(column);
 
   for (let i = config.headerRow; i < rows.length; i++) {
     if (rows[i][colIndex] && rows[i][colIndex].toLowerCase() === value.toLowerCase()) {
@@ -100,11 +100,21 @@ export async function findRowByValue(config: SheetConfig, column: string, value:
   return null;
 }
 
+// Convert column letter (e.g. 'A', 'Z', 'AA', 'AL') to 0-based numeric index
+export function colLetterToIndex(col: string): number {
+  const upper = col.toUpperCase();
+  let index = 0;
+  for (let i = 0; i < upper.length; i++) {
+    index = index * 26 + (upper.charCodeAt(i) - 64);
+  }
+  return index - 1;
+}
+
 // Convert row array to object using column mapping
 export function rowToObject(config: SheetConfig, row: string[]): Record<string, string> {
   const obj: Record<string, string> = {};
   for (const [field, col] of Object.entries(config.columns)) {
-    const idx = col.charCodeAt(0) - 'A'.charCodeAt(0);
+    const idx = colLetterToIndex(col);
     obj[field] = row[idx] || '';
   }
   return obj;
@@ -116,13 +126,13 @@ export function objectToRow(config: SheetConfig, obj: Record<string, string>): s
   if (colEntries.length === 0) {
     throw new Error(`objectToRow: sheet config "${config.tabName}" has no column mappings — cannot build row`);
   }
-  const maxCol = Math.max(...colEntries.map(c => c.charCodeAt(0) - 'A'.charCodeAt(0)));
+  const maxCol = Math.max(...colEntries.map(c => colLetterToIndex(c)));
   if (!isFinite(maxCol) || maxCol < 0) {
     throw new Error(`objectToRow: sheet config "${config.tabName}" produced invalid column index (${maxCol}) — check column letters`);
   }
   const row = new Array(maxCol + 1).fill('');
   for (const [field, col] of Object.entries(config.columns)) {
-    const idx = col.charCodeAt(0) - 'A'.charCodeAt(0);
+    const idx = colLetterToIndex(col);
     row[idx] = obj[field] || '';
   }
   return row;
@@ -164,7 +174,7 @@ export async function validateSheetHeaders(config: SheetConfig): Promise<boolean
     const mismatches: string[] = [];
 
     for (const [field, col] of Object.entries(config.columns)) {
-      const colIdx = col.charCodeAt(0) - 'A'.charCodeAt(0);
+      const colIdx = colLetterToIndex(col);
       const actualHeader = (actualHeaders[colIdx] || '').trim().toLowerCase();
       const expectedField = field.toLowerCase();
       // Convert camelCase to space-separated words: contactName → contact name

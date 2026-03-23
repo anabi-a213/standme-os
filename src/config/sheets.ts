@@ -35,6 +35,19 @@ export const SHEETS: Record<string, SheetConfig> = {
       outreachReadiness: 'W',
       language: 'X',
       notes: 'Y',
+      // Extended fields — populated via knowledge-propagator, not on initial row creation
+      standType:          'AA',  // 'island' | 'corner' | 'peninsula' | 'inline'
+      openSides:          'AB',  // '1' | '2' | '3' | '4'
+      mainGoal:           'AC',  // 'meetings' | 'brand_awareness' | 'product_launch' | 'lead_gen'
+      staffCount:         'AD',
+      mustHaveElements:   'AE',
+      brandColours:       'AF',
+      previousExperience: 'AG',  // 'first_time' | 'experienced' | 'veteran'
+      briefTier:          'AH',  // '1' | '2' | '3'
+      rendersGenerated:   'AI',  // 'true' | 'false'
+      rendersDriveUrl:    'AJ',
+      lastDataUpdate:     'AK',
+      dataConfidenceLog:  'AL',
     },
     headerRow: 1,
   },

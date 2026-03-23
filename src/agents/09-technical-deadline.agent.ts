@@ -5,6 +5,19 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, appendRow, updateCell, objectToRow } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
+import { SHOW_PROFILES } from '../config/standme-knowledge';
+
+const SHOW_PROFILE_MAP: Record<string, string> = {
+  'arab health':    'arabHealth',
+  'gulfood':        'gulfood',
+  'hannover messe': 'hannoverMesse',
+  'hannover':       'hannoverMesse',
+  'interpack':      'interpack',
+  'intersolar':     'intersolar',
+  'medica':         'medica',
+  'sial':           'sialParis',
+  'ise':            'ise',
+};
 
 export class TechnicalDeadlineAgent extends BaseAgent {
   config: AgentConfig = {
@@ -70,6 +83,31 @@ export class TechnicalDeadlineAgent extends BaseAgent {
         alerts.join('\n\n')
       ));
     }
+
+    // Show calendar estimates for shows in pipeline with no deadline on file
+    try {
+      const leads = await readSheet(SHEETS.LEAD_MASTER);
+      const showsWithDeadlines = new Set(existing.slice(1).map(r => (r[1] || '').toLowerCase()));
+      for (const row of leads.slice(1)) {
+        const status = (row[15] || '').toUpperCase();
+        const show = row[6] || '';
+        if (!show || (status !== 'HOT' && status !== 'WARM')) continue;
+        const hasOnFile = [...showsWithDeadlines].some(s => s.includes(show.toLowerCase().substring(0, 6)));
+        if (!hasOnFile) {
+          const profileKey = Object.keys(SHOW_PROFILE_MAP).find(k => show.toLowerCase().includes(k));
+          if (profileKey) {
+            const profile = SHOW_PROFILES[SHOW_PROFILE_MAP[profileKey]];
+            if (profile) {
+              alerts.push(
+                `📅 No deadlines on file for *${show}* — estimated from show calendar:\n` +
+                `   • ${profile.deadlineNote}\n` +
+                `   ⚠️ Confirm with organiser. Add confirmed dates with /techdeadlines.`
+              );
+            }
+          }
+        }
+      }
+    } catch { /* non-fatal */ }
 
     await this.respond(ctx.chatId,
       alerts.length > 0

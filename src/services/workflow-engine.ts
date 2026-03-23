@@ -32,6 +32,7 @@ import { saveKnowledge } from './knowledge';
 import { writeSystemLog } from '../utils/system-log';
 import { logger } from '../utils/logger';
 import { pipelineRunner } from './pipeline-runner';
+import { displayValue } from '../utils/confidence';
 
 // ── WORKFLOW_LOG helpers ────────────────────────────────────────────────────
 
@@ -253,25 +254,37 @@ async function w3_scoringModifiers(): Promise<void> {
 // ── W4: Lead enriched + readiness≥7 → notify Mo ────────────────────────────
 
 async function w4_enrichedReady(event: AgentEvent): Promise<void> {
-  const readiness = parseInt((event.data.outreachReadiness as string) || '0');
-  if (readiness < 7) return;
   if (!guardStart('W4', event.entityId)) return;
 
   const startedAt = new Date().toISOString();
   await logWF({ workflowId: 'W4', workflowName: 'Enriched Lead Ready', trigger: 'lead.enriched', entityName: event.entityName, status: 'RUNNING', startedAt });
 
   try {
+    const readiness = parseInt((event.data.outreachReadiness as string) || '0');
     const score = event.data.score as number || 0;
     const show = event.data.showName as string || '';
 
-    await sendToMo(formatType2(
-      `Lead Ready: ${event.entityName}`,
-      `"${event.entityName}" has been enriched.\n` +
-      `Readiness: ${readiness}/10 | Score: ${score}/10${show ? ` | Show: ${show}` : ''}\n\n` +
-      `*Suggested next steps:*\n` +
-      `• /brief ${event.entityName} — Generate concept brief\n` +
-      `• /outreach ${event.entityName} — Start email outreach`
-    ));
+    let message: string;
+    if (readiness >= 7) {
+      message =
+        `"${event.entityName}" enriched and ready.\n` +
+        `Readiness: ${readiness}/10 | Score: ${score}/10${show ? ` | Show: ${show}` : ''}\n\n` +
+        `*Next steps:*\n` +
+        `• /brief ${event.entityName} — Generate concept brief\n` +
+        `• /outreach ${event.entityName} — Start email outreach`;
+    } else if (readiness >= 4) {
+      message =
+        `"${event.entityName}" enriched — partial data available.\n` +
+        `Readiness: ${readiness}/10 | Score: ${score}/10${show ? ` | Show: ${show}` : ''}\n\n` +
+        `Brief possible with assumptions. Run /brief ${event.entityName} to generate a draft, or gather more first.`;
+    } else {
+      message =
+        `"${event.entityName}" — early stage (readiness ${readiness}/10).\n` +
+        `Score: ${score}/10${show ? ` | Show: ${show}` : ''}\n\n` +
+        `More data needed before brief. Run /brief ${event.entityName} once show + size + budget are confirmed.`;
+    }
+
+    await sendToMo(formatType2(`Lead Enriched: ${event.entityName}`, message));
 
     await logWF({
       workflowId: 'W4', workflowName: 'Enriched Lead Ready',
@@ -341,6 +354,56 @@ async function w5_morningBriefing(): Promise<void> {
         `Active pipelines: ${pipelineRunner.getActive().length}\n` +
         `Blocked pipelines: ${blocked.length}`,
     });
+
+    // ── 3b. Tier grouping — brief readiness ──────────────────────────────────
+    const tier3: string[] = [];  // renders ready (has standType)
+    const tier2: string[] = [];  // brief ready (show + size + budget, no standType)
+    const tier1: string[] = [];  // incomplete
+    const yesterday = Date.now() - 24 * 60 * 60 * 1000;
+
+    for (const row of rows.slice(1)) {
+      const company   = row[2] || '';
+      const showName  = displayValue(row[6] || '');
+      const standSize = displayValue(row[8] || '');
+      const budget    = displayValue(row[9] || '');
+      const standType = displayValue(row[26] || ''); // col AA
+      const briefTier = displayValue(row[33] || ''); // col AH
+      const lastUpd   = row[36] || '';               // col AK
+
+      if (!company) continue;
+
+      if (showName && standSize && budget && standType) {
+        tier3.push(company);
+      } else if (showName && standSize && budget) {
+        tier2.push(company);
+      } else if (company) {
+        const missing: string[] = [];
+        if (!showName) missing.push('show');
+        if (!standSize) missing.push('size');
+        if (!budget) missing.push('budget');
+        tier1.push(`${company} (missing: ${missing.join(', ')})`);
+      }
+    }
+
+    if (tier3.length > 0) {
+      sections.push({
+        label: `🎨 RENDERS READY — ${tier3.length}`,
+        content: tier3.slice(0, 8).map(c => `  • /renders ${c}`).join('\n'),
+      });
+    }
+    if (tier2.length > 0) {
+      sections.push({
+        label: `📋 BRIEF READY — ${tier2.length}`,
+        content: tier2.slice(0, 8).map(c => `  • /brief ${c}`).join('\n'),
+      });
+    }
+    if (tier1.length > 0) {
+      sections.push({
+        label: `📌 INCOMPLETE — ${tier1.length}`,
+        content: tier1.slice(0, 6).map(c => `  • ${c}`).join('\n') +
+          (tier1.length > 6 ? `\n  ...and ${tier1.length - 6} more` : ''),
+      });
+    }
 
     if (staleLeads.length > 0) {
       sections.push({

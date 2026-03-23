@@ -272,11 +272,59 @@ export async function getRecentKnowledge(limit = 20): Promise<KnowledgeEntry[]> 
 }
 
 // ──────────────────────────────────────────────────────────────
-// Read: build a context string for AI prompts
+// Read: search scoped to a specific company (prevents data mixing)
+// Returns only entries that mention the company name.
+// Optionally boosts entries that match a known lead ID.
 // ──────────────────────────────────────────────────────────────
 
-export async function buildKnowledgeContext(query: string): Promise<string> {
-  const entries = await searchKnowledge(query, 8);
+export async function searchKnowledgeForCompany(
+  companyName: string,
+  additionalQuery: string,
+  leadId?: string,
+  limit = 8
+): Promise<KnowledgeEntry[]> {
+  const companyTerms = companyName.toLowerCase()
+    .split(/\s+/)
+    .filter(t => t.length > 2);
+
+  if (companyTerms.length === 0) return [];
+
+  const allResults = await searchKnowledge(
+    `${companyName} ${additionalQuery}`,
+    limit * 3
+  );
+
+  // Keep only entries that contain at least one company name term
+  const companyResults = allResults.filter(entry => {
+    const text = `${entry.topic} ${entry.source} ${entry.tags} ${entry.content}`
+      .toLowerCase();
+    return companyTerms.some(term => text.includes(term));
+  });
+
+  // If leadId provided, boost entries that contain it
+  if (leadId) {
+    const lid = leadId.toLowerCase();
+    companyResults.sort((a, b) => {
+      const aHas = `${a.tags} ${a.source} ${a.content}`.toLowerCase().includes(lid) ? 2 : 0;
+      const bHas = `${b.tags} ${b.source} ${b.content}`.toLowerCase().includes(lid) ? 2 : 0;
+      return bHas - aHas;
+    });
+  }
+
+  return companyResults.slice(0, limit);
+}
+
+// ──────────────────────────────────────────────────────────────
+// Read: build a context string for AI prompts
+// When companyName is provided, uses searchKnowledgeForCompany
+// to prevent cross-company data leakage.
+// ──────────────────────────────────────────────────────────────
+
+export async function buildKnowledgeContext(query: string, companyName?: string): Promise<string> {
+  const entries = companyName
+    ? await searchKnowledgeForCompany(companyName, query)
+    : await searchKnowledge(query, 8);
+
   if (entries.length === 0) return '';
 
   return entries.map(e =>

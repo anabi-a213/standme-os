@@ -11,6 +11,8 @@ import {
 } from '../services/trello/client';
 import { formatType2 } from '../services/telegram/bot';
 import { agentEventBus } from '../services/agent-event-bus';
+import { readSheet } from '../services/google/sheets';
+import { SHEETS } from '../config/sheets';
 
 export class CardManagerAgent extends BaseAgent {
   config: AgentConfig = {
@@ -52,11 +54,21 @@ export class CardManagerAgent extends BaseAgent {
       return { success: false, message: 'Board ID missing', confidence: 'LOW' };
     }
 
+    // Resolve SM-XXXX lead ID → company name for search
+    let resolvedSearch = cardSearch;
+    if (/^SM-\d+$/i.test(cardSearch)) {
+      try {
+        const leads = await readSheet(SHEETS.LEAD_MASTER);
+        const leadRow = leads.slice(1).find(r => (r[0] || '').toUpperCase() === cardSearch.toUpperCase());
+        if (leadRow) resolvedSearch = leadRow[2] || cardSearch; // col C = companyName
+      } catch { /* non-fatal — fall through to name search */ }
+    }
+
     // Find the card by name (fuzzy match)
     const cards = await getBoardCardsWithListNames(boardId);
-    const match = this.findCard(cards, cardSearch);
+    const matches = this.findCards(cards, resolvedSearch);
 
-    if (!match) {
+    if (matches.length === 0) {
       await this.respond(
         ctx.chatId,
         `No card found matching "*${cardSearch}*".\n` +
@@ -64,6 +76,18 @@ export class CardManagerAgent extends BaseAgent {
       );
       return { success: false, message: `Card not found: ${cardSearch}`, confidence: 'LOW' };
     }
+
+    if (matches.length > 1) {
+      const list = matches.map((c, i) => `  ${i + 1}. ${c.name} (${c.listName || 'Unknown'})`).join('\n');
+      await this.respond(
+        ctx.chatId,
+        `Multiple cards match "*${cardSearch}*" — please be more specific:\n\n${list}\n\n` +
+        `Re-run with the full name:\n\`/movecard [exact name] | [stage]\``
+      );
+      return { success: false, message: `Multiple matches for: ${cardSearch}`, confidence: 'LOW' };
+    }
+
+    const match = matches[0];
 
     // Find the target list
     const targetList = await findListByName(boardId, targetStageName);
@@ -135,16 +159,16 @@ export class CardManagerAgent extends BaseAgent {
     };
   }
 
-  private findCard(cards: TrelloCard[], search: string): TrelloCard | null {
+  private findCards(cards: TrelloCard[], search: string): TrelloCard[] {
     const q = search.toLowerCase();
-    // Exact match first
-    const exact = cards.find(c => c.name.toLowerCase() === q);
-    if (exact) return exact;
+    // Exact match → single result
+    const exact = cards.filter(c => c.name.toLowerCase() === q);
+    if (exact.length > 0) return exact;
     // Partial match
-    const partial = cards.find(c => c.name.toLowerCase().includes(q));
-    if (partial) return partial;
-    // Word-level match (any word in search matches any word in card name)
+    const partial = cards.filter(c => c.name.toLowerCase().includes(q));
+    if (partial.length > 0) return partial;
+    // Word-level match
     const words = q.split(/\s+/).filter(w => w.length > 2);
-    return cards.find(c => words.some(w => c.name.toLowerCase().includes(w))) || null;
+    return cards.filter(c => words.some(w => c.name.toLowerCase().includes(w)));
   }
 }

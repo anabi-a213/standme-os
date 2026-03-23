@@ -2,6 +2,8 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { getBoardCardsWithListNames } from '../services/trello/client';
+import { readSheet } from '../services/google/sheets';
+import { SHEETS } from '../config/sheets';
 import { generateText, detectLanguage } from '../services/ai/client';
 import { sendToMo, formatType1 } from '../services/telegram/bot';
 import { buildKnowledgeContext } from '../services/knowledge';
@@ -47,6 +49,43 @@ export class ClientReminderAgent extends BaseAgent {
         }
       }
     }
+
+    // Also check LEAD_MASTER for HOT/WARM leads with no email contact at all
+    try {
+      const leads = await readSheet(SHEETS.LEAD_MASTER);
+      for (const row of leads.slice(1)) {
+        const status = (row[15] || '').toUpperCase();
+        if (status !== 'HOT' && status !== 'WARM') continue;
+        const company = row[2] || '';
+        const email = row[4] || '';
+        const createdAt = row[1] || ''; // col B = timestamp
+        if (!company) continue;
+
+        // Skip if already in Trello reminders
+        if (reminders.some(r => r.card.name.toLowerCase().includes(company.toLowerCase()))) continue;
+
+        const daysSince = createdAt
+          ? Math.floor((now.getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24))
+          : 0;
+
+        if (daysSince >= 3) {
+          reminders.push({
+            card: {
+              id: `lead-${row[0]}`,
+              name: company,
+              dateLastActivity: createdAt || now.toISOString(),
+              listName: email ? 'Lead Master (no Trello card)' : 'Lead Master (no email on file)',
+              due: null,
+              idList: '',
+              desc: '',
+              url: '',
+            } as any,
+            daysSince,
+            stage: email ? 'New Lead (no Trello card)' : 'New Lead (no email — manual outreach needed)',
+          });
+        }
+      }
+    } catch { /* non-fatal */ }
 
     if (reminders.length === 0) {
       await this.respond(ctx.chatId, '✅ All clients have been contacted recently.');

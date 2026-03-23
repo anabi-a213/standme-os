@@ -2,25 +2,81 @@ import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
 import { SHEETS } from '../config/sheets';
-import { readSheet, findRowByValue, appendRow, objectToRow } from '../services/google/sheets';
+import { readSheet, findRowByValue, appendRow, objectToRow, updateCell } from '../services/google/sheets';
 import { addComment } from '../services/trello/client';
 import { createGoogleDoc } from '../services/google/drive';
 import { getFolderIdForCategory } from '../config/drive-folders';
 import { generateBrief, generateText } from '../services/ai/client';
-import { saveKnowledge, buildKnowledgeContext } from '../services/knowledge';
+import { saveKnowledge, buildKnowledgeContext, searchKnowledgeForCompany } from '../services/knowledge';
 import { sendToMo, formatType1, formatType2, sendToTeam } from '../services/telegram/bot';
 import { pipelineRunner } from '../services/pipeline-runner';
+import { displayValue } from '../utils/confidence';
 
 export class ConceptBriefAgent extends BaseAgent {
   config: AgentConfig = {
     name: 'AI Concept Brief Generator',
     id: 'agent-03',
     description: 'Generate research-backed design briefs',
-    commands: ['/brief'],
+    commands: ['/brief', '/renders'],
     requiredRole: UserRole.OPS_LEAD,
   };
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
+    if (ctx.command === '/renders') return this.queueRenders(ctx);
+    return this.runBrief(ctx);
+  }
+
+  // ─── /renders [company] — queue render request ────────────────────────────
+  private async queueRenders(ctx: AgentContext): Promise<AgentResponse> {
+    const company = (ctx.args || '').trim();
+    if (!company) {
+      await this.respond(ctx.chatId,
+        'Usage: `/renders [company name]`\n\n' +
+        'Renders are queued and generated when the brief reaches Tier 3 (stand type confirmed).\n' +
+        'Make sure stand type is set: `/updatelead [Company] | standType=island`'
+      );
+      return { success: false, message: 'No company specified', confidence: 'LOW' };
+    }
+
+    const leadRow = await this.fuzzyFindLead(company);
+    if (!leadRow) {
+      await this.respond(ctx.chatId, `Lead "${company}" not found.`);
+      return { success: false, message: 'Lead not found', confidence: 'HIGH' };
+    }
+
+    const standType = displayValue(leadRow.data[26] || ''); // col AA
+    const briefTier = leadRow.data[33] || '';               // col AH
+
+    if (!standType) {
+      await this.respond(ctx.chatId,
+        `⚠️ Stand type not confirmed for *${leadRow.data[2]}*.\n\n` +
+        `Renders need stand type to generate accurate spatial images.\n` +
+        `Set it first: \`/updatelead ${leadRow.data[2]} | standType=island\` (or peninsula/corner/inline)`
+      );
+      return { success: false, message: 'Stand type missing', confidence: 'MEDIUM' };
+    }
+
+    // Queue renders — write to LEAD_MASTER col AI (rendersGenerated = QUEUED)
+    await updateCell(SHEETS.LEAD_MASTER, leadRow.row, 'AI', 'QUEUED').catch(() => {});
+    await sendToMo(formatType2(
+      `Renders Queued: ${leadRow.data[2]}`,
+      `Stand type: *${standType}*\nBrief tier: ${briefTier || 'not set'}\n\n` +
+      `Freepik render prompts are in the concept brief (look for the Render Prompts section).\n` +
+      `Copy the prompt and generate in Freepik AI → save to Drive → run: \`/updatelead ${leadRow.data[2]} | rendersDriveUrl=https://...\``
+    ));
+
+    await this.respond(ctx.chatId,
+      `📸 Render request queued for *${leadRow.data[2]}*.\n` +
+      `Stand type: ${standType}\n\n` +
+      `Mo has been notified with the Freepik prompts from the brief.\n` +
+      `_(Renders are generated manually in Freepik AI — this system queues and tracks the request.)_`
+    );
+
+    return { success: true, message: 'Render request queued', confidence: 'HIGH' };
+  }
+
+  // ─── /brief [company] — run brief with tier system ────────────────────────
+  private async runBrief(ctx: AgentContext): Promise<AgentResponse> {
     const clientName = ctx.args.trim();
     if (!clientName) {
       await this.respond(ctx.chatId, 'Usage: /brief [client name or lead ID]');
@@ -40,58 +96,69 @@ export class ConceptBriefAgent extends BaseAgent {
     const companyName = leadRow.data[2];
     const showName = leadRow.data[6];
     const showCity = leadRow.data[7];
-    const standSize = leadRow.data[8];
-    const budget = leadRow.data[9];
-    const industry = leadRow.data[10];
+    const standSize = displayValue(leadRow.data[8] || '');
+    const budget = displayValue(leadRow.data[9] || '');
+    const industry = displayValue(leadRow.data[10] || '');
     const trelloCardId = leadRow.data[16];
+    const leadId = leadRow.data[0];
 
-    // Check if we have all 4 required fields
-    const missing: string[] = [];
-    if (!showName) missing.push('show name');
-    if (!standSize) missing.push('stand size (sqm)');
-    if (!budget) missing.push('budget range');
-    // brand guidelines optional
+    // Tier 3 fields (from knowledge propagator — new columns AA-AG)
+    const standType         = displayValue(leadRow.data[26] || ''); // col AA
+    const openSides         = displayValue(leadRow.data[27] || ''); // col AB
+    const mainGoal          = displayValue(leadRow.data[28] || ''); // col AC
+    const staffCount        = displayValue(leadRow.data[29] || ''); // col AD
+    const mustHaveElements  = displayValue(leadRow.data[30] || ''); // col AE
+    const brandColours      = displayValue(leadRow.data[31] || ''); // col AF
+    const previousExperience= displayValue(leadRow.data[32] || ''); // col AG
 
-    if (missing.length > 0) {
-      // Block the pipeline so /status shows it as needing attention
-      const leadId = leadRow.data[0];
-      if (leadId) {
-        pipelineRunner.block(leadId, `Missing required fields for brief: ${missing.join(', ')}`);
-      }
+    // Determine brief tier
+    // Tier 1: company + show only (no size/budget) — run with assumptions
+    // Tier 2: + size + budget — standard 2-concept brief
+    // Tier 3: + standType — renders-ready with spatial constraints
+    let tier: 1 | 2 | 3 = 1;
+    if (standSize && budget) tier = 2;
+    if (tier === 2 && standType) tier = 3;
 
+    // If Tier 1 (no show), we can still proceed but with more assumptions
+    // Only hard-block if we have NO show name at all
+    if (!showName) {
       const contactEmail = leadRow.data[4];
       if (contactEmail) {
-        // Draft info request email
         const emailDraft = await generateText(
           `Draft a short email to ${leadRow.data[3] || 'the client'} at ${companyName} ` +
-          `asking for: ${missing.join(', ')}. Show: ${showName || 'unknown'}. ` +
-          `Rules: NO "I hope this email finds you well", NO dashes, max 6 lines, ` +
+          `asking which show they are exhibiting at. ` +
+          `Rules: NO "I hope this email finds you well", NO dashes, max 4 lines, ` +
           `direct hook, one CTA. Subject: short + specific.`,
           'You write concise business emails. No fluff.',
-          400
+          200
         );
-
         await sendToMo(formatType1(
           `Info Request for ${companyName}`,
-          `Missing: ${missing.join(', ')}`,
+          'Missing: show name',
           `Draft email to ${contactEmail}:\n\n${emailDraft}`,
-          `brief_email_${leadRow.data[0]}`
+          `brief_email_${leadId}`
         ));
-
-        if (trelloCardId) {
-          await addComment(trelloCardId, `INFO REQUESTED — ${new Date().toISOString().split('T')[0]}. Waiting for: ${missing.join(', ')}`);
-        }
-
-        return {
-          success: true,
-          message: `Info request drafted for ${companyName}. Awaiting Mo approval.`,
-          confidence: 'MEDIUM',
-        };
+        if (leadId) pipelineRunner.block(leadId, 'Missing show name for brief');
+        await this.respond(ctx.chatId,
+          `⚠️ No show name for *${companyName}* — info request drafted for Mo.\n` +
+          `Pipeline blocked until show is confirmed. Add it with:\n` +
+          `\`/updatelead ${companyName} | showName=Arab Health\``
+        );
+        return { success: true, message: 'Info request drafted for show name', confidence: 'MEDIUM' };
       } else {
-        await this.respond(ctx.chatId, `Missing data for brief: ${missing.join(', ')}. No contact email to request info.\nPipeline blocked — run /resume ${companyName} once data is added.`);
-        return { success: false, message: 'Missing data, no email', confidence: 'LOW' };
+        await this.respond(ctx.chatId, `No show name and no contact email for "${companyName}". Can't proceed.`);
+        if (leadId) pipelineRunner.block(leadId, 'Missing show name, no contact email');
+        return { success: false, message: 'Missing show name, no email', confidence: 'LOW' };
       }
     }
+
+    // Notify Mo of the tier being used
+    const tierNote = tier === 1
+      ? `⚠️ Running Tier 1 brief (show only — no size/budget). Fields will be assumed.`
+      : tier === 2
+      ? `Running Tier 2 brief (size + budget confirmed).`
+      : `Running Tier 3 brief (stand type confirmed — renders-ready).`;
+    await this.respond(ctx.chatId, `${tierNote}\nGenerating concept brief for *${companyName}*...`);
 
     // Get lessons learned from both the sheet and the Knowledge Base
     let lessonsContext = '';
@@ -106,14 +173,18 @@ export class ConceptBriefAgent extends BaseAgent {
       }
     } catch { /* lessons are optional */ }
 
-    // Enrich with Knowledge Base — show context, company history, past briefs
-    const kbContext = await buildKnowledgeContext(`${showName} ${companyName} ${industry} brief design stand`);
-    if (kbContext) {
+    // Enrich with Knowledge Base — scoped to this company to prevent cross-client data mixing
+    const kbEntries = await searchKnowledgeForCompany(
+      companyName,
+      `${showName} ${industry} brief design stand`,
+      leadId || undefined
+    );
+    if (kbEntries.length > 0) {
+      const kbContext = kbEntries.map(e =>
+        `[${e.sourceType.toUpperCase()} | ${e.topic}] ${e.content}`
+      ).join('\n');
       lessonsContext = `${lessonsContext}\n\nKNOWLEDGE BASE CONTEXT:\n${kbContext}`.trim();
     }
-
-    // Generate brief
-    await this.respond(ctx.chatId, `Generating concept brief for ${companyName}...`);
 
     const briefContent = await generateBrief({
       clientName: companyName,
@@ -122,6 +193,14 @@ export class ConceptBriefAgent extends BaseAgent {
       standSize,
       budget,
       industry,
+      tier,
+      standType: standType || undefined,
+      openSides: openSides || undefined,
+      mainGoal: mainGoal || undefined,
+      staffCount: staffCount || undefined,
+      mustHaveElements: mustHaveElements || undefined,
+      brandColours: brandColours || undefined,
+      previousExperience: previousExperience || undefined,
       lessonsLearned: lessonsContext,
     });
 
@@ -179,19 +258,35 @@ export class ConceptBriefAgent extends BaseAgent {
       );
     }
 
-    await this.respond(ctx.chatId, `✅ Brief generated for ${companyName}.\nDoc: ${doc.url}`);
+    // Save brief tier to LEAD_MASTER col AH
+    await updateCell(SHEETS.LEAD_MASTER, leadRow.row, 'AH', `TIER${tier}`).catch(() => {});
+    // Mark renders as ready if Tier 3
+    if (tier === 3) {
+      await updateCell(SHEETS.LEAD_MASTER, leadRow.row, 'AI', 'READY').catch(() => {});
+    }
 
-    // Advance pipeline if one exists for this lead
-    const leadId = leadRow.data[0];
+    const tierSuffix = tier === 1
+      ? '\n\n⚠️ This is a Tier 1 brief — assumptions are marked [ASSUMED]. Update with `/updatelead` once size and budget are confirmed.'
+      : tier === 3
+      ? '\n\n📸 Tier 3 brief — stand type confirmed. Render prompts are in the doc. Run `/renders ' + companyName + '` to queue render generation.'
+      : '';
+
+    await this.respond(ctx.chatId, `✅ Brief generated for *${companyName}* (Tier ${tier}).\nDoc: ${doc.url}${tierSuffix}`);
+
+    // Advance pipeline — degraded if Tier 1 (ran with assumptions)
     if (leadId) {
-      pipelineRunner.advance(leadId, { docUrl: doc.url, briefGeneratedAt: new Date().toISOString() });
+      if (tier === 1) {
+        pipelineRunner.markDegraded(leadId, { docUrl: doc.url, briefTier: tier, briefGeneratedAt: new Date().toISOString() });
+      } else {
+        pipelineRunner.advance(leadId, { docUrl: doc.url, briefTier: tier, briefGeneratedAt: new Date().toISOString() });
+      }
     }
 
     return {
       success: true,
-      message: `Brief created for ${companyName}`,
-      confidence: 'HIGH',
-      data: { docUrl: doc.url },
+      message: `Brief created for ${companyName} (Tier ${tier})`,
+      confidence: tier === 1 ? 'MEDIUM' : 'HIGH',
+      data: { docUrl: doc.url, briefTier: tier },
     };
   }
 

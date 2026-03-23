@@ -75,6 +75,14 @@ export async function detectLanguage(text: string): Promise<'ar' | 'en' | 'franc
   return 'en';
 }
 
+// Stand type spatial constraints for renders-ready briefs
+const STAND_TYPE_CONSTRAINTS: Record<string, string> = {
+  'island':      'ISLAND stand (4 open sides): maximum visibility from all aisles. Prioritise central focal point, equal brand presence on all 4 faces, and clear traffic flow through the stand.',
+  'peninsula':   'PENINSULA stand (3 open sides): strong front + 2 side faces. Back wall anchors the space. Traffic enters from 3 directions — design to capture all.',
+  'inline':      'INLINE stand (1 open side): one aisle face, back and side walls. Depth is your tool — draw visitors in. Use depth zones: front (visible), middle (engage), back (close).',
+  'corner':      'CORNER stand (2 open sides at 90°): two aisle faces. Corner position = higher traffic. Anchor the corner, give both faces equal weight.',
+};
+
 export async function generateBrief(context: {
   clientName: string;
   showName: string;
@@ -82,17 +90,65 @@ export async function generateBrief(context: {
   standSize: string;
   budget: string;
   industry: string;
+  tier?: 1 | 2 | 3;
+  standType?: string;
+  openSides?: string;
+  mainGoal?: string;
+  staffCount?: string;
+  mustHaveElements?: string;
+  brandColours?: string;
+  previousExperience?: string;
   brandGuidelines?: string;
   lessonsLearned?: string;
 }): Promise<string> {
-  const prompt = `You are writing a concept brief for an exhibition stand project at StandMe.
+  const tier = context.tier || 2;
+  const standConstraint = context.standType
+    ? STAND_TYPE_CONSTRAINTS[context.standType.toLowerCase()] || ''
+    : '';
+
+  // Tier 1: basic single-concept brief with explicit assumptions
+  const assumptionsBlock = tier === 1
+    ? `\nASSUMPTIONS (not confirmed by client — flag each one):
+- Stand size: ASSUMED ~36 sqm (typical for this industry at this show)
+- Budget: ASSUMED mid-range (confirm before proceeding)
+- Stand type: ASSUMED inline or corner
+Mark each assumption clearly in the brief with [ASSUMED].`
+    : '';
+
+  const conceptsToWrite = tier === 1 ? 1 : 2;
+  const conceptsInstruction = tier === 1
+    ? `## Design Concept A: [Give it a real name]
+One single concept direction. Describe the spatial experience visually. Mark any assumptions with [ASSUMED]. Note what would change once size and budget are confirmed.`
+    : `## Design Concept A: The Refined Option — [Give it a real name]
+Clear, polished direction. Describe spatial experience: approach, first impression, movement through, stopping moment. Materials, lighting, key visual. Why this works.
+
+## Design Concept B: The Bold Option — [Give it a real name]
+Meaningfully different. Different spatial logic or brand story. Push further. Same detail level.`;
+
+  const freepikPrompts = tier >= 2
+    ? `\n## Render Prompts
+For each concept, write one Freepik AI image generation prompt ready to use:
+- Concept A: exhibition stand interior, ${context.standSize || '36'} sqm, ${context.industry || 'trade show'}, [specific materials/colours/elements], photorealistic, professional photography, dramatic lighting, ultra-detailed
+${tier >= 2 ? `- Concept B: exhibition stand interior, ${context.standSize || '36'} sqm, ${context.industry || 'trade show'}, [different style], photorealistic, professional photography, dramatic lighting, ultra-detailed` : ''}`
+    : '';
+
+  const prompt = `You are writing a Tier ${tier} concept brief for an exhibition stand project at StandMe.
 
 CLIENT: ${context.clientName}
 SHOW: ${context.showName}, ${context.showCity}
-STAND SIZE: ${context.standSize} sqm
-BUDGET: ${context.budget}
-INDUSTRY: ${context.industry}
+${context.standSize ? `STAND SIZE: ${context.standSize} sqm` : 'STAND SIZE: [not confirmed — use assumption]'}
+${context.budget ? `BUDGET: ${context.budget}` : 'BUDGET: [not confirmed — use assumption]'}
+INDUSTRY: ${context.industry || 'unknown'}
+${context.standType ? `STAND TYPE: ${context.standType}` : ''}
+${context.openSides ? `OPEN SIDES: ${context.openSides}` : ''}
+${context.mainGoal ? `CLIENT GOAL: ${context.mainGoal}` : ''}
+${context.staffCount ? `STAFF COUNT: ${context.staffCount}` : ''}
+${context.mustHaveElements ? `MUST-HAVE ELEMENTS: ${context.mustHaveElements}` : ''}
+${context.brandColours ? `BRAND COLOURS: ${context.brandColours}` : ''}
+${context.previousExperience ? `PREVIOUS STAND EXPERIENCE: ${context.previousExperience}` : ''}
 ${context.brandGuidelines ? `BRAND GUIDELINES: ${context.brandGuidelines}` : ''}
+${assumptionsBlock}
+${standConstraint ? `SPATIAL CONSTRAINTS:\n${standConstraint}` : ''}
 ${context.lessonsLearned ? `PAST LESSONS FROM SIMILAR PROJECTS:\n${context.lessonsLearned}` : ''}
 
 Write a concept brief using this exact structure. Be specific and visual. No filler sentences:
@@ -105,39 +161,28 @@ Write a concept brief using this exact structure. Be specific and visual. No fil
 2-3 sentences on what this show is about, who attends, what the competitive environment looks like on the floor, and why it matters for this client specifically.
 
 ## Client Objectives
-What does a company in the ${context.industry} sector typically want to achieve at this show? Visitors to attract, deals to close, brand story to tell. Keep it sharp.
+What does a company in the ${context.industry || 'exhibition'} sector want to achieve at this show? Sharp and specific.
 
-## Design Concept A: [Give it a real name]
-A single, clear concept direction. Describe the spatial experience: how a visitor approaches, what they see first, how they move through, what moment stops them. Materials, lighting mood, key visual element. Why this works for this client and show.
-
-## Design Concept B: [Give it a real name]
-A second direction, meaningfully different from A. Different spatial logic or brand story. Same level of detail.
-
-## Design Concept C: [Give it a real name]
-A third direction, the bold/experimental option. Push the brief here.
-
-## AI Image Prompts
-For each concept above, write one Midjourney prompt ready to paste:
-- Concept A: exhibition stand, [specific details], photorealistic, trade show floor, dramatic lighting, 8K
-- Concept B: ...
-- Concept C: ...
+${conceptsInstruction}
 
 ## Key Constraints
-- ${context.standSize} sqm: what that space actually allows (traffic flow, zones, meeting area)
-- Budget reality: what this budget tier enables and what it rules out
+${context.standSize ? `- ${context.standSize} sqm: what that space actually allows (traffic flow, zones, meeting area)` : '- Stand size not confirmed — base on [ASSUMED] footprint'}
+${context.budget ? `- Budget reality: what ${context.budget} enables and what it rules out` : '- Budget not confirmed — note in brief as [ASSUMED]'}
+${standConstraint ? `- Stand type: ${standConstraint}` : ''}
 - Show-specific rules or typical restrictions at ${context.showName}
+${freepikPrompts}
 
 ## Recommended Next Step
-One specific action. Not "discuss further." What exactly should happen in the next 48 hours.
+One specific action for the next 48 hours.
 
 ---
 
-Write with confidence. This is a document a client will read and get excited about. Every sentence earns its place.`;
+Write with confidence. Every sentence earns its place. No em dashes. No filler.`;
 
   return generateText(
     prompt,
     'You are StandMe\'s senior creative director. You have 15 years designing exhibition stands across MENA and Europe. You write briefs that win projects. Your language is precise, visual, and confident. Never use em dashes. Never use corporate filler.',
-    3500
+    tier === 1 ? 2000 : 3500
   );
 }
 

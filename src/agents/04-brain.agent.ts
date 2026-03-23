@@ -7,11 +7,13 @@ import { getBoardCardsWithListNames } from '../services/trello/client';
 import { generateText, generateChat, detectLanguage } from '../services/ai/client';
 import { saveThreadEntry, setActiveFocus } from '../services/thread-context';
 import { formatType3, sendToTeam } from '../services/telegram/bot';
-import { buildKnowledgeContext, getKnowledgeStats, saveKnowledge } from '../services/knowledge';
+import { buildKnowledgeContext, searchKnowledgeForCompany, getKnowledgeStats, saveKnowledge } from '../services/knowledge';
 import { getAgent } from './registry';
 import { logger } from '../utils/logger';
 import { writeSystemLog } from '../utils/system-log';
 import { getStaticKnowledge } from '../config/standme-knowledge';
+import { propagateLeadData } from '../utils/knowledge-propagator';
+import { DataField } from '../utils/confidence';
 
 // Track when the process started for uptime display in /systemstatus
 const PROCESS_START = Date.now();
@@ -238,6 +240,25 @@ OUTREACH SYSTEM (Instantly.ai):
 - Daily capacity: depends on number of Instantly inboxes configured (50-100 per inbox/day)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATA COLLECTION RULE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Every conversation is also a data collection session.
+
+When Mo mentions ANY detail about a specific company — stand type, budget confirmation, goal, colour, requirement, past show, staff count, ANYTHING — extract it and save it immediately using [ACTION: /updatelead CompanyName | field=value].
+
+Extract data from statements like:
+- "PharmaCorp confirmed island stand" → standType=island (CONFIRMED)
+- "their budget is 50k" → budget=50000 (CONFIRMED)
+- "they want mainly meetings" → mainGoal=meetings (CONFIRMED)
+- "dark blue brand, very corporate" → brandColours=dark blue (CONFIRMED)
+- "first time at Arab Health" → previousExperience=first_time (CONFIRMED)
+
+After saving, check readiness and mention it naturally:
+"Got it — saved island stand for PharmaCorp. They're now ready for renders. Want me to generate them?"
+
+Do this silently and naturally — never announce "I am saving data". Just save it and mention what it unlocks if anything.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RESPONSE STYLE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - Direct and confident — you're a senior advisor, not a chatbot
@@ -330,7 +351,7 @@ export class BrainAgent extends BaseAgent {
     name: 'StandMe Brain',
     id: 'agent-04',
     description: 'Central intelligence — answers any question, connects all agents',
-    commands: ['/brain', '/ask', '/seedknowledge', '/kbstats', '/healthcheck', '/sheetssetup', '/systemstatus'],
+    commands: ['/brain', '/ask', '/seedknowledge', '/kbstats', '/healthcheck', '/sheetssetup', '/systemstatus', '/updatelead'],
     schedule: '0 8 * * *',
     requiredRole: UserRole.OPS_LEAD,
   };
@@ -358,6 +379,11 @@ export class BrainAgent extends BaseAgent {
     // Knowledge base stats: entry count, types, recent entries
     if (ctx.command === '/kbstats') {
       return this.showKbStats(ctx);
+    }
+
+    // Update lead data — called internally by Brain's [ACTION:] system or manually
+    if (ctx.command === '/updatelead') {
+      return this.updateLeadData(ctx);
     }
 
     // System status: pending approvals, sessions, scheduler, Instantly state
@@ -512,10 +538,19 @@ export class BrainAgent extends BaseAgent {
         }, 8000)),
       ]);
 
-      // Pull relevant knowledge base entries for this message
+      // Pull relevant knowledge base entries — scoped by active company focus when available
+      // to prevent cross-client data leakage in multi-company pipelines
       let knowledgeContext = '';
       try {
-        knowledgeContext = await buildKnowledgeContext(message);
+        const activeCompany = ctx.activeFocus?.name || '';
+        if (activeCompany) {
+          const entries = await searchKnowledgeForCompany(activeCompany, message);
+          knowledgeContext = entries.map(e =>
+            `[${e.sourceType.toUpperCase()} | ${e.topic}] ${e.content} (from: ${e.source})`
+          ).join('\n');
+        } else {
+          knowledgeContext = await buildKnowledgeContext(message);
+        }
       } catch { /* silent */ }
 
       // Thread context (cross-agent activity) — already injected by BaseAgent.run()
@@ -1077,6 +1112,102 @@ INSIGHT: [company or person] | [type: budget|dm|preference|competitor|decision|s
         logger.info(`[Brain] Saved insight: ${entity} | ${factType} | ${fact.slice(0, 60)}`);
       }
     } catch { /* non-fatal — never interrupt the main flow */ }
+  }
+
+  // ── Company disambiguation — exact match check before any data write ────────
+  private async verifyCompanyExact(
+    companyName: string
+  ): Promise<{ found: boolean; exactName: string; ambiguous: boolean; matches: string[] }> {
+    try {
+      const rows = await readSheet(SHEETS.LEAD_MASTER);
+      const needle = companyName.toLowerCase().trim();
+      const matches: string[] = [];
+
+      for (let i = 1; i < rows.length; i++) {
+        const name = (rows[i][2] || '').trim();
+        if (name && name.toLowerCase().includes(needle)) {
+          matches.push(name);
+        }
+      }
+
+      if (matches.length === 0) return { found: false, exactName: '', ambiguous: false, matches: [] };
+      if (matches.length === 1) return { found: true, exactName: matches[0], ambiguous: false, matches };
+      return { found: true, exactName: '', ambiguous: true, matches };
+    } catch {
+      return { found: false, exactName: '', ambiguous: false, matches: [] };
+    }
+  }
+
+  // ── /updatelead — update lead fields from Brain's data collection ──────────
+  private async updateLeadData(ctx: AgentContext): Promise<AgentResponse> {
+    const args = (ctx.args || '').trim();
+    if (!args) {
+      await this.respond(ctx.chatId, 'Usage: /updatelead CompanyName | field=value | field=value');
+      return { success: false, message: 'No args', confidence: 'LOW' };
+    }
+
+    const parts = args.split('|').map(s => s.trim());
+    const rawCompany = parts[0];
+    if (!rawCompany) {
+      await this.respond(ctx.chatId, 'Company name required as first argument.');
+      return { success: false, message: 'No company name', confidence: 'LOW' };
+    }
+
+    const newData: Record<string, DataField> = {};
+    for (const part of parts.slice(1)) {
+      const eqIdx = part.indexOf('=');
+      if (eqIdx < 0) continue;
+      const field = part.substring(0, eqIdx).trim();
+      const value = part.substring(eqIdx + 1).trim();
+      if (field && value) {
+        newData[field] = { value, confidence: 'CONFIRMED', source: this.config.id };
+      }
+    }
+
+    if (Object.keys(newData).length === 0) {
+      await this.respond(ctx.chatId, 'No field=value pairs found. Format: field=value');
+      return { success: false, message: 'No fields', confidence: 'LOW' };
+    }
+
+    // Verify company exists and is unambiguous before writing any data
+    const verification = await this.verifyCompanyExact(rawCompany);
+
+    if (!verification.found) {
+      await this.respond(ctx.chatId,
+        `⚠️ I couldn't find "*${rawCompany}*" in the system.\n\n` +
+        `Check the spelling or run \`/newlead\` to add them first.`
+      );
+      return { success: false, message: `Company not found: ${rawCompany}`, confidence: 'HIGH' };
+    }
+
+    if (verification.ambiguous) {
+      const list = verification.matches.map((m, i) => `  ${i + 1}. ${m}`).join('\n');
+      await this.respond(ctx.chatId,
+        `⚠️ I found ${verification.matches.length} companies matching "*${rawCompany}*":\n\n${list}\n\n` +
+        `Which one did you mean? Re-run with the exact name:\n` +
+        `\`/updatelead [exact name] | field=value\``
+      );
+      return { success: false, message: `Ambiguous company: ${rawCompany}`, confidence: 'HIGH' };
+    }
+
+    // Use the exact name from LEAD_MASTER for the write
+    const companyName = verification.exactName;
+    const { unlockedSteps } = await propagateLeadData(companyName, newData, this.config.id);
+
+    const savedFields = Object.keys(newData).join(', ');
+    let reply = `✅ Saved for *${companyName}*: ${savedFields}`;
+    if (unlockedSteps.length > 0) {
+      const readyFor = unlockedSteps.map(s => {
+        if (s === 'canRunBrief') return `brief (/brief ${companyName})`;
+        if (s === 'canRunRenders') return `renders (/renders ${companyName})`;
+        if (s === 'canRunOutreach') return `outreach`;
+        return s;
+      }).join(', ');
+      reply += `\nNow ready for: ${readyFor}`;
+    }
+
+    await this.respond(ctx.chatId, reply);
+    return { success: true, message: `Updated ${savedFields} for ${companyName}`, confidence: 'HIGH' };
   }
 
   private getHistory(userId: string): { role: 'user' | 'assistant'; content: string }[] {

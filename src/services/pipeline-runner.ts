@@ -25,19 +25,23 @@ import {
 import { logger } from '../utils/logger';
 
 export type PipelineStep   = 'INTAKE' | 'ENRICH' | 'BRIEF' | 'PROPOSAL' | 'OUTREACH';
-export type PipelineStatus = 'WAITING' | 'RUNNING' | 'BLOCKED' | 'DONE' | 'FAILED';
+export type PipelineStatus = 'WAITING' | 'RUNNING' | 'BLOCKED' | 'DONE' | 'DONE_DEGRADED' | 'SKIPPED' | 'FAILED';
 
 export interface PipelineState {
-  leadId:         string;
-  companyName:    string;
-  currentStep:    PipelineStep;
-  status:         PipelineStatus;
-  blockedReason?: string;
-  completedSteps: PipelineStep[];
+  leadId:           string;
+  companyName:      string;
+  currentStep:      PipelineStep;
+  status:           PipelineStatus;
+  blockedReason?:   string;
+  completedSteps:   PipelineStep[];
+  /** Steps that ran with degraded/partial data (tier 1 brief, assumed fields, etc.) */
+  degradedSteps:    PipelineStep[];
+  /** Steps intentionally skipped due to missing optional data */
+  skippedSteps:     PipelineStep[];
   /** Structured output data forwarded between steps (not persisted to KB for size reasons) */
-  stepData:       Partial<Record<PipelineStep, Record<string, unknown>>>;
-  createdAt:      string;
-  updatedAt:      string;
+  stepData:         Partial<Record<PipelineStep, Record<string, unknown>>>;
+  createdAt:        string;
+  updatedAt:        string;
 }
 
 const PIPELINE_STEPS: PipelineStep[] = ['INTAKE', 'ENRICH', 'BRIEF', 'PROPOSAL', 'OUTREACH'];
@@ -69,6 +73,8 @@ class PipelineRunnerService {
       currentStep:    'ENRICH',
       status:         'WAITING',
       completedSteps: ['INTAKE'],
+      degradedSteps:  [],
+      skippedSteps:   [],
       stepData:       {},
       createdAt:      new Date().toISOString(),
       updatedAt:      new Date().toISOString(),
@@ -110,6 +116,33 @@ class PipelineRunnerService {
 
     logger.info(`[Pipeline] Advanced "${state.companyName}" → ${state.currentStep} (${state.status})`);
     return state;
+  }
+
+  // ── Degraded ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Mark the current step as completed in degraded mode (ran with assumptions/partial data).
+   * The pipeline continues but the step is flagged for follow-up.
+   */
+  markDegraded(leadId: string, stepData?: Record<string, unknown>): PipelineState | null {
+    const state = this.pipelines.get(leadId);
+    if (!state) return null;
+    state.degradedSteps.push(state.currentStep);
+    return this.advance(leadId, stepData);
+  }
+
+  // ── Skip ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * Skip the current step (optional step with insufficient data).
+   * Pipeline advances without completing this step.
+   */
+  skipStep(leadId: string, reason?: string): PipelineState | null {
+    const state = this.pipelines.get(leadId);
+    if (!state) return null;
+    state.skippedSteps.push(state.currentStep);
+    logger.info(`[Pipeline] Skipped "${state.companyName}" step ${state.currentStep}${reason ? `: ${reason}` : ''}`);
+    return this.advance(leadId);
   }
 
   // ── Block ────────────────────────────────────────────────────────────────────
@@ -198,6 +231,8 @@ class PipelineRunnerService {
       status:         state.status,
       blockedReason:  state.blockedReason,
       completedSteps: state.completedSteps,
+      degradedSteps:  state.degradedSteps,
+      skippedSteps:   state.skippedSteps,
       createdAt:      state.createdAt,
       updatedAt:      state.updatedAt,
     };
@@ -246,7 +281,9 @@ class PipelineRunnerService {
 
           const state: PipelineState = {
             ...parsed,
-            stepData: {}, // step data is not persisted
+            degradedSteps: parsed.degradedSteps || [],
+            skippedSteps:  parsed.skippedSteps  || [],
+            stepData:      {}, // step data is not persisted
           };
 
           this.pipelines.set(state.leadId, state);

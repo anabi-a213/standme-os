@@ -5,7 +5,8 @@ import { SHEETS } from '../config/sheets';
 import { readSheet, updateCell, sheetUrl } from '../services/google/sheets';
 import { generateText } from '../services/ai/client';
 import { sendToMo, formatType2 } from '../services/telegram/bot';
-import { saveKnowledge, buildKnowledgeContext, sourceExistsInKnowledge } from '../services/knowledge';
+import { saveKnowledge, updateKnowledge, buildKnowledgeContext, searchKnowledgeForCompany, sourceExistsInKnowledge } from '../services/knowledge';
+import { getConfidence } from '../utils/confidence';
 import { logger } from '../utils/logger';
 import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
@@ -35,8 +36,14 @@ export class LeadEnrichmentAgent extends BaseAgent {
       // If a specific company was requested, filter to that company only
       if (targetCompany && !companyName.includes(targetCompany)) continue;
 
-      // Enrich any lead that hasn't been enriched yet — no score gate
-      if (['PENDING', 'QUALIFYING', ''].includes(enrichStatus) && rows[i][2]) {
+      // Enrich any lead that hasn't been enriched yet, OR has ASSUMED/INFERRED key fields
+      const hasLowConfidenceFields = ['G', 'I', 'J', 'K'].some(col => {
+        const colIdx = col.charCodeAt(0) - 65;
+        const val = rows[i][colIdx] || '';
+        const conf = getConfidence(val);
+        return val && (conf === 'ASSUMED' || conf === 'INFERRED');
+      });
+      if ((['PENDING', 'QUALIFYING', ''].includes(enrichStatus) || hasLowConfidenceFields) && rows[i][2]) {
         leadsToEnrich.push({ row: i + 1, data: rows[i] });
       }
     }
@@ -63,8 +70,11 @@ export class LeadEnrichmentAgent extends BaseAgent {
       await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'IN_PROGRESS');
 
       try {
-        // Pull existing knowledge about this company and industry
-        const knowledgeCtx = await buildKnowledgeContext(`${companyName} ${industry || ''}`);
+        // Pull existing knowledge scoped to this company only (prevents cross-company data mixing)
+        const knowledgeEntries = await searchKnowledgeForCompany(companyName, industry || '', leadId);
+        const knowledgeCtx = knowledgeEntries.map(e =>
+          `[${e.sourceType.toUpperCase()} | ${e.topic}] ${e.content}`
+        ).join('\n');
 
         // Use AI to suggest DM search strategy — enriched with KB context
         const enrichmentResult = await generateText(
@@ -116,6 +126,17 @@ export class LeadEnrichmentAgent extends BaseAgent {
           });
         }
 
+        // If no DM email found, save a detailed guidance note to KB
+        if (!dmEmail) {
+          const website = lead.data[21] || ''; // col V might hold website in some rows
+          await updateKnowledge(`enrichment-dm-${leadId}`, {
+            sourceType: 'manual',
+            topic: companyName,
+            tags: `enrichment,dm-not-found,${(industry || '').toLowerCase()}`,
+            content: `DM not found for ${companyName}. Suggest checking LinkedIn for: "${dmTitle || 'Marketing Director OR Exhibition Manager'}". Notes: ${enrichmentResult.slice(0, 200)}`,
+          });
+        }
+
         // Publish lead.enriched — Workflow Engine W4 notifies Mo if readiness≥7
         // NOTE: Agent-02 no longer auto-adds to OUTREACH_QUEUE.
         // Mo explicitly runs /outreach [company] or /bulkoutreach [show] when ready.
@@ -134,12 +155,16 @@ export class LeadEnrichmentAgent extends BaseAgent {
         conflictGuard.release(lockKey);
       } catch (err: any) {
         conflictGuard.release(lockKey);
-        await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'FAILED');
-        await this.log({
-          actionType: 'enrich',
-          detail: `Failed to enrich ${companyName}: ${err.message}`,
-          result: 'FAIL',
-        });
+        // Graceful failure — mark as partial, save guidance note to KB, never hard fail
+        await updateCell(SHEETS.LEAD_MASTER, lead.row, 'R', 'ENRICHED').catch(() => {});
+        await saveKnowledge({
+          source: `enrichment-error-${leadId}`,
+          sourceType: 'manual',
+          topic: companyName,
+          tags: `enrichment,error,${(industry || '').toLowerCase()}`,
+          content: `Enrichment partially failed for ${companyName}: ${err.message}. Manual DM research recommended.`,
+        }).catch(() => {});
+        logger.warn(`[Enrichment] Partial failure for ${companyName}: ${err.message}`);
       }
     }
 

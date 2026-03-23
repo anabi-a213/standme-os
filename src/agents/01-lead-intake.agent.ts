@@ -13,6 +13,7 @@ import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
 import { pipelineRunner } from '../services/pipeline-runner';
 import { generateLeadId } from '../utils/lead-id';
+import { checkAllStepReadiness } from '../utils/knowledge-propagator';
 
 export class LeadIntakeAgent extends BaseAgent {
   config: AgentConfig = {
@@ -55,12 +56,12 @@ export class LeadIntakeAgent extends BaseAgent {
       ));
     }
 
-    // Validate show
+    // Validate show — soft fail only, never block lead creation
     const showValidation = showName ? validateShow(showName) : { valid: false, match: null, confidence: 'LOW' as const };
     if (showName && !showValidation.valid) {
       await sendToMo(formatType2(
-        'Show Name Mismatch',
-        `"${showName}" not found in verified database. Flagged for review.`
+        'Show Name Check',
+        `"${showName}" not found in verified database — saved as-is. Confirm spelling when you get a chance.`
       ));
     }
 
@@ -185,9 +186,26 @@ export class LeadIntakeAgent extends BaseAgent {
       await sendToMo(formatType2('New Lead Logged', message));
     }
 
+    // Check what steps are already unlocked with the data provided
+    const fakeRow: string[] = new Array(38).fill('');
+    fakeRow[6] = leadData.showName;   // G = showName
+    fakeRow[8] = leadData.standSize;  // I = standSize
+    fakeRow[9] = leadData.budget;     // J = budget
+    fakeRow[4] = leadData.contactEmail; // E = contactEmail
+    const unlockedSteps: string[] = await checkAllStepReadiness(companyName, fakeRow).catch(() => []);
+
     const leadSheetLink = sheetUrl(SHEETS.LEAD_MASTER);
     const dupNote = existingDup ? `\n⚠️ Possible duplicate flagged — Mo notified to review.` : '';
-    await this.respond(ctx.chatId, `✅ Lead captured: ${companyName} — ${scoreResult.status} (${scoreResult.total}/10)${dupNote}${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
+
+    let readinessNote = '';
+    if (unlockedSteps.includes('canRunBrief')) {
+      readinessNote += `\nReady now: /brief ${companyName} (has show + size + budget)`;
+    }
+    if (!standSize) {
+      readinessNote += `\nStill needed for renders: stand type`;
+    }
+
+    await this.respond(ctx.chatId, `✅ Lead captured: ${companyName} — ${scoreResult.status} (${scoreResult.total}/10)${dupNote}${readinessNote}${leadSheetLink ? `\n📊 [View in Lead Master](${leadSheetLink})` : ''}`);
 
     // Start pipeline for HOT/WARM manual leads (COLD leads don't warrant automatic pipeline)
     if (scoreResult.status === 'HOT' || scoreResult.status === 'WARM') {

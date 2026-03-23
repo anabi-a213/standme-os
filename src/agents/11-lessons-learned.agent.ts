@@ -171,18 +171,24 @@ export class LessonsLearnedAgent extends BaseAgent {
   }
 
   private async addManualLesson(ctx: AgentContext): Promise<AgentResponse> {
-    if (!ctx.args) {
-      await this.respond(ctx.chatId, 'Usage: /addlesson [your lesson/note]');
+    const input = (ctx.args || '').trim();
+    if (!input) {
+      await this.respond(ctx.chatId,
+        'Usage: `/addlesson [your lesson or observation]`\n\n' +
+        'Minimum: one sentence. Any format accepted:\n' +
+        '  • "Pharma clients always want meeting rooms, even for small stands"\n' +
+        '  • "Intersolar build window is only 2 days — plan for pre-fab"\n' +
+        '  • "Client X wanted revisions 48h before build start — add revision deadline to contract"'
+      );
       return { success: false, message: 'No lesson provided', confidence: 'LOW' };
     }
-
     // Save to Knowledge Base immediately so all agents see it
     await saveKnowledge({
-      source: 'manual-lesson',
+      source: `manual-lesson-${Date.now()}`,
       sourceType: 'manual',
       topic: 'lessons-learned',
       tags: `lesson,manual,institutional-knowledge`,
-      content: ctx.args.slice(0, 500),
+      content: input.slice(0, 500),
     });
 
     await appendRow(SHEETS.LESSONS_LEARNED, objectToRow(SHEETS.LESSONS_LEARNED, {

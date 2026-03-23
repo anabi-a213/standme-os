@@ -15,7 +15,7 @@
 import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentContext, AgentResponse } from '../types/agent';
 import { UserRole } from '../config/access';
-import { saveKnowledge, updateKnowledge, sourceExistsInKnowledge } from '../services/knowledge';
+import { updateKnowledge } from '../services/knowledge';
 import {
   listCampaigns,
   getCampaignStats,
@@ -63,23 +63,38 @@ export class WoodpeckerSyncAgent extends BaseAgent {
         await this.syncCampaign(campaign.id, campaign.name);
         results.campaigns++;
       } catch (err: any) {
-        logger.warn(`[WPSync] Campaign ${campaign.id} failed: ${err.message}`);
-        results.errors++;
+        // Handle 429 rate limit — wait 2s and retry once before giving up
+        if (err.message?.includes('429') || err.message?.toLowerCase().includes('rate limit')) {
+          logger.warn(`[WPSync] Rate limited on campaign ${campaign.id} — waiting 2s and retrying`);
+          await new Promise(r => setTimeout(r, 2000));
+          try {
+            await this.syncCampaign(campaign.id, campaign.name);
+            results.campaigns++;
+          } catch (retryErr: any) {
+            logger.warn(`[WPSync] Campaign ${campaign.id} failed after retry: ${retryErr.message}`);
+            results.errors++;
+          }
+        } else {
+          logger.warn(`[WPSync] Campaign ${campaign.id} failed: ${err.message}`);
+          results.errors++;
+        }
       }
 
       // Rate limit: Woodpecker Classic API is strict — 1 req/sec
       await new Promise(r => setTimeout(r, 1100));
     }
 
+    // Always write partial results — even if some campaigns failed
     const msg =
       `✅ Woodpecker sync complete\n` +
       `  Campaigns: ${results.campaigns} | Replied contacts: ${results.replies} | Errors: ${results.errors}\n` +
-      `  Data saved to Knowledge Base — Brain will use it in client conversations.`;
+      `  Data saved to Knowledge Base — Brain will use it in client conversations.` +
+      (results.errors > 0 ? `\n  ⚠️ ${results.errors} campaign(s) failed — partial data saved.` : '');
 
     if (!silent) await this.respond(ctx.chatId, msg);
     logger.info(`[WPSync] Done — ${results.campaigns} campaigns, ${results.replies} replied contacts`);
 
-    return { success: true, message: msg, confidence: 'HIGH' };
+    return { success: true, message: msg, confidence: results.errors > 0 ? 'MEDIUM' : 'HIGH' };
   }
 
   // ─── Sync a single campaign ───────────────────────────────────────────────
@@ -99,23 +114,12 @@ export class WoodpeckerSyncAgent extends BaseAgent {
       `${stats.replied} total replies.`;
 
     const campaignSource = `woodpecker-campaign-${campaignId}`;
-    const campaignExists = await sourceExistsInKnowledge(campaignSource);
-
-    if (campaignExists) {
-      await updateKnowledge(campaignSource, {
-        content: campaignContent,
-        tags: `woodpecker, campaign, outreach, ${campaignName.toLowerCase()}`,
-        lastUpdated: new Date().toISOString(),
-      } as any);
-    } else {
-      await saveKnowledge({
-        source: campaignSource,
-        sourceType: 'woodpecker',
-        topic: 'campaign',
-        tags: `woodpecker, campaign, outreach, ${campaignName.toLowerCase()}`,
-        content: campaignContent,
-      });
-    }
+    await updateKnowledge(campaignSource, {
+      sourceType: 'woodpecker',
+      topic: 'campaign',
+      tags: `woodpecker, campaign, outreach, ${campaignName.toLowerCase()}`,
+      content: campaignContent,
+    });
 
     // 2. Replied and interested prospects — the most valuable data for Brain
     let replied: WoodpeckerProspect[] = [];
@@ -166,23 +170,12 @@ export class WoodpeckerSyncAgent extends BaseAgent {
       `Campaign performance: ${stats.sent} sent, ${stats.replied} replied, ${stats.interested} interested.`;
 
     const source = `woodpecker-prospect-${prospect.email}`;
-    const exists = await sourceExistsInKnowledge(source);
-
-    if (exists) {
-      await updateKnowledge(source, {
-        content,
-        tags: `woodpecker, prospect, ${status.toLowerCase()}, ${company.toLowerCase()}, ${campaignName.toLowerCase()}`,
-        lastUpdated: new Date().toISOString(),
-      } as any);
-    } else {
-      await saveKnowledge({
-        source,
-        sourceType: 'woodpecker',
-        topic: 'company',
-        tags: `woodpecker, prospect, ${status.toLowerCase()}, ${company.toLowerCase()}, ${campaignName.toLowerCase()}`,
-        content,
-      });
-    }
+    await updateKnowledge(source, {
+      sourceType: 'woodpecker',
+      topic: 'company',
+      tags: `woodpecker, prospect, ${status.toLowerCase()}, ${company.toLowerCase()}, ${campaignName.toLowerCase()}`,
+      content,
+    });
   }
 
   // ─── Called by /webhook/woodpecker when a real-time reply arrives ─────────
@@ -223,8 +216,7 @@ export class WoodpeckerSyncAgent extends BaseAgent {
 
     const source = `woodpecker-reply-${params.email}-${date}`;
 
-    await saveKnowledge({
-      source,
+    await updateKnowledge(source, {
       sourceType: 'woodpecker',
       topic: 'conversation',
       tags: `woodpecker, reply, ${company.toLowerCase()}, ${campaign.toLowerCase()}`,

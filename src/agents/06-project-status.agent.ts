@@ -19,6 +19,7 @@ export class ProjectStatusAgent extends BaseAgent {
 
   async execute(ctx: AgentContext): Promise<AgentResponse> {
     const sections: { label: string; content: string }[] = [];
+    const unconfiguredBoards: string[] = [];
 
     // Sales Pipeline
     const salesBoardId = process.env.TRELLO_BOARD_SALES_PIPELINE || '';
@@ -37,12 +38,14 @@ export class ProjectStatusAgent extends BaseAgent {
       } catch {
         sections.push({ label: 'SALES PIPELINE', content: '  Could not fetch' });
       }
+    } else {
+      unconfiguredBoards.push('Sales Pipeline (TRELLO_BOARD_SALES_PIPELINE)');
     }
 
     // Other boards summary
     for (const [key, envKey] of [['DESIGN', 'TRELLO_BOARD_DESIGN'], ['OPERATION', 'TRELLO_BOARD_OPERATION'], ['PRODUCTION', 'TRELLO_BOARD_PRODUCTION']]) {
       const boardId = process.env[envKey];
-      if (!boardId) continue;
+      if (!boardId) { unconfiguredBoards.push(`${key} (TRELLO_BOARD_${key})`); continue; }
       try {
         const cards = await getBoardCardsWithListNames(boardId);
         const overdue = cards.filter(c => { if (!c.due) return false; const d = new Date(c.due); return !isNaN(d.getTime()) && d < new Date(); }).length;
@@ -89,6 +92,13 @@ export class ProjectStatusAgent extends BaseAgent {
       );
       sections.push({ label: 'AI SUMMARY', content: aiSummary });
     } catch { /* skip */ }
+
+    if (unconfiguredBoards.length > 0) {
+      sections.push({
+        label: 'NOT CONFIGURED',
+        content: unconfiguredBoards.map(b => `  • ${b} — set env var to enable`).join('\n'),
+      });
+    }
 
     const dashboard = formatType3('PIPELINE STATUS', sections);
     await this.respond(ctx.chatId, dashboard);

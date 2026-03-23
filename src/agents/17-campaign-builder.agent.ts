@@ -989,7 +989,12 @@ export class CampaignBuilderAgent extends BaseAgent {
           knowledgeContext: knowledgeCtx,
         });
 
-        const { reply, classification, extractedInfo, urgencyUsed } = salesResult;
+        // Default classification to INFO_REQUEST when AI returns empty/null/unknown
+        const VALID_CLASSIFICATIONS = ['INTERESTED', 'NOT_INTERESTED', 'NEEDS_MORE_INFO', 'READY_TO_CLOSE', 'OUT_OF_OFFICE', 'INFO_REQUEST'];
+        const { reply, extractedInfo, urgencyUsed } = salesResult;
+        const classification: string = VALID_CLASSIFICATIONS.includes(salesResult.classification)
+          ? salesResult.classification
+          : 'INFO_REQUEST';
         const updatedInfo = { ...collectedInfo, ...extractedInfo };
 
         // Save the reply to knowledge base for learning

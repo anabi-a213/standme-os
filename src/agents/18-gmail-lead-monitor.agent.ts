@@ -19,6 +19,8 @@ import { agentEventBus } from '../services/agent-event-bus';
 import { conflictGuard } from '../services/conflict-guard';
 import { pipelineRunner } from '../services/pipeline-runner';
 import { generateLeadId } from '../utils/lead-id';
+import { propagateLeadData } from '../utils/knowledge-propagator';
+import { DataField } from '../utils/confidence';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,14 @@ interface ExtractedLead {
   notes: string;
   isStandRequest: boolean;
   missingFields: string[];
+  // Extended fields (Phase 2)
+  standType: string | null;
+  openSides: number | null;
+  mainGoal: string | null;
+  staffCount: number | null;
+  mustHaveElements: string | null;
+  brandColours: string | null;
+  previousExperience: string | null;
 }
 
 interface PendingEmailLead {
@@ -219,7 +229,14 @@ Extract the following fields. Use EXACTLY this JSON format:
   "industry": "",
   "website": "",
   "notes": "",
-  "missingFields": []
+  "missingFields": [],
+  "standType": null,
+  "openSides": null,
+  "mainGoal": null,
+  "staffCount": null,
+  "mustHaveElements": null,
+  "brandColours": null,
+  "previousExperience": null
 }
 
 Rules:
@@ -233,6 +250,15 @@ Rules:
 - website: company website if mentioned
 - notes: any other relevant details (special requirements, timeline, design wishes)
 - missingFields: list the field names that are empty AND critical to creating a proper lead. Include from: ["company name", "show / exhibition name", "stand size", "budget", "industry"]
+- standType: one of ["island","corner","peninsula","inline"] only if explicitly or clearly mentioned, else null
+- openSides: integer 1-4 if mentioned, else null
+- mainGoal: one of ["meetings","brand_awareness","product_launch","lead_gen"] based on context clues only if clear, else null
+- staffCount: integer if mentioned, else null
+- mustHaveElements: comma-separated list of specific requirements (meeting room, demo area, storage, reception, video wall, etc.) if mentioned, else null
+- brandColours: any colour mentions, hex codes, or brand colour descriptions if present, else null
+- previousExperience: one of ["first_time","experienced","veteran"] based on context clues only if clear, else null
+
+Only include extended fields if genuinely mentioned or clearly implied. Do not guess. Return null if uncertain.
 
 Return ONLY the JSON object. No explanation.`;
 
@@ -254,6 +280,13 @@ Return ONLY the JSON object. No explanation.`;
         website: parsed.website || '',
         notes: parsed.notes || '',
         missingFields: Array.isArray(parsed.missingFields) ? parsed.missingFields : [],
+        standType: parsed.standType || null,
+        openSides: parsed.openSides || null,
+        mainGoal: parsed.mainGoal || null,
+        staffCount: parsed.staffCount || null,
+        mustHaveElements: parsed.mustHaveElements || null,
+        brandColours: parsed.brandColours || null,
+        previousExperience: parsed.previousExperience || null,
       };
     } catch {
       // Fallback: mark as a possible stand request with all data missing
@@ -269,6 +302,13 @@ Return ONLY the JSON object. No explanation.`;
         website: '',
         notes: `Raw email — extraction failed. Subject: ${subject}`,
         missingFields: ['company name', 'show / exhibition name', 'stand size', 'budget', 'industry'],
+        standType: null,
+        openSides: null,
+        mainGoal: null,
+        staffCount: null,
+        mustHaveElements: null,
+        brandColours: null,
+        previousExperience: null,
       };
     }
   }
@@ -496,6 +536,19 @@ Return ONLY the JSON object. No explanation.`;
     // Start pipeline (email leads start at BRIEF step — enrichment is less critical here
     // since we already have the email. Pipeline will wait until client replies with full data)
     pipelineRunner.start(leadId, d.companyName);
+
+    // Propagate any extended fields extracted from the email
+    const extendedFields: Record<string, DataField> = {};
+    if (d.standType)          extendedFields.standType          = { value: d.standType, confidence: 'CONFIRMED', source: this.config.id };
+    if (d.openSides !== null) extendedFields.openSides          = { value: String(d.openSides), confidence: 'CONFIRMED', source: this.config.id };
+    if (d.mainGoal)           extendedFields.mainGoal           = { value: d.mainGoal, confidence: 'INFERRED', source: this.config.id };
+    if (d.staffCount !== null) extendedFields.staffCount        = { value: String(d.staffCount), confidence: 'CONFIRMED', source: this.config.id };
+    if (d.mustHaveElements)   extendedFields.mustHaveElements   = { value: d.mustHaveElements, confidence: 'CONFIRMED', source: this.config.id };
+    if (d.brandColours)       extendedFields.brandColours       = { value: d.brandColours, confidence: 'CONFIRMED', source: this.config.id };
+    if (d.previousExperience) extendedFields.previousExperience = { value: d.previousExperience, confidence: 'INFERRED', source: this.config.id };
+    if (Object.keys(extendedFields).length > 0) {
+      await propagateLeadData(d.companyName, extendedFields, this.config.id).catch(() => null);
+    }
 
     // Send welcome email immediately (no budget mention)
     const welcomeSubject = `Your ${d.showName || 'Exhibition Stand'} Request — We're On It`;
@@ -744,6 +797,13 @@ Write a friendly, helpful email (max 150 words). Do not use placeholders. Do not
       website: updated.website || pendingEntry.partialData?.website || '',
       notes: [pendingEntry.partialData?.notes, updated.notes].filter(Boolean).join(' | '),
       missingFields: [],
+      standType: updated.standType || null,
+      openSides: updated.openSides || null,
+      mainGoal: updated.mainGoal || null,
+      staffCount: updated.staffCount || null,
+      mustHaveElements: updated.mustHaveElements || null,
+      brandColours: updated.brandColours || null,
+      previousExperience: updated.previousExperience || null,
     };
 
     const showValidation = merged.showName ? validateShow(merged.showName) : { valid: false, match: null, confidence: 'LOW' as const };
