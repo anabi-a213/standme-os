@@ -77,6 +77,14 @@ export async function changeCameraAngle(
     `via ${imageData.startsWith('http') ? 'URL' : 'base64'}`
   );
 
+  // Freepik requires seed >= 1. Use the master seed for visual consistency across
+  // angles; generate a cryptographically random valid seed when unavailable or invalid.
+  const effectiveSeed: number = (typeof seed === 'number' && seed >= 1)
+    ? seed
+    : Math.floor(Math.random() * 999998) + 1;
+
+  logger.info(`[Freepik] Using seed ${effectiveSeed} (${typeof seed === 'number' && seed >= 1 ? 'from master' : 'generated'})`);
+
   // Submit — capture Freepik's error body on failure for real diagnostics
   let submitResp: any;
   try {
@@ -87,7 +95,7 @@ export async function changeCameraAngle(
         horizontal_angle: horizontalAngle,
         vertical_angle: verticalAngle,
         zoom,
-        ...(seed !== undefined && seed >= 1 ? { seed } : {}),
+        seed: effectiveSeed,
       },
       { headers: headers(), timeout: 30_000 },
     );
