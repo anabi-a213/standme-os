@@ -126,10 +126,54 @@ Clear, polished direction. Describe spatial experience: approach, first impressi
 Meaningfully different. Different spatial logic or brand story. Push further. Same detail level.`;
 
   const freepikPrompts = tier >= 2
-    ? `\n## Render Prompts
-For each concept, write one Freepik AI image generation prompt ready to use:
-- Concept A: exhibition stand interior, ${context.standSize || '36'} sqm, ${context.industry || 'trade show'}, [specific materials/colours/elements], photorealistic, professional photography, dramatic lighting, ultra-detailed
-${tier >= 2 ? `- Concept B: exhibition stand interior, ${context.standSize || '36'} sqm, ${context.industry || 'trade show'}, [different style], photorealistic, professional photography, dramatic lighting, ultra-detailed` : ''}`
+    ? `\n## Render Prompts (for Freepik AI — read every word carefully)
+
+You are writing prompts for a photorealistic AI image generator that will produce the client's first visual impression of their exhibition stand. These prompts must be built from the actual client data above — never generic.
+
+Use ALL of this data in the prompts:
+- Company name and industry
+- Stand size and type (island/corner/peninsula/inline)
+- Main goal (meetings/brand awareness/product launch/lead gen)
+- Brand colours (if known — use exact colour names)
+- Must-have elements (if known)
+- Show name and city (affects lighting, audience, atmosphere)
+- Budget signal (high budget = premium materials, low = smart design)
+
+Exhibition stand photography rules you must follow:
+- Always: "photorealistic architectural visualisation, exhibition stand, trade show floor, professional lighting, ultra sharp, 8K, wide establishing shot showing full stand in context"
+- Always include people: "visitors and staff at the stand, business attire, busy trade show atmosphere"
+- Always specify materials: name actual materials (brushed aluminium, backlit fabric, tempered glass, oak veneer, powder-coated steel, LED wall, etc.)
+- Never: "modern", "sleek", "innovative" — these are meaningless. Describe what you actually see.
+- Stand type affects composition:
+  - island: "four open sides, central focal point, visible from all aisles, 360-degree brand presence"
+  - corner: "two open faces at 90 degrees, strong corner anchor, high visibility from two aisles"
+  - peninsula: "three open sides, back wall anchor, traffic from three directions"
+  - inline: "single aisle face, depth zones drawing visitors in, back wall as hero visual"
+
+CONCEPT A must be: The refined, premium direction
+- Clean architecture, high-end materials
+- Colour palette directly from the brand
+- Lighting that creates atmosphere (warm/cool based on brand)
+- The stand as a calm, confident brand statement
+- Example structure: "[company] exhibition stand at [show], [sqm] [type] stand, [brand colour] backlit fabric walls, [material] flooring, [material] meeting pods, [specific feature from brief], visitors engaging with staff, professional trade show lighting, photorealistic architectural visualisation, 8K, wide shot"
+
+CONCEPT B must be: The bold, high-impact direction
+- Meaningfully different spatial logic or visual language
+- One dramatic hero element that stops foot traffic
+- Could be: full LED wall, suspended signage, bold colour contrast, unexpected material, experiential activation
+- Same brand but louder expression
+- Example structure: same data points but different design language — describe what makes it visually different
+
+Both prompts must be on a SINGLE LINE with no line breaks.
+Start each with the label exactly as shown:
+FREEPIK_PROMPT_A: [prompt]
+FREEPIK_PROMPT_B: [prompt]
+
+BAD example (do not do this):
+FREEPIK_PROMPT_A: Modern sleek exhibition stand with innovative design for tech company, professional lighting
+
+GOOD example:
+FREEPIK_PROMPT_A: Star Box Coffee exhibition stand at Gulfood Dubai, 50sqm island stand with four open sides, warm amber backlit fabric walls in brand coffee-brown and cream tones, reclaimed wood flooring, brass accent fixtures, central coffee bar sampling station with overhead pendant lighting, branded cup display wall, baristas serving visitors in black uniforms, busy trade show floor atmosphere, photorealistic architectural visualisation, 8K, wide establishing shot`
     : '';
 
   const prompt = `You are writing a Tier ${tier} concept brief for an exhibition stand project at StandMe.

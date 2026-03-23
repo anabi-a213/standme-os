@@ -398,7 +398,11 @@ export class ConceptBriefAgent extends BaseAgent {
       sourceType: 'drive',
       topic: companyName,
       tags: `brief,concept,${showName.toLowerCase().replace(/\s+/g, '-')},${(industry || '').toLowerCase()},design`,
-      content: `Concept brief for ${companyName} at ${showName}. ${standSize}sqm, budget ${budget}. Key concepts: ${briefContent.slice(200, 600)}`,
+      content: (() => {
+        const intro = briefContent.slice(0, 500);
+        const freepikLines = (briefContent.match(/FREEPIK_PROMPT_[AB]:[^\n]+/g) ?? []).join('\n');
+        return `Concept brief for ${companyName} at ${showName}. ${standSize}sqm, budget ${budget}.\n${intro}\n\n${freepikLines}`.slice(0, 2000);
+      })(),
     });
 
     // Send to Mo for approval
