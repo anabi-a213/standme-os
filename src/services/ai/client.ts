@@ -208,58 +208,60 @@ of their exhibition stand. These must describe a stand that is:
     Drama through lighting, materials, spatial hierarchy, and brand colour.
 
 ═══════════════════════════════════════
-BUILDABILITY RULES — never violate these:
+DESIGN PHILOSOPHY — apply to every brief and prompt:
 ═══════════════════════════════════════
-- Stand must sit on the floor. No suspended platforms, no floating walls.
-- All walls and structures must be supported (no unsupported cantilevers
-  over 1.5m).
-- Use only real exhibition materials: wood  in paint or any finsh ,
-  tension fabric graphic walls, modular display panels, timber or
-  laminate flooring on raised platform, acrylic or tempered glass,
-  powder-coated steel, LED lightboxes, fabric-stretch graphics,
-  MDF/laminate cladding, modular meeting pods, LED strip lighting.
-- Meeting rooms: enclosed or semi-enclosed pods with clear or frosted
-  glass walls — not open "zones".
-- LED walls are allowed but must be mounted on a solid back wall or
-  structural frame, not floating.
-- when requaerd Ceiling structures: fabric canopy or fascia signage suspended from
-  truss — not solid ceilings unless stand is in a venue with rigging.
-- For budget signals: low budget = smart fabric graphics + standard
-  wood painted  + vinyl flooring. High budget = premium timber, glass, LED,
-  custom fabrication.
+The stands you describe must look like real, built exhibition
+stands that a visitor at a trade show could actually walk into.
+They must not look like futuristic architecture, CGI art,
+science fiction sets, or luxury concept stores.
 
-═══════════════════════════════════════
-PROMPT CONSTRUCTION RULES:
-═══════════════════════════════════════
-Required anchor phrase (always include):
-"photorealistic architectural visualisation, exhibition stand,
-trade show floor, professional even lighting, ultra sharp,
-4K, wide establishing shot showing the full stand in context,
-Canon 24mm lens, f/8 aperture"
+SIMPLICITY IS THE GOAL:
+  - Clean rectangular or L-shaped footprint
+  - Max 2-3 materials per stand (not 5-6)
+  - Max 2-3 colours (brand colour + white/black/grey neutral)
+  - One hero element per concept (one large graphic wall, OR
+    one LED screen, OR one product display — not all three)
+  - Open and inviting — visitors should feel they can walk in
+  - Negative space is a design choice, not a flaw
 
-Always include people:
-"business visitors browsing the stand, staff in branded uniforms
-at the counter, busy trade show atmosphere, visitors walking past"
+WHAT MAKES A STAND LOOK GREAT WITHOUT BEING FANCY:
+  - Perfect material quality: e.g. smooth matte white MDF walls
+    with a single large format print look more premium than 5
+    different mixed materials
+  - Lighting does the heavy lifting: LED strip on the back wall
+    edge, spotlights on key products — simple but impactful
+  - Consistent brand colour applied cleanly — one wall in brand
+    colour, rest in white/grey is more powerful than brand colour
+    everywhere
+  - Well-placed counter with logo — simple reception desk with
+    branded fascia panel looks professional and clean
+  - Good floor choice: grey carpet, light oak vinyl, or dark
+    laminate — clean and simple
 
-Always name real materials — never write "premium materials" or
-"high-end finishes". Say: "brushed aluminium frame, white tension
-fabric graphic walls, light oak laminate flooring on 10cm raised
-platform, frosted glass meeting pod, LED lightbox header panel"
+ABSOLUTE PROHIBITIONS — never describe or generate:
+  - No curved organic walls or blob shapes
+  - No multi-level raised platforms above 20cm
+  - No suspended ceiling structures (unless brief says rigging)
+  - No complex geometric angular wall shapes (no diamonds,
+    triangles, hexagons as structural elements)
+  - No neon lighting rigs or full-perimeter RGB lighting
+  - No more than one LED video wall per concept
+  - No water features, plants walls, or trees inside the stand
+  - No chandelier-style lighting installations
+  - No gold, chrome, or mirrored surfaces unless brand uses them
+  - Never use the words: luxury, premium, high-end, stunning,
+    impressive, cutting-edge, innovative, futuristic, bespoke
 
-Never use these words: modern, sleek, innovative, futuristic,
-cutting-edge, stunning, impressive, unique, state-of-the-art.
-Describe what you see, not how it feels.
-
-Stand type composition rules (use the client's actual stand type):
-  - island: "four open sides, central product display plinth,
-    360-degree fabric graphic walls, open traffic flow from all aisles"
-  - corner: "two open aisle faces at 90 degrees, corner header sign,
-    reception counter facing main aisle, display wall on back"
-  - peninsula: "three open sides, solid back wall with hero graphic,
-    open front and two sides, raised platform perimeter"
-  - inline: "single aisle-facing open side, back wall as hero brand
-    graphic, side walls with product display shelving,
-    depth zones drawing visitors from aisle to consultation area"
+WHAT GOOD LOOKS LIKE (use as reference):
+  - Think: Apple Store simplicity applied to a trade stand
+  - Think: IKEA showroom — clean, functional, every element
+    serves a purpose, nothing decorative for its own sake
+  - Think: Scandinavian design — white space, one accent colour,
+    natural material, perfect lighting
+  - A 30sqm inline stand with a clean white back wall, one
+    large format brand print, a simple counter, 3 product
+    display shelves, and good spotlighting is better than
+    a 30sqm stand with 8 different design features
 
 ═══════════════════════════════════════
 CONCEPT RULES:
@@ -276,27 +278,44 @@ Use ALL of this client data:
   - Budget signal: ${context.budget || 'mid-range'}
   - Staff count: ${context.staffCount || '4-6 staff'}
 
-CONCEPT A — The Refined Direction:
-  Calm, confident brand statement. Clean spatial layout.
-  Premium materials for the budget level. Warm or cool lighting
-  that matches brand colours. One clear hero visual element
-  (large format graphic wall, backlit logo panel, or product display).
-  The stand looks expensive but achievable.
-  Format: "[ClientName] exhibition stand at [ShowName] [City],
-  [sqm] [type] stand, [brand colour] tension fabric back wall,
-  [material] flooring on raised platform, [specific feature],
-  [meeting solution], [lighting], staff in [brand colour] uniforms,
-  busy trade show atmosphere, [anchor phrase]"
+═══════════════════════════════════════
+RENDER PROMPT DESIGN RULES (updated):
+═══════════════════════════════════════
+Required anchor phrase (always include verbatim):
+"photorealistic architectural visualisation, exhibition stand,
+international trade show floor, soft professional overhead
+lighting, razor sharp focus, 4K resolution, Canon 24mm lens
+f/8, photorealistic people in background for scale"
 
-CONCEPT B — The Bold Direction:
-  Same stand footprint and type, but a meaningfully different
-  design language. One strong hero element that stops foot traffic —
-  choose ONE of: full-height LED video wall on back panel,
-  bold contrasting colour block geometry, dramatic overhead truss
-  with suspended fabric canopy and brand logo, or product hero
-  display as the central architectural feature.
-  Must still be 100% buildable. Bolder, not bigger.
-  Same data used, different visual story.
+CONCEPT A — Clean & Refined:
+  Simple clean architecture. White or light neutral as base.
+  Brand colour used on ONE feature element only (back wall,
+  counter fascia, or header panel — pick one).
+  Max 2 materials. Spotlights on products/counter.
+  Open floor plan, no walls blocking entrance.
+  Formula: "[Company] exhibition stand at [Show] [City],
+  [sqm] [type] stand, [stand type composition], clean white
+  MDF back wall with [brand colour] large format brand graphic,
+  [floor material] flooring, simple [material] reception
+  counter with backlit logo panel, [1 product feature],
+  LED spotlights, staff in [brand colour] uniforms,
+  business visitors browsing, busy trade show floor,
+  [anchor phrase]"
+
+CONCEPT B — Bold & Simple:
+  Same clean principles but ONE bold visual change.
+  Choose exactly ONE of these bold moves:
+    Option 1: Full-height LED video wall on back panel
+              showing product footage
+    Option 2: Back wall entirely in deep brand colour
+              with large white logo — high contrast
+    Option 3: Large suspended truss fascia sign with
+              brand name in oversized letters
+    Option 4: Central product hero plinth — the product
+              IS the stand's centrepiece
+  Everything else stays clean and simple.
+  Formula: same data as A but with the one bold change
+  described specifically.
 
 Both prompts must be a SINGLE LINE with no line breaks.
 Output exactly:
@@ -307,7 +326,7 @@ BAD (do not do this):
 FREEPIK_PROMPT_A: Modern sleek stand for tech company with innovative design
 
 GOOD:
-FREEPIK_PROMPT_A: Star Box Coffee exhibition stand at Gulfood Dubai 2025, 50sqm island stand, four open sides, warm coffee-brown tension fabric graphic walls with cream brand logo, light oak laminate flooring on 10cm raised platform, central circular coffee sampling bar with brass pendant lighting overhead, baristas in black branded uniforms serving espresso samples, LED lightbox header panel with tagline, branded cup display shelf on side panel, business visitors at the bar, busy trade show floor, photorealistic architectural visualisation, exhibition stand, professional even lighting, ultra sharp, 4K, wide establishing shot, Canon 24mm lens`
+FREEPIK_PROMPT_A: Star Box Coffee exhibition stand at Gulfood Dubai 2025, 50sqm island stand, four open sides, clean white MDF back wall with coffee-brown large format brand graphic, light oak laminate flooring, simple white reception counter with backlit logo panel, branded cup display shelf, LED spotlights on counter and graphic wall, baristas in black branded uniforms, business visitors browsing, busy trade show floor, photorealistic architectural visualisation, exhibition stand, international trade show floor, soft professional overhead lighting, razor sharp focus, 4K resolution, Canon 24mm lens f/8, photorealistic people in background for scale`
     : '';
 
   const prompt = `You are writing a Tier ${tier} concept brief for an exhibition stand project at StandMe.

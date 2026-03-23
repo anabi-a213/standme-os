@@ -29,7 +29,7 @@ const MYSTIC_MAX_POLLS = 24; // 120s
 export async function generateMasterImage(
   prompt: string,
 ): Promise<{ base64: string; cdnUrl: string; seed: number | undefined }> {
-  // Submit to Mystic
+  // SUBMIT to Mystic — higher quality than text-to-image
   let submitResp: any;
   try {
     submitResp = await axios.post(
@@ -39,75 +39,64 @@ export async function generateMasterImage(
         resolution: '2k',
         aspect_ratio: 'widescreen_16_9',
         model: 'realism',
-        hdr: 60,
-        creative_detailing: 40,
+        hdr: 65,
+        creative_detailing: 35,
         filter_nsfw: true,
       },
-      { headers: headers(), timeout: 60_000 },
+      { headers: headers(), timeout: 30_000 },
     );
   } catch (err: any) {
     const detail = err.response
       ? JSON.stringify(err.response.data).slice(0, 800)
       : err.message;
-    logger.error(`[Freepik] Mystic submit HTTP ${err.response?.status ?? '?'}: ${detail}`);
     throw new Error(`Freepik Mystic submit failed (${err.response?.status ?? 'network'}): ${detail}`);
   }
 
-  const taskId: string = submitResp.data?.data?.task_id ?? submitResp.data?.task_id ?? '';
-  if (!taskId) {
-    throw new Error(`Freepik Mystic: no task_id returned. Response: ${JSON.stringify(submitResp.data).slice(0, 500)}`);
-  }
+  const taskId: string = submitResp.data?.data?.task_id ?? '';
+  if (!taskId) throw new Error('Freepik Mystic: no task_id returned.');
+
   logger.info(`[Freepik] Mystic task submitted: ${taskId}`);
 
-  // Poll until COMPLETED
+  // POLL — Mystic takes longer, use 6000ms × 25 polls = 150s max
+  const MYSTIC_POLL_MS = 6000;
+  const MYSTIC_MAX_POLLS = 25;
+
   for (let poll = 0; poll < MYSTIC_MAX_POLLS; poll++) {
-    await new Promise(r => setTimeout(r, MYSTIC_POLL_INTERVAL_MS));
+    await new Promise(r => setTimeout(r, MYSTIC_POLL_MS));
 
     const pollResp = await axios.get(
       `${BASE}/mystic/${taskId}`,
       { headers: headers(), timeout: 15_000 },
     );
 
-    const status: string = pollResp.data?.data?.status ?? pollResp.data?.status ?? '';
-    logger.info(`[Freepik] Mystic task ${taskId} poll ${poll + 1}/${MYSTIC_MAX_POLLS}: ${status}`);
+    const status: string = pollResp.data?.data?.status ?? '';
+    logger.info(`[Freepik] Mystic ${taskId} poll ${poll + 1}/${MYSTIC_MAX_POLLS}: ${status}`);
 
     if (status === 'COMPLETED') {
-      // Dump full response so we can verify the real shape in Railway logs
-      logger.info(`[Freepik] Mystic COMPLETED response: ${JSON.stringify(pollResp.data).slice(0, 1500)}`);
+      logger.info(`[Freepik] Mystic COMPLETED raw: ${JSON.stringify(pollResp.data).slice(0, 1000)}`);
 
-      const d = pollResp.data?.data;
-      // Mystic returns generated as an array of strings: ["https://..."]
-      // Other Freepik endpoints return objects: [{url:"..."}]
-      // Handle both formats.
-      const gen0: any = d?.generated?.[0];
-      const rawUrl: string =
-        (typeof gen0 === 'string' ? gen0 : gen0?.url as string | undefined) ??
-        pollResp.data?.generated?.[0]?.url ??
-        d?.images?.[0]?.url ??
-        d?.url ??
-        '';
+      // generated[] is an array of plain URL strings
+      const raw = pollResp.data?.data?.generated?.[0];
+      const cdnUrl: string = (typeof raw === 'string' ? raw : raw?.url) ?? '';
 
-      if (!rawUrl) {
-        throw new Error(`Freepik Mystic task ${taskId} completed but returned no URL.`);
-      }
+      if (!cdnUrl) throw new Error(
+        `Freepik Mystic task ${taskId} completed but no URL. ` +
+        `Response: ${JSON.stringify(pollResp.data).slice(0, 500)}`
+      );
 
-      // Freepik change-camera rejects HTTP URLs — always upgrade to HTTPS
-      const cdnUrl = rawUrl.replace(/^http:\/\//i, 'https://');
-      logger.info(`[Freepik] Mystic master image ready — CDN URL: ${cdnUrl.slice(0, 80)}`);
+      logger.info(`[Freepik] Mystic master done: ${cdnUrl}`);
       return { base64: '', cdnUrl, seed: undefined };
     }
 
     if (status === 'FAILED') {
-      const detail = JSON.stringify(pollResp.data).slice(0, 500);
-      logger.error(`[Freepik] Mystic task ${taskId} FAILED: ${detail}`);
-      throw new Error(`Freepik Mystic task ${taskId} failed: ${detail}`);
+      throw new Error(
+        `Freepik Mystic task ${taskId} FAILED: ${JSON.stringify(pollResp.data).slice(0, 500)}`
+      );
     }
     // PENDING / IN_PROGRESS — keep polling
   }
 
-  throw new Error(
-    `Freepik Mystic task ${taskId} timed out after ${MYSTIC_MAX_POLLS * MYSTIC_POLL_INTERVAL_MS / 1000}s.`,
-  );
+  throw new Error(`Freepik Mystic task ${taskId} timed out after ${MYSTIC_MAX_POLLS * MYSTIC_POLL_MS / 1000}s`);
 }
 
 /**

@@ -87,13 +87,32 @@ export class ConceptBriefAgent extends BaseAgent {
       promptB = `${base}, bold dark materials, strong brand statement, dramatic lighting`;
     }
 
-    // 4. Camera angles — chosen for exhibition stands
-    // Each angle shows how a trade show visitor would naturally see the stand
+    // 4. Camera angles — professional architectural visualisation shots
     const ANGLES = [
-      { label: 'front',    h: 0,   v: 10, z: 5 },  // straight on, eye level
-      { label: 'corner',   h: 40,  v: 20, z: 4 },  // 40° side — best reveals depth
-      { label: 'elevated', h: 20,  v: 50, z: 5 },  // bird's eye, shows floor plan
-      { label: 'approach', h: 330, v: 5,  z: 3 },  // wide approaching shot, drama
+      // Shot 1: Hero / Eye-level — the "street view", human perspective
+      // Camera at eye level, straight on. Most relatable, shows stand
+      // as a visitor walking toward it from the main aisle.
+      { label: 'front',    h: 0,   v: 8,  z: 5 },
+
+      // Shot 2: 45° Corner — best for showing depth and dimension.
+      // Two faces visible simultaneously. Industry standard for stands.
+      { label: 'corner',   h: 45,  v: 15, z: 4 },
+
+      // Shot 3: Semi-aerial / Elevated — 30° above eye level.
+      // Shows full stand layout, floor plan, material distribution.
+      // Not too high — keeps human scale visible.
+      { label: 'elevated', h: 25,  v: 35, z: 4 },
+
+      // Shot 4: Top-down overview — bird's eye view.
+      // Shows complete floor plan and spatial zones from above.
+      // Best for showing traffic flow and stand size.
+      { label: 'topview',  h: 15,  v: 65, z: 5 },
+
+      // Shot 5: Approach / Wide dramatic — low angle from far aisle.
+      // Camera slightly lower than eye level, wide shot showing the
+      // stand in full trade show context with surrounding booths.
+      // Creates the "WOW first impression" shot.
+      { label: 'approach', h: 335, v: 3,  z: 2 },
     ];
 
     // 5. Get target folder
@@ -102,7 +121,7 @@ export class ConceptBriefAgent extends BaseAgent {
     // 6. Announce start
     await this.respond(ctx.chatId,
       `🎨 Generating renders for *${companyName}*...\n` +
-      `2 concepts × 4 angles = 8 images. Takes ~4 minutes.`
+      `2 concepts × 5 angles = 10 images. Takes ~5 minutes.`
     );
 
     const results: Array<{ concept: string; angle: string; url: string }> = [];
