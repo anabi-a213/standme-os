@@ -188,20 +188,16 @@ export async function changeCameraAngle(
     logger.info(`[Freepik] task ${taskId} poll ${poll + 1}/${MAX_POLLS}: ${status}`);
 
     if (status === 'COMPLETED') {
-      // Dump full response once so we can see the real shape in production logs
-      logger.info(`[Freepik] COMPLETED response: ${JSON.stringify(pollResp.data).slice(0, 1500)}`);
+      // Log full response so we can verify structure in Railway logs
+      logger.info(`[Freepik] COMPLETED raw: ${JSON.stringify(pollResp.data).slice(0, 1000)}`);
 
-      // Defensive fallback chain — Freepik has changed the response shape across API versions
-      const d = pollResp.data?.data;
-      const url: string =
-        d?.generated?.[0]?.url       ??
-        d?.images?.[0]?.url          ??
-        d?.output?.[0]?.url          ??
-        d?.result?.url               ??
-        d?.url                       ??
-        pollResp.data?.generated?.[0]?.url ??
-        '';
-      if (!url) throw new Error(`Freepik change-camera task ${taskId} completed but returned no URL.`);
+      // Freepik generated[] is an array of plain URL strings, not objects
+      const raw = pollResp.data?.data?.generated?.[0];
+      const url: string = (typeof raw === 'string' ? raw : raw?.url) ?? '';
+      if (!url) throw new Error(
+        `Freepik change-camera task ${taskId} completed but returned no URL. ` +
+        `Full response: ${JSON.stringify(pollResp.data).slice(0, 500)}`
+      );
       return { url };
     }
 
