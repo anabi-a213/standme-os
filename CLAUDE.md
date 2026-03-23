@@ -88,7 +88,7 @@ Brain agent (`04-brain.agent.ts`) uses `generateChat()` with a stored per-user m
 | agent-05 | `05-deadline-monitor.agent.ts` | Check upcoming show deadlines | daily 8am |
 | agent-06 | `06-project-status.agent.ts` | Project status summaries | — |
 | agent-07 | `07-client-reminder.agent.ts` | Client follow-up reminders | — |
-| agent-08 | `08-card-manager.agent.ts` | Trello card CRUD | — |
+| agent-08 | `08-card-manager.agent.ts` | Trello card CRUD; `resolveStage()` matches by numeric prefix ("03"), ordinal ("third"), or keyword against live `getBoardLists()` — never hardcoded names | — |
 | agent-09 | `09-technical-deadline.agent.ts` | Technical submission deadlines | — |
 | agent-10 | `10-contractor-coord.agent.ts` | Contractor database | — |
 | agent-11 | `11-lessons-learned.agent.ts` | Post-project lessons | — |
@@ -153,13 +153,29 @@ Persistent memory in the `KNOWLEDGE_BASE` Google Sheets tab. Key functions:
 Agent-20 writes Woodpecker campaign stats and replied-prospect summaries here. Brain and the dashboard chat use `searchKnowledge()` to pull relevant context into every AI prompt.
 
 ### Approval Flow (`src/services/approvals.ts`)
-Agents that need Mo's sign-off call `this.sendAction()` (BaseAgent) which formats a TYPE 1 message with `/approve_<id>` and `/reject_<id>` buttons. `registerApproval(id, { onApprove, onReject })` stores the callback in an in-memory Map. **Approvals are lost on Railway redeploy.** Only the outreach launch flow has a Knowledge Base fallback (`reconstructBulkApproval()`) — both `/launch` and the deprecated `/bulkoutreach` persist their approval payload to KB under `bulk-approval-{approvalId}`; all other agents require re-running the original command.
+Agents that need Mo's sign-off call `this.sendAction()` (BaseAgent) which formats a TYPE 1 message with `/approve_<id>` and `/reject_<id>` buttons. `registerApproval(id, { onApprove, onReject })` stores the callback in an in-memory Map **and** saves metadata to KB (`pending-approval-{id}`). **Approvals are lost on Railway redeploy.** `getApprovalMetaFromKB(id)` lets the "approval not found" handler show Mo what the action was and how to re-trigger it. Only the outreach launch flow has full KB-based recovery (`reconstructBulkApproval()`).
+
+**Critical ordering in Agent-01**: `registerApproval(leadId, callbacks)` MUST be called BEFORE `formatType1(…, leadId)` / `sendToMo()`. The buttons are sent by Telegram immediately — if the callback isn't registered first, `/approve_<leadId>` returns "not found".
+
+### Brain Data Loading (`src/agents/04-brain.agent.ts`)
+`buildDataContext()` fetches live Trello + Sheets data before every AI response:
+- All 4 API calls (Trello, Leads, Deadlines, OutreachQueue) run **in parallel** via `Promise.all`
+- Each call is individually wrapped in `withCallTimeout(p, 5000, null)` — returns `null` on timeout instead of throwing; response always returns with whatever data did load
+- Module-level **60s cache** (`_dataCtxCache`) — repeated messages within a minute hit zero APIs
+- Outer safety-net `Promise.race` rejects at 10s (sets `dataTimedOut = true`); write [ACTION:] tags (`/movecard`, `/newlead`, `/enrich`, `/brief`, `/convert`, `/launch`) are blocked when `dataTimedOut` is true
+
+**Brain Direct Command Router**: natural language bypasses Claude entirely for known commands — currently handles `/launch`, `/convert`, `/replies`, `/campaigns`, `/outreachstatus`, `/instantlyverify`, `/status`, `/deadlines`, `/movecard` (e.g. "move Pharma Corp to 03"), and `/enrich` (e.g. "enrich Pharma Corp").
+
+**Brain `runLeadSetupFlow()`**: triggered by "set up lead for [company]" / "full setup for [company]". Chains: enrich → movecard to `02` → brief → adds brief Drive URL as Trello comment → summary to Mo.
+
+**Brain `/movecard` rule**: always pass numeric prefix only (`03`) — not full stage name. `resolveStage()` in Agent-08 maps it to the live Trello list name.
 
 ### Dashboard Chat (`src/services/dashboard/chat-service.ts`)
 The dashboard chat calls `buildLiveDataContext()` before every AI response. This function:
 - Runs Trello + 2× Sheets API calls **in parallel** via `Promise.all` (not sequentially)
 - Has a **60-second in-process cache** — repeated messages within a minute reuse cached data
 - Each individual API call has a 7s per-call timeout; outer safety net is 9s
+- On full timeout, throws with `code: 'LIVE_DATA_TIMEOUT'` — `processChat()` catches it, sends an abort message to the user, and returns early (no silent empty-data response)
 
 ### Dashboard
 - `src/services/dashboard/event-bus.ts` — `dashboardBus` singleton emits events (agent started/finished, approvals, logs, live chat)
@@ -238,11 +254,15 @@ Managed by Agent-18 (detection + welcome) and Agent-19 (ongoing conversation).
 ## What NOT to Break
 - `saveHistory()` / `getHistory()` in Brain agent — per-user multi-turn conversation memory
 - `getThreadContext()` / `saveThreadEntry()` in thread-context service — injected by BaseAgent.run()
-- `registerApproval()` / `handleApproval()` in approvals.ts — approval callback lifecycle
+- `registerApproval()` / `handleApproval()` in approvals.ts — approval callback lifecycle; in Agent-01, `registerApproval()` must be called **before** `sendToMo(formatType1(...))` or buttons will be dead on arrival
+- `getApprovalMetaFromKB(id)` in approvals.ts — used by "approval not found" handlers in both index.ts and dashboard chat-service.ts to show Mo what was pending and how to re-trigger
 - `generateChat()` in ai/client.ts — Brain passes a proper messages array; must not be flattened to a single prompt
 - `conflictGuard` in Agent-18 — prevents duplicate lead rows when two scan cycles overlap
+- `_dataCtxCache` + `withCallTimeout` in Brain `04-brain.agent.ts` — 60s module-level cache + per-call timeout wrapper; removing either causes API hammering or sequential timeouts
 - `liveDataCache` in dashboard `chat-service.ts` — 60s cache preventing API hammering; do not remove
 - `saveFunnelRecord()` in Agent-18 — must be called after welcome email to create the EMAIL_FUNNEL row that Agent-19 depends on
 - `saveReplyToKB()` in Agent-20 — called directly by the `/webhook/woodpecker` handler; must remain a public method
+- `resolveStage()` in Agent-08 — fetches live `getBoardLists()` and matches by numeric prefix/ordinal/keyword; do not replace with hardcoded list names or `findListByName()` substring match
 - `reconstructBulkApproval()` in Agent-13 — fallback for post-redeploy approval recovery; both `/launch` and deprecated `/bulkoutreach` save to KB under `bulk-approval-{approvalId}`
 - `pollInstantlyReplies()` in workflow-engine.ts — 3-hour cron that drives reply processing on the Growth plan; do not remove the `isInstantlyConfigured()` guard
+- `dataTimedOut` write-guard in Brain `execute()` — blocks [ACTION:] write commands when live data fetch failed; removing it risks Brain executing moves/enrich on stale/no context
