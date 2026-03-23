@@ -24,7 +24,7 @@ function headers(): Record<string, string> {
  */
 export async function generateMasterImage(
   prompt: string,
-): Promise<{ base64: string; cdnUrl: string; seed: number }> {
+): Promise<{ base64: string; cdnUrl: string; seed: number | undefined }> {
   const resp = await axios.post(
     `${BASE}/text-to-image`,
     {
@@ -44,8 +44,10 @@ export async function generateMasterImage(
     throw new Error('Freepik text-to-image returned no image data. Check your API plan limits.');
   }
 
-  const seed: number = resp.data?.meta?.seed ?? 0;
-  logger.info(`[Freepik] Master image generated (seed: ${seed}) — CDN URL: ${cdnUrl ? 'yes' : 'no'}`);
+  // Only pass seed when it's a valid value — change-camera requires seed >= 1
+  const rawSeed = resp.data?.meta?.seed;
+  const seed: number | undefined = (typeof rawSeed === 'number' && rawSeed >= 1) ? rawSeed : undefined;
+  logger.info(`[Freepik] Master image generated (seed: ${seed ?? 'none'}) — CDN URL: ${cdnUrl ? 'yes' : 'no'}`);
   return { base64, cdnUrl, seed };
 }
 
@@ -85,7 +87,7 @@ export async function changeCameraAngle(
         horizontal_angle: horizontalAngle,
         vertical_angle: verticalAngle,
         zoom,
-        ...(seed !== undefined ? { seed } : {}),
+        ...(seed !== undefined && seed >= 1 ? { seed } : {}),
       },
       { headers: headers(), timeout: 30_000 },
     );

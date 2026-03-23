@@ -113,9 +113,9 @@ export class ConceptBriefAgent extends BaseAgent {
       { prompt: promptB, label: 'B' },
     ]) {
       // Generate master image
-      let base64  = '';
-      let cdnUrl  = '';
-      let seed    = 0;
+      let base64: string            = '';
+      let cdnUrl: string            = '';
+      let seed:   number | undefined;
       try {
         await this.respond(ctx.chatId, `⏳ Concept ${label}: generating master image...`);
         ({ base64, cdnUrl, seed } = await generateMasterImage(prompt));
