@@ -15,7 +15,7 @@ import { findExhibitorFiles, parseExhibitorFile } from '../services/drive-exhibi
 import { validateShow } from '../config/shows';
 import { generateOutreachEmail, generateText } from '../services/ai/client';
 import { saveKnowledge, buildKnowledgeContext, searchKnowledge, getKnowledgeBySource, updateKnowledge } from '../services/knowledge';
-import { registerApproval } from '../services/approvals';
+import { registerApproval, hasPending } from '../services/approvals';
 import { pipelineRunner } from '../services/pipeline-runner';
 import { sendToMo, formatType1, formatType2 } from '../services/telegram/bot';
 import { logger } from '../utils/logger';
@@ -257,6 +257,11 @@ export class OutreachAgent extends BaseAgent {
       };
 
       const approvalId = `outreach_${leadId}`;
+      // Skip if already pending — prevents double-approval on concurrent agent runs
+      if (hasPending(approvalId)) {
+        logger.info(`[Outreach] Skipping ${company} — approval already pending`);
+        continue;
+      }
       registerApproval(approvalId, {
         action: `Send outreach to ${company} (${dmEmail})`,
         data: { lead_prospect, campaignId: campaign.id, logId, company, dmEmail },

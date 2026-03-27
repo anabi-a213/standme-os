@@ -48,10 +48,16 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
       logger.warn(`[Dashboard] Welcome message error: ${err.message}`);
     }
 
+    // Track which session this socket is using (captured from first chat event).
+    let socketSessionId: string | null = null;
+
     // ── CHAT ──────────────────────────────────────────────────────────────────
     socket.on('chat:send', async (data: { message: string; sessionId: string }) => {
       const { message, sessionId } = data;
       if (!message?.trim()) return;
+
+      // Capture sessionId so disconnect handler can clean up
+      if (sessionId) socketSessionId = sessionId;
 
       logger.info(`[DashboardChat] [${sessionId}] User: ${message.substring(0, 80)}`);
 
@@ -88,6 +94,7 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
 
     // Load conversation history for a session
     socket.on('chat:history', (data: { sessionId: string }) => {
+      if (data.sessionId) socketSessionId = data.sessionId;
       const history = getSessionHistory(data.sessionId);
       socket.emit('chat:history', { history, sessionId: data.sessionId });
     });
@@ -100,6 +107,12 @@ export function initDashboardSocket(httpServer: HttpServer): SocketServer {
 
     socket.on('disconnect', () => {
       logger.info(`[Dashboard] Client disconnected: ${socket.id}`);
+      // Clear session immediately on disconnect so memory is freed without waiting
+      // for the hourly TTL sweep. If the user reconnects with the same sessionId
+      // they'll start a fresh session (expected behaviour for a closed tab).
+      if (socketSessionId) {
+        clearSession(socketSessionId);
+      }
     });
   });
 

@@ -105,12 +105,14 @@ router.post('/api/trigger', async (req: Request, res: Response) => {
     language: 'en' as const,
   };
 
-  // Run async — don't block the response
+  // Run async — fire-and-forget (client should poll /api/logs for progress)
   agent.run(ctx).catch((err: any) =>
-    logger.error(`[Dashboard] Trigger error: ${err.message}`)
+    logger.error(`[Dashboard] Trigger error for ${command}: ${err.message}`)
   );
 
-  res.json({ ok: true, agent: agent.config.name, command });
+  // Return async:true so client knows this is not a synchronous result.
+  // Use /api/run instead if you need to wait for the result.
+  res.json({ ok: true, async: true, agent: agent.config.name, command });
 });
 
 // API: Run agent synchronously — returns result

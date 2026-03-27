@@ -1,9 +1,9 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import path from 'path';
 import express from 'express';
 import { createServer } from 'http';
+import path from 'path';
 import cookieParser from 'cookie-parser';
 import { initBot, getBot, buildContext, sendToMo, formatType2 } from './services/telegram/bot';
 import { registerAgent, getAgent, getAllAgents } from './agents/registry';
@@ -14,10 +14,8 @@ import { startScheduler } from './scheduler';
 import { logger } from './utils/logger';
 import { writeSystemLog } from './utils/system-log';
 import { canApprove, getUserRole, UserRole } from './config/access';
-import { handleApproval, logApprovalStoreStatus } from './services/approvals';
+import { handleApproval } from './services/approvals';
 import { initSheets } from './services/google/sheets-init';
-import { validateSheetHeaders } from './services/google/sheets';
-import { SHEETS } from './config/sheets';
 import { loadRuntimeConfig } from './services/runtime-config';
 import { warmGoogleAuth } from './services/google/auth';
 
@@ -33,20 +31,12 @@ import { TechnicalDeadlineAgent } from './agents/09-technical-deadline.agent';
 import { ContractorCoordAgent } from './agents/10-contractor-coord.agent';
 import { LessonsLearnedAgent } from './agents/11-lessons-learned.agent';
 import { DealAnalyserAgent } from './agents/12-deal-analyser.agent';
-import { OutreachAgent, reconstructBulkApproval } from './agents/13-outreach.agent';
-import { getReplies as getInstantlyReplies, isInstantlyConfigured } from './services/instantly/client';
+import { OutreachAgent } from './agents/13-outreach.agent';
 import { DriveIndexerAgent } from './agents/14-drive-indexer.agent';
 import { MarketingContentAgent } from './agents/15-marketing-content.agent';
 import { CardManagerAgent } from './agents/08-card-manager.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
 import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
-import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
-import { EmailFunnelAgent } from './agents/19-email-funnel.agent';
-import { WoodpeckerSyncAgent } from './agents/20-woodpecker-sync.agent';
-import { initWorkflowEngine } from './services/workflow-engine';
-import { pipelineRunner } from './services/pipeline-runner';
-import { loadThreadsFromKB } from './services/thread-context';
-import { scanPendingApprovalsFromKB, getApprovalMetaFromKB } from './services/approvals';
 
 
 async function main() {
@@ -75,21 +65,6 @@ async function main() {
   // Auto-check and create any missing Google Sheets tabs
   initSheets().catch(err => logger.warn(`[Sheets Init] Failed: ${err.message}`));
 
-  // Validate critical sheet column headers at startup — catches manual reorders
-  // before they silently corrupt writes. Runs non-blocking (async, no await).
-  Promise.all([
-    validateSheetHeaders(SHEETS.LEAD_MASTER),
-    validateSheetHeaders(SHEETS.OUTREACH_LOG),
-    validateSheetHeaders(SHEETS.SYSTEM_LOG),
-  ]).then(([leads, outreach, syslog]) => {
-    if (!leads || !outreach || !syslog) {
-      logger.warn('[Startup] One or more critical sheet headers do not match config — check logs above');
-    }
-  }).catch(() => { /* non-blocking — sheets may not exist yet */ });
-
-  // Log approval store state at startup (will always be 0 on cold start — confirms clean state)
-  logApprovalStoreStatus();
-
   // Register all agents
   const agents = [
     new LeadIntakeAgent(),
@@ -109,9 +84,6 @@ async function main() {
     new DriveIndexerAgent(),
     new MarketingContentAgent(),
     new CrossBoardAgent(),
-    new GmailLeadMonitorAgent(),
-    new EmailFunnelAgent(),
-    new WoodpeckerSyncAgent(),
   ];
 
   for (const agent of agents) {
@@ -119,22 +91,6 @@ async function main() {
     dashboardBus.registerAgent(agent.config.id, agent.config.name);
     logger.info(`  Registered: ${agent.config.name} (${agent.config.commands.join(', ')})`);
   }
-
-  // Initialize Workflow Engine AFTER all agents are registered
-  // (engine calls getAgent() lazily at runtime — registry must be populated first)
-  initWorkflowEngine();
-
-  // Restore persistent state from KB (pipelines + thread sessions + pending approvals)
-  // Non-blocking — startup continues even if KB is temporarily unavailable
-  Promise.all([
-    pipelineRunner.loadFromKB(),
-    loadThreadsFromKB(),
-  ]).catch(err => logger.warn(`[Startup] KB restore failed: ${err.message}`));
-
-  // Notify Mo of any approvals that were pending before the last restart
-  scanPendingApprovalsFromKB().then(async (msg) => {
-    if (msg) await sendToMo(msg).catch(() => {});
-  }).catch(() => {});
 
   // Initialize Telegram bot (skip polling in local dashboard-only mode)
   if (process.env.DASHBOARD_ONLY === 'true') {
@@ -160,24 +116,17 @@ async function main() {
         `/newlead — Add a new lead\n` +
         `/enrich — Enrich pending leads\n` +
         `/brief [client] — Generate concept brief\n` +
-        `/status — Pipeline dashboard (all active leads)\n` +
-        `/resume [company] — Resume a blocked pipeline step\n` +
-        `/retry [company] — Retry last failed step\n` +
-        `/briefing — Morning briefing with blocked items\n` +
+        `/status — Pipeline dashboard\n` +
         `/deadlines — Check deadlines\n` +
         `/reminders — Client follow-ups\n` +
         `/movecard — Move a card to a pipeline stage\n` +
         `/techdeadlines — Technical deadlines\n` +
         `/outreach — Run outreach\n` +
-        `/bulkoutreach [show] — Bulk push all leads for a show (creates campaign automatically)\n` +
-        `/outreachstatus — Live Instantly campaign stats\n` +
-        `/replies [show] — View and score recent replies\n` +
-        `/campaigns — List all Instantly campaigns\n` +
-        `/instantlyverify — Verify Instantly connection\n` +
+        `/outreachstatus — Outreach stats\n` +
         `/newcampaign [show] — Build full show campaign\n` +
         `/salesreplies — Handle campaign replies (sales loop)\n` +
         `/campaignstatus [show] — Campaign pipeline status\n` +
-        `/indexinstantly — Index Instantly performance data to Knowledge Base\n` +
+        `/indexwoodpecker — Index all Woodpecker emails to Knowledge Base\n` +
         `/contractors — List contractors\n` +
         `/addcontractor — Add contractor\n` +
         `/bookcontractor — Book contractor\n` +
@@ -191,13 +140,6 @@ async function main() {
         `/contentplan — Weekly content plan\n` +
         `/ask [question] — Ask the Brain\n` +
         `/healthcheck — Check all system services\n` +
-        `/systemstatus — Pending approvals, sessions, scheduler state\n` +
-        `/checkemails — Scan inbox for new stand request emails\n` +
-        `/emailstatus — Gmail lead monitor status\n` +
-        `/emailfunnel — Email funnel dashboard (all inbound lead conversations)\n` +
-        `/emailthread [company] — Full conversation thread\n` +
-        `/emaildraft [company] — AI drafts a reply for your approval\n` +
-        `/emailreply [company] | [message] — Send a reply from info@standme.de\n` +
         `/help — Show this menu`,
         { parse_mode: 'Markdown' }
       );
@@ -207,107 +149,11 @@ async function main() {
     if (text === '/help') {
       await bot.sendMessage(msg.chat.id,
         `*StandMe OS Help*\n\n` +
-        `20 agents running. All actions require Mo's approval.\n` +
+        `17 agents running. All actions require Mo's approval.\n` +
         `Type any command or ask a question with /ask.\n\n` +
-        `Pipeline commands: /status | /resume [company] | /retry [company] | /briefing\n\n` +
         `Your role: ${ctx.role}`,
         { parse_mode: 'Markdown' }
       );
-      return;
-    }
-
-    // ── /status — pipeline dashboard ─────────────────────────────────────────
-    if (text === '/status') {
-      const active = pipelineRunner.getActive();
-      if (active.length === 0) {
-        await bot.sendMessage(msg.chat.id, '✅ No active pipelines. All leads are at rest or complete.');
-      } else {
-        const lines = active.map(p => {
-          const statusEmoji = p.status === 'BLOCKED' ? '🔴' : p.status === 'RUNNING' ? '🟡' : '🟢';
-          const blocked = p.status === 'BLOCKED' ? `\n  ⚠️ ${p.blockedReason}\n  → /resume ${p.companyName}` : '';
-          return `${statusEmoji} *${p.companyName}* — ${p.currentStep} (${p.status})${blocked}`;
-        }).join('\n\n');
-        await bot.sendMessage(msg.chat.id, `*Pipeline Dashboard — ${active.length} active*\n\n${lines}`, { parse_mode: 'Markdown' });
-      }
-      return;
-    }
-
-    // ── /resume [company] — resume a blocked pipeline ────────────────────────
-    if (text.startsWith('/resume')) {
-      const companyArg = text.replace('/resume', '').trim();
-      if (!companyArg) {
-        const blocked = pipelineRunner.getBlocked();
-        if (blocked.length === 0) {
-          await bot.sendMessage(msg.chat.id, 'No blocked pipelines to resume.');
-        } else {
-          const list = blocked.map(p => `  • ${p.companyName} (${p.currentStep}): ${p.blockedReason || 'unknown reason'}\n    /resume ${p.companyName}`).join('\n\n');
-          await bot.sendMessage(msg.chat.id, `*Blocked Pipelines:*\n\n${list}`, { parse_mode: 'Markdown' });
-        }
-        return;
-      }
-      const pipeline = pipelineRunner.findByCompany(companyArg);
-      if (!pipeline) {
-        await bot.sendMessage(msg.chat.id, `No active pipeline found for "${companyArg}".`);
-        return;
-      }
-      const next = pipelineRunner.resume(pipeline.leadId);
-      if (!next) {
-        await bot.sendMessage(msg.chat.id, `Pipeline for "${pipeline.companyName}" is ${pipeline.status} — nothing to resume.`);
-        return;
-      }
-      await bot.sendMessage(msg.chat.id, `▶️ Resuming pipeline for *${pipeline.companyName}* at step *${pipeline.currentStep}*...`, { parse_mode: 'Markdown' });
-      const agent = getAgent(next.command);
-      if (agent) {
-        ctx.command = next.command;
-        ctx.args    = next.args;
-        await agent.run(ctx);
-      } else {
-        await bot.sendMessage(msg.chat.id, `No agent found for command ${next.command}.`);
-      }
-      return;
-    }
-
-    // ── /briefing — trigger morning briefing manually ─────────────────────────
-    if (text === '/briefing') {
-      const w5Agent = getAgent('/enrich'); // reuse W5 logic via workflow engine pattern
-      // Build a quick briefing inline
-      const blocked = pipelineRunner.getBlocked();
-      const active  = pipelineRunner.getActive();
-      const sections = [
-        `*Active pipelines:* ${active.length}`,
-        `*Blocked pipelines:* ${blocked.length}${blocked.length > 0 ? '\n' + blocked.map(p => `  🔴 ${p.companyName} — ${p.currentStep}: ${p.blockedReason || 'unknown'}\n  → /resume ${p.companyName}`).join('\n') : ''}`,
-        blocked.length > 0 ? '' : '✅ All pipelines are clear.',
-        `\nFull commands:\n/status — pipeline dashboard\n/enrich — enrich stale leads\n/deadlines — check deadlines`,
-      ].filter(Boolean).join('\n\n');
-      await bot.sendMessage(msg.chat.id, `*📋 StandMe Briefing*\n\n${sections}`, { parse_mode: 'Markdown' });
-      return;
-    }
-
-    // ── /retry [company] — alias for /resume ─────────────────────────────────
-    if (text.startsWith('/retry')) {
-      const companyArg = text.replace('/retry', '').trim();
-      const pipeline = companyArg ? pipelineRunner.findByCompany(companyArg) : null;
-      if (!pipeline) {
-        const blocked = pipelineRunner.getBlocked();
-        if (blocked.length === 0) {
-          await bot.sendMessage(msg.chat.id, 'No blocked pipelines to retry.');
-        } else {
-          await bot.sendMessage(msg.chat.id, `Use /resume ${blocked[0].companyName} to retry the last blocked pipeline.`);
-        }
-        return;
-      }
-      const next = pipelineRunner.resume(pipeline.leadId);
-      if (!next) {
-        await bot.sendMessage(msg.chat.id, `Pipeline for "${pipeline.companyName}" is ${pipeline.status} — nothing to retry.`);
-        return;
-      }
-      await bot.sendMessage(msg.chat.id, `🔄 Retrying *${pipeline.companyName}* at step *${pipeline.currentStep}*...`, { parse_mode: 'Markdown' });
-      const agent = getAgent(next.command);
-      if (agent) {
-        ctx.command = next.command;
-        ctx.args    = next.args;
-        await agent.run(ctx);
-      }
       return;
     }
 
@@ -321,42 +167,13 @@ async function main() {
         return;
       }
 
-      let result = await handleApproval(approvalId, isApprove);
-
-      // In-memory callback missing (most common cause: Railway redeploy between
-      // the approval request and Mo's approval). For bulk outreach approvals,
-      // we persisted the params to Knowledge Base — try to reconstruct and re-run.
-      if (result === null && isApprove && approvalId.startsWith('bulkoutreach_')) {
-        await bot.sendMessage(msg.chat.id, '⏳ Approval callback expired (server restarted). Reconstructing bulk push from saved params...', { parse_mode: 'Markdown' });
-        result = await reconstructBulkApproval(approvalId).catch(() => null);
-      }
-
-      if (result === null) {
-        // Look up KB metadata so Mo knows exactly what this approval was for
-        let actionDesc = '';
-        try {
-          const meta = await getApprovalMetaFromKB(approvalId);
-          if (meta?.action) actionDesc = `\n\nThis was: *${meta.action}*`;
-        } catch { /* best-effort */ }
-
-        const isLaunch = approvalId.startsWith('bulkoutreach_') || approvalId.startsWith('launch_');
-        const rerunHint = isLaunch
-          ? '\n\nRe-run `/launch [show]` to get a fresh approval token.'
-          : '\n\nRe-run the original command to get a fresh approval token.';
-
-        await bot.sendMessage(
-          msg.chat.id,
-          `⚠️ Approval not found — the server may have restarted since this was issued.${actionDesc}${rerunHint}`,
-          { parse_mode: 'Markdown' }
-        );
-      } else {
-        await bot.sendMessage(msg.chat.id, result, { parse_mode: 'Markdown' });
-      }
+      const result = await handleApproval(approvalId, isApprove);
+      await bot.sendMessage(msg.chat.id, result || (isApprove ? '✅ Approved.' : '❌ Rejected.'), { parse_mode: 'Markdown' });
       await writeSystemLog({
         agent: 'Brain',
         actionType: isApprove ? 'APPROVE' : 'REJECT',
         detail: approvalId,
-        result: result === null ? 'FAIL' : 'SUCCESS',
+        result: 'SUCCESS',
       });
       return;
     }
@@ -411,104 +228,48 @@ async function main() {
   // Dashboard routes (served at /dashboard)
   app.use('/dashboard', dashboardRouter);
 
-  // Simple in-memory rate limiter for the Instantly webhook.
-  // Prevents spam/abuse — max 60 requests per minute per IP.
-  const webhookHits = new Map<string, number[]>();
-  const WEBHOOK_RATE_MAX = 60;
-  const WEBHOOK_RATE_WINDOW_MS = 60_000;
-
-  // POST /webhook/instantly — receives reply/open/bounce events from Instantly.ai
-  // Configure in Instantly: Settings → Integrations → Webhooks → point to this URL
-  app.post('/webhook/instantly', async (req, res) => {
-    // Rate limiting: reject if IP exceeds WEBHOOK_RATE_MAX requests in the window
-    const ip  = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
-    const now = Date.now();
-    const hits = (webhookHits.get(ip) || []).filter(t => now - t < WEBHOOK_RATE_WINDOW_MS);
-    hits.push(now);
-    webhookHits.set(ip, hits);
-    if (hits.length > WEBHOOK_RATE_MAX) {
-      logger.warn(`[Webhook] Rate limit exceeded for ${ip} (${hits.length} req/min)`);
-      res.sendStatus(429);
-      return;
-    }
-
+  // POST /webhook/woodpecker — receives reply/open/bounce events from Woodpecker
+  app.post('/webhook/woodpecker', async (req, res) => {
     res.sendStatus(200);
 
-    // Polling mode guard — webhook requires Hypergrowth plan ($97/mo).
-    // On Growth plan ($37/mo) the poller in workflow-engine.ts handles replies every 3h.
-    // Set INSTANTLY_WEBHOOK_ENABLED=true in Railway env when upgrading to Hypergrowth.
-    if (!process.env.INSTANTLY_WEBHOOK_SECRET && !process.env.INSTANTLY_WEBHOOK_ENABLED) {
-      logger.info('[Webhook] Instantly webhook received but polling mode is active (set INSTANTLY_WEBHOOK_ENABLED=true on Hypergrowth plan to enable real-time processing)');
+    const secret = process.env.WOODPECKER_WEBHOOK_SECRET;
+    if (secret && req.headers['x-woodpecker-secret'] !== secret) {
+      logger.warn('[Webhook] Woodpecker: invalid secret, ignoring');
       return;
     }
 
-    const secret = process.env.INSTANTLY_WEBHOOK_SECRET;
-    if (secret && req.headers['x-instantly-secret'] !== secret) {
-      logger.warn('[Webhook] Instantly: invalid secret, ignoring');
-      return;
-    }
+    const { status, prospect } = req.body || {};
+    const prospectEmail = (prospect?.email || '').toLowerCase();
+    const eventType = (status || '').toUpperCase();
 
-    const body = req.body || {};
-    // Instantly webhook payload shape: { event_type, campaign_id, lead_email, ... }
-    const eventType   = (body.event_type || body.status || '').toUpperCase();
-    const leadEmail   = (body.lead_email || body.email || '').toLowerCase();
-    const campaignId  = body.campaign_id || '';
-
-    logger.info(`[Webhook] Instantly: ${eventType} — ${leadEmail} (campaign: ${campaignId})`);
-    dashboardBus.logEvent('agent-17', 'Campaign Builder', `Instantly webhook: ${eventType} — ${leadEmail}`);
+    logger.info(`[Webhook] Woodpecker: ${eventType} — ${prospectEmail}`);
+    dashboardBus.logEvent('agent-17', 'Campaign Builder', `Webhook: ${eventType} — ${prospectEmail}`);
 
     const campaignAgent = getAgent('/salesreplies');
-    if (!campaignAgent) return;
+    if (!campaignAgent || !prospectEmail) return;
 
-    if (eventType === 'REPLY' || eventType === 'REPLIED') {
+    if (eventType === 'REPLIED') {
       const ctx = {
-        userId:   'webhook',
+        userId: 'webhook',
         username: 'webhook',
-        chatId:   parseInt(process.env.MO_TELEGRAM_ID || '0'),
-        command:  'scheduled',
-        args:     '',
-        role:     UserRole.ADMIN,
+        chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
+        command: 'scheduled',
+        args: '',
+        role: UserRole.ADMIN,
         language: 'en' as const,
       };
       campaignAgent.run(ctx).catch((err: any) =>
         logger.warn(`[Webhook] Reply processing error: ${err.message}`)
       );
-    } else if (['OPEN', 'OPENED', 'CLICK', 'CLICKED', 'BOUNCE', 'BOUNCED', 'UNSUBSCRIBE', 'UNSUBSCRIBED'].includes(eventType)) {
-      (campaignAgent as any).handleWebhookEvent(eventType, leadEmail, campaignId)
-        .catch((err: any) => logger.warn(`[Webhook] Event error: ${err.message}`));
-    }
-  });
-
-  // Woodpecker webhook — captures real-time reply events into Knowledge Base
-  app.post('/webhook/woodpecker', (req, res) => {
-    res.sendStatus(200); // always ACK immediately
-
-    const body = req.body || {};
-    const event   = (body.event || body.type || '').toUpperCase();
-    const email   = body.email || body.prospect_email || '';
-    const company = body.company || body.prospect?.company || '';
-
-    // Only process REPLY events — they have the richest data
-    if (!['REPLY', 'REPLIED'].includes(event) || !email) {
-      if (event) logger.info(`[Webhook/WP] Ignored event: ${event}`);
-      return;
-    }
-
-    logger.info(`[Webhook/WP] Reply received from ${email} (${company || 'unknown company'})`);
-
-    // Save to Knowledge Base asynchronously — don't block the response
-    const syncAgent = getAgent('agent-20') as WoodpeckerSyncAgent | undefined;
-    if (syncAgent) {
-      syncAgent.saveReplyToKB({
-        email,
-        company:      company || undefined,
-        campaignId:   body.campaign_id   ? Number(body.campaign_id)   : undefined,
-        campaignName: body.campaign_name || undefined,
-        replyBody:    body.reply_message || body.reply_body || body.message || undefined,
-        subject:      body.subject       || undefined,
-      }).catch((err: any) => logger.warn(`[Webhook/WP] KB save failed: ${err.message}`));
-    } else {
-      logger.warn('[Webhook/WP] WoodpeckerSyncAgent not found — reply not saved to KB');
+    } else if (['OPENED', 'BOUNCED', 'INVALID', 'INTERESTED', 'NOT_INTERESTED', 'UNSUBSCRIBED'].includes(eventType)) {
+      // Guard: only call handleWebhookEvent if the resolved agent actually has that method
+      const agent = campaignAgent as any;
+      if (typeof agent.handleWebhookEvent === 'function') {
+        agent.handleWebhookEvent(eventType, prospectEmail)
+          .catch((err: any) => logger.warn(`[Webhook] Event error: ${err.message}`));
+      } else {
+        logger.warn(`[Webhook] Agent for /salesreplies does not have handleWebhookEvent — skipping ${eventType}`);
+      }
     }
   });
 
@@ -522,19 +283,11 @@ async function main() {
   const httpServer = createServer(app);
   initDashboardSocket(httpServer);
   httpServer.listen(PORT, () => {
-    logger.info(`  Server on port ${PORT} — Dashboard: /dashboard | Webhook: /webhook/instantly`);
+    logger.info(`  Server on port ${PORT} — Dashboard: /dashboard | Webhook: /webhook/woodpecker`);
   });
 
   // Start scheduler
   startScheduler();
-
-  // ── Railway keep-alive ─────────────────────────────────────────────────────
-  // Ping our own /health endpoint every 4 minutes so Railway never marks the
-  // service as idle and cuts WebSocket connections due to inactivity.
-  const keepAliveUrl = `http://localhost:${PORT}/health`;
-  setInterval(() => {
-    fetch(keepAliveUrl).catch(() => { /* ignore — server is shutting down */ });
-  }, 4 * 60 * 1000);
 
   // Log startup
   await writeSystemLog({

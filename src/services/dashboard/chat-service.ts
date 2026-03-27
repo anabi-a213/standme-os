@@ -43,6 +43,18 @@ export interface ChatSession {
 
 const sessions = new Map<string, ChatSession>();
 const MAX_HISTORY = 40;
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Purge sessions that have been idle for more than SESSION_TTL_MS.
+// Runs every hour — prevents unbounded memory growth if dashboard tabs are left open.
+setInterval(() => {
+  const cutoff = Date.now() - SESSION_TTL_MS;
+  for (const [id, session] of sessions) {
+    if (session.lastActivity.getTime() < cutoff) {
+      sessions.delete(id);
+    }
+  }
+}, 60 * 60 * 1000);
 
 export function getSession(sessionId: string): ChatSession {
   if (!sessions.has(sessionId)) {

@@ -17,8 +17,10 @@ export abstract class BaseAgent {
     logger.info(`[${this.config.id}] Starting: ${this.config.name}`);
     dashboardBus.agentStarted(this.config.id, this.config.name, context.command);
 
-    // Inject thread context so every agent knows what the user has been working on
-    if (context.userId !== 'SYSTEM') {
+    // Inject thread context so every agent knows what the user has been working on.
+    // Skip for system/automated callers that have no real user session.
+    const isSystemCaller = ['SYSTEM', 'webhook', 'dashboard', 'dashboard-ai'].includes(context.userId);
+    if (!isSystemCaller) {
       context.threadContext = getThreadContext(context.userId);
       context.activeFocus = getActiveFocus(context.userId);
     }
@@ -28,7 +30,7 @@ export abstract class BaseAgent {
       const duration = Date.now() - startTime;
 
       // Save this interaction to thread so future agents have context
-      if (context.userId !== 'SYSTEM') {
+      if (!isSystemCaller) {
         saveThreadEntry(
           context.userId,
           this.config.id,

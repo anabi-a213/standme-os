@@ -16,6 +16,7 @@ export function startScheduler(): void {
     running.set(agent.config.id, false);
 
     try {
+      const tz = process.env.SCHEDULER_TIMEZONE || 'Europe/Berlin';
       cron.schedule(agent.config.schedule, async () => {
         if (running.get(agent.config.id)) {
           logger.warn(`[Scheduler] Skipping ${agent.config.name} — previous run still in progress`);
@@ -48,7 +49,7 @@ export function startScheduler(): void {
           running.set(agent.config.id, false);
         }
       }, {
-        timezone: 'Europe/Berlin',
+        timezone: tz,
       });
 
       logger.info(`[Scheduler] Registered: ${agent.config.name} — ${agent.config.schedule}`);
