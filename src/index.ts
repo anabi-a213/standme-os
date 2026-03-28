@@ -41,6 +41,7 @@ import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
 import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
 import { EmailFunnelAgent } from './agents/19-email-funnel.agent';
 import { WoodpeckerSyncAgent } from './agents/20-woodpecker-sync.agent';
+import { EmailManagerAgent } from './agents/21-email-manager.agent';
 
 async function main() {
   logger.info('========================================');
@@ -90,6 +91,7 @@ async function main() {
     new GmailLeadMonitorAgent(),
     new EmailFunnelAgent(),
     new WoodpeckerSyncAgent(),
+    new EmailManagerAgent(),
   ];
 
   for (const agent of agents) {
@@ -145,6 +147,11 @@ async function main() {
         `/casestudy /portfolio /insight — Content\n` +
         `/contentplan — Weekly content plan\n` +
         `/ask [question] — Ask the Brain\n` +
+        `/inbox — Gmail inbox\n` +
+        `/readmail [#] — Read email\n` +
+        `/replymail [#] [message] — Reply in thread\n` +
+        `/sendmail [to] | [subject] | [body] — Send email\n` +
+        `/searchmail [query] — Search Gmail\n` +
         `/healthcheck — Check all system services\n` +
         `/help — Show this menu`,
         { parse_mode: 'Markdown' }
