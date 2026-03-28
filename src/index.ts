@@ -155,7 +155,7 @@ async function main() {
     if (text === '/help') {
       await bot.sendMessage(msg.chat.id,
         `*StandMe OS Help*\n\n` +
-        `17 agents running. All actions require Mo's approval.\n` +
+        `20 agents running. All actions require Mo's approval.\n` +
         `Type any command or ask a question with /ask.\n\n` +
         `Your role: ${ctx.role}`,
         { parse_mode: 'Markdown' }
