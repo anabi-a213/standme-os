@@ -113,9 +113,45 @@ SHOW EXPERTISE (key shows):
 - SIAL Paris (Oct, biennial): Biggest food show. French aesthetics, fire safety strict.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AGENT COMMANDS
+HOW TO TAKE ACTIONS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-When the user wants an action, end your response with [ACTION: /command args]:
+When the user wants something done — DO IT, don't explain it.
+
+RULE: If you're triggering an action, your entire text response must be ONE SHORT LINE max.
+The agent's output IS the answer. Your explanation before it is noise.
+
+WRONG:
+"Sure! I'll check your inbox for you right now. Let me run the inbox command to fetch your recent emails and see if there's anything from Amy. Stand by while I pull that up for you."
+[ACTION: /inbox]
+
+RIGHT:
+"Checking now." [ACTION: /inbox]
+
+EVEN BETTER (for obvious requests):
+[ACTION: /inbox]
+
+SILENCE RULE: If the action fully answers the request, your text = empty or 1 word.
+Examples:
+- "check my emails" → [ACTION: /inbox]  (no text needed)
+- "add this lead: ..." → [ACTION: /newlead ...] (no text needed)
+- "move Pharma Corp to proposal" → [ACTION: /movecard Pharma Corp | 04] (no text needed)
+- "what's the pipeline?" → [ACTION: /status] (no text needed)
+- "write a brief for Star Box" → "Generating brief for Star Box." [ACTION: /brief Star Box Coffee]
+
+USE [ACTION:] AUTOMATICALLY for all of these intents — don't ask, just do:
+- Any mention of emails/inbox → /inbox or /searchmail
+- "add a lead", "new lead", "got a new client" → /newlead
+- "brief for X", "write a concept for X" → /brief X
+- "what's the status", "pipeline" → /status
+- "move X to Y stage" → /movecard X | Y
+- "enrich X", "find the DM for X" → /enrich X
+- "deadlines", "what's due" → /deadlines
+- "find file", "search drive" → /findfile
+- "check replies", "any replies from outreach" → /salesreplies
+
+WHEN THE USER SAYS "DO IT" or confirms something → trigger the action, don't re-explain.
+
+AGENT COMMANDS — trigger with [ACTION: /command args]:
 - /newlead — add new lead. EXACT FORMAT (pipe-separated, this order): CompanyName | ContactName | ContactEmail | ShowName | StandSizeSqm | Budget | Industry  (e.g. /newlead Solar GmbH | Hans Müller | hans@solar.de | Intersolar Munich 2025 | 36 | €50k | Solar/Energy)
 - /enrich — enrich leads with decision maker info
 - /brief [client] — generate concept brief for a client
@@ -163,15 +199,18 @@ Don't just answer — anticipate the next step:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RESPONSE STYLE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Direct and confident — you're a senior advisor, not a chatbot
-- *Bold* for key numbers, names, and urgency items
-- Under 300 words unless a full report is genuinely needed
-- Never say "I cannot" — either do it, guide them to it, or tell them why it can't be done
-- NEVER say you can't read emails — use [ACTION: /inbox] or [ACTION: /searchmail query] immediately
-- NEVER ask Mo to forward or copy-paste emails — you have direct Gmail access via the email commands
+- ACT first, explain only if needed — the result is the answer
+- Direct and confident — senior advisor, not a chatbot
+- *Bold* for key numbers, names, urgency items
+- Under 150 words for conversational replies. Under 50 words when triggering an action.
+- ZERO words when the action fully answers the request (email check, status, brief, etc.)
+- Never say "I cannot" or "I don't have access" — you have access to everything
+- Never ask Mo to do something you can do yourself
+- NEVER say you can't read emails — [ACTION: /inbox] or [ACTION: /searchmail query]
+- NEVER ask Mo to forward/copy-paste emails — you have direct Gmail access
 - Proactively flag urgent items even if not asked
-- When live data shows something concerning — say it
-- If a command just ran — tell them the result, don't repeat the action
+- When live data shows something concerning — say it immediately
+- If a command just ran — tell them the result only, don't re-explain what you did
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ENTITY TRACKING (hidden tag)
@@ -212,6 +251,40 @@ export class BrainAgent extends BaseAgent {
     }
 
     const message = ctx.args || ctx.command;
+
+    // ── Natural follow-up routing — "read the second one", "reply to that" ───
+    const emailAgent2 = getAgent('/inbox');
+    if (emailAgent2) {
+      const m = message.toLowerCase();
+
+      // "read the second one" / "open number 3" / "read email 2"
+      const readFollowUp = m.match(/(?:read|open|show|see)\s+(?:the\s+)?(?:(\d+)(?:st|nd|rd|th)?|(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth))\s*(?:one|email|mail)?/i)
+        || m.match(/(?:read|open|show)\s+(?:email\s+)?(?:number\s+)?(\d+)/i);
+      if (readFollowUp) {
+        const ordinals: Record<string, number> = { first:1, second:2, third:3, fourth:4, fifth:5, sixth:6, seventh:7, eighth:8, ninth:9, tenth:10 };
+        const numStr = readFollowUp[1] || readFollowUp[2];
+        const num = isNaN(Number(numStr)) ? (ordinals[numStr?.toLowerCase()] || 1) : Number(numStr);
+        const readCtx: AgentContext = { ...ctx, command: '/readmail', args: String(num) };
+        await emailAgent2.run(readCtx);
+        return { success: true, message: 'Routed to readmail', confidence: 'HIGH' };
+      }
+
+      // "reply to the second one with..." / "reply to email 3: ..."
+      const replyFollowUp = m.match(/(?:reply|respond)\s+(?:to\s+)?(?:the\s+)?(?:(\d+)(?:st|nd|rd|th)?|(first|second|third|fourth|fifth))\s*(?:one|email|mail)?\s*(?:with|:|-|saying|and say|and tell)?\s+(.+)/i)
+        || m.match(/(?:reply|respond)\s+(?:to\s+)?(?:email\s+)?(?:number\s+)?(\d+)\s*(?:with|:|-|saying|and say)?\s*(.+)/i);
+      if (replyFollowUp) {
+        const ordinals2: Record<string, number> = { first:1, second:2, third:3, fourth:4, fifth:5 };
+        const numStr2 = replyFollowUp[1] || replyFollowUp[2];
+        const num2 = isNaN(Number(numStr2)) ? (ordinals2[numStr2?.toLowerCase()] || 1) : Number(numStr2);
+        const replyText = (replyFollowUp[3] || replyFollowUp[2] || '').trim();
+        if (replyText.length > 3) {
+          const replyCtx: AgentContext = { ...ctx, command: '/replymail', args: `${num2} ${replyText}` };
+          await emailAgent2.run(replyCtx);
+          return { success: true, message: 'Routed to replymail', confidence: 'HIGH' };
+        }
+      }
+    }
+    // ── End follow-up routing ─────────────────────────────────────────────────
 
     // ── Direct email routing — bypass Claude for clear email intent ──────────
     // Brain cannot read Gmail itself. Detect email-related intent and hand off
@@ -334,8 +407,19 @@ export class BrainAgent extends BaseAgent {
         setActiveFocus(ctx.userId, focusType, focusName);
       }
 
+      // ── Action suppression: when an agent is being triggered, Brain's
+      // verbose explanation is noise. Only send Brain's text if it adds
+      // genuine value beyond the action itself (e.g. a question, a warning,
+      // a summary of something). Pure filler like "On it!", "Checking now.",
+      // "Sure!", "Let me...", "I'll...", "Of course" → suppress entirely.
+      const FILLER_PATTERNS = [
+        /^(on it|checking|looking|fetching|running|generating|got it|sure|okay|ok|of course|right away|let me|i'll|i will|one moment|stand by|just a|hang on|pulling|searching)/i,
+      ];
+      const isJustFiller = response.length < 80 && FILLER_PATTERNS.some(r => r.test(response));
+      const shouldSuppressText = actionMatch && (response.length === 0 || isJustFiller);
+
       // Save to per-user Brain conversation history (clean message, no data context)
-      this.saveHistory(ctx.userId, message, response);
+      this.saveHistory(ctx.userId, message, response || `[Ran ${actionMatch?.[1] || 'action'}]`);
 
       // Also save to cross-agent thread context with entity info
       saveThreadEntry(
@@ -343,11 +427,14 @@ export class BrainAgent extends BaseAgent {
         this.config.id,
         ctx.command,
         message,
-        response,
+        response || `[Ran ${actionMatch?.[1] || 'action'}]`,
         focusMatch ? { type: focusMatch[1].trim(), name: focusMatch[2].trim() } : undefined
       );
 
-      await this.respond(ctx.chatId, response);
+      // Only send Brain's text response if it has real content
+      if (!shouldSuppressText && response) {
+        await this.respond(ctx.chatId, response);
+      }
 
       // Report any data source issues to Mo as a separate diagnostic message
       const allIssues: string[] = [...dataIssues];
@@ -360,7 +447,7 @@ export class BrainAgent extends BaseAgent {
         );
       }
 
-      // Trigger agent action if requested
+      // Trigger agent action — runs AFTER any Brain text (or silently if suppressed)
       if (actionMatch) {
         const command = actionMatch[1].toLowerCase();
         const args = actionMatch[2].trim();
@@ -369,7 +456,15 @@ export class BrainAgent extends BaseAgent {
         if (agent) {
           const actionCtx: AgentContext = { ...ctx, command, args };
           await agent.run(actionCtx);
+        } else {
+          // Action command not found — only then tell Mo
+          if (shouldSuppressText) {
+            await this.respond(ctx.chatId, `Unknown command: ${command}`);
+          }
         }
+      } else if (shouldSuppressText) {
+        // Suppressed text but no action ran — send the text after all
+        await this.respond(ctx.chatId, response);
       }
 
       return { success: true, message: 'Brain responded', confidence: 'HIGH' };
