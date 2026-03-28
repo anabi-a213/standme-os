@@ -238,6 +238,18 @@ WHAT MAKES A STAND LOOK GREAT WITHOUT BEING FANCY:
   - Good floor choice: grey carpet, light oak vinyl, or dark
     laminate — clean and simple
 
+WHAT MAKES AI STANDS LOOK FAKE (avoid all of these):
+  - Vague materials: "glass and steel" → AI produces unbuilable
+    fantasy. Always name the material specifically.
+  - "Photorealistic" alone as a quality marker → produces slick
+    CGI. Use "architectural visualisation" instead.
+  - Words: "futuristic", "modern", "innovative", "dramatic" →
+    pushes toward sci-fi aesthetic every time.
+  - No surrounding context (other booths, aisle, ceiling) →
+    stand floats in a white void, looks fake immediately.
+  - "Dramatic lighting" without qualifier → theatre/cinema
+    lighting, not a trade show hall.
+
 ABSOLUTE PROHIBITIONS — never describe or generate:
   - No curved organic walls or blob shapes
   - No multi-level raised platforms above 20cm
@@ -246,11 +258,12 @@ ABSOLUTE PROHIBITIONS — never describe or generate:
     triangles, hexagons as structural elements)
   - No neon lighting rigs or full-perimeter RGB lighting
   - No more than one LED video wall per concept
-  - No water features, plants walls, or trees inside the stand
+  - No water features, plant walls, or trees inside the stand
   - No chandelier-style lighting installations
   - No gold, chrome, or mirrored surfaces unless brand uses them
   - Never use the words: luxury, premium, high-end, stunning,
-    impressive, cutting-edge, innovative, futuristic, bespoke
+    impressive, cutting-edge, innovative, futuristic, bespoke,
+    photorealistic (use "architectural visualisation" instead)
 
 WHAT GOOD LOOKS LIKE (use as reference):
   - Think: Apple Store simplicity applied to a trade stand
@@ -279,43 +292,75 @@ Use ALL of this client data:
   - Staff count: ${context.staffCount || '4-6 staff'}
 
 ═══════════════════════════════════════
-RENDER PROMPT DESIGN RULES (updated):
+RENDER PROMPT DESIGN RULES:
 ═══════════════════════════════════════
-Required anchor phrase (always include verbatim):
-"photorealistic architectural visualisation, exhibition stand,
-international trade show floor, soft professional overhead
-lighting, razor sharp focus, 4K resolution, Canon 24mm lens
-f/8, photorealistic people in background for scale"
+Required anchor phrase (always include verbatim at the end):
+"architectural visualisation, exhibition stand at international
+trade show, soft overhead LED track lighting from above,
+neighbouring exhibitor booths visible in background,
+carpet aisle in foreground, exhibition hall ceiling structure
+visible, shallow depth of field on background, business
+visitors in suits browsing, Canon EOS 5D Mark IV 24mm f/8,
+razor sharp focus, 4K"
+
+WHY these words work:
+  - "architectural visualisation" (not "photorealistic" alone)
+    grounds the AI in real-world building materials
+  - "neighbouring exhibitor booths" stops the stand floating
+    in a white void — adds critical real-world context
+  - "carpet aisle in foreground" anchors the scene on a real
+    trade show floor
+  - "exhibition hall ceiling structure" — the steel truss and
+    overhead lighting that every real trade show has
+  - "shallow depth of field on background" adds photographic
+    realism — background blurs naturally like a real lens
+  - Specific camera "Canon EOS 5D Mark IV 24mm f/8" beats
+    generic "professional camera"
 
 CONCEPT A — Clean & Refined:
   Simple clean architecture. White or light neutral as base.
   Brand colour used on ONE feature element only (back wall,
   counter fascia, or header panel — pick one).
-  Max 2 materials. Spotlights on products/counter.
+  Max 2 named materials (e.g. "matte white MDF", "light oak
+  vinyl planks" — always name the material specifically).
+  LED spotlights on products and counter only.
   Open floor plan, no walls blocking entrance.
   Formula: "[Company] exhibition stand at [Show] [City],
-  [sqm] [type] stand, [stand type composition], clean white
-  MDF back wall with [brand colour] large format brand graphic,
-  [floor material] flooring, simple [material] reception
-  counter with backlit logo panel, [1 product feature],
-  LED spotlights, staff in [brand colour] uniforms,
-  business visitors browsing, busy trade show floor,
+  [sqm] [type] stand, [stand type open sides description],
+  matte white MDF back wall with [brand colour] large-format
+  brand graphic, [named floor material] flooring, white MDF
+  reception counter with backlit [brand colour] logo fascia,
+  [1 specific product feature — e.g. 'three product display
+  plinths with spotlights'], LED spotlights above counter and
+  graphic wall, staff in [brand colour] uniforms,
   [anchor phrase]"
 
 CONCEPT B — Bold & Simple:
-  Same clean principles but ONE bold visual change.
+  Same clean base but ONE bold visual hero element.
   Choose exactly ONE of these bold moves:
-    Option 1: Full-height LED video wall on back panel
-              showing product footage
-    Option 2: Back wall entirely in deep brand colour
-              with large white logo — high contrast
-    Option 3: Large suspended truss fascia sign with
-              brand name in oversized letters
-    Option 4: Central product hero plinth — the product
-              IS the stand's centrepiece
-  Everything else stays clean and simple.
-  Formula: same data as A but with the one bold change
-  described specifically.
+    Option 1: Full-height LED video wall (back panel) showing
+              product/brand footage — everything else white
+    Option 2: Back wall entirely in deep brand colour with
+              oversized white logo — maximum contrast
+    Option 3: Exposed steel truss fascia above stand with
+              brand name in oversized illuminated letters
+    Option 4: Central raised product plinth (30cm platform)
+              — the product IS the stand's centrepiece,
+              spotlit from above
+  Everything else stays white, clean, and simple.
+  Formula: same structure as A but replace the back wall
+  or hero element with the ONE bold choice above —
+  describe it specifically and in detail.
+
+MATERIAL NAMING RULES — always use specific named materials:
+  Walls:    "matte white MDF", "gloss white laminate",
+            "raw concrete panel", "dark walnut veneer"
+  Floors:   "grey exhibition carpet", "light oak vinyl planks",
+            "polished grey epoxy", "raised dark laminate platform"
+  Counter:  "white MDF counter", "brushed aluminium fascia",
+            "backlit frosted acrylic panel"
+  Graphics: "large-format direct-print graphic", "tension
+            fabric lightbox", "vinyl-wrapped wall panel"
 
 Both prompts must be a SINGLE LINE with no line breaks.
 Output exactly:
@@ -323,10 +368,10 @@ FREEPIK_PROMPT_A: [full prompt]
 FREEPIK_PROMPT_B: [full prompt]
 
 BAD (do not do this):
-FREEPIK_PROMPT_A: Modern sleek stand for tech company with innovative design
+FREEPIK_PROMPT_A: Modern sleek stand for tech company with innovative design features
 
 GOOD:
-FREEPIK_PROMPT_A: Star Box Coffee exhibition stand at Gulfood Dubai 2025, 50sqm island stand, four open sides, clean white MDF back wall with coffee-brown large format brand graphic, light oak laminate flooring, simple white reception counter with backlit logo panel, branded cup display shelf, LED spotlights on counter and graphic wall, baristas in black branded uniforms, business visitors browsing, busy trade show floor, photorealistic architectural visualisation, exhibition stand, international trade show floor, soft professional overhead lighting, razor sharp focus, 4K resolution, Canon 24mm lens f/8, photorealistic people in background for scale`
+FREEPIK_PROMPT_A: Star Box Coffee exhibition stand at Gulfood Dubai, 50sqm island stand, four open sides, matte white MDF back wall with coffee-brown large-format brand graphic, light oak vinyl plank flooring, white MDF reception counter with backlit coffee-brown logo fascia, three product display plinths with LED spotlights, staff in black branded uniforms, architectural visualisation, exhibition stand at international trade show, soft overhead LED track lighting from above, neighbouring exhibitor booths visible in background, carpet aisle in foreground, exhibition hall ceiling structure visible, shallow depth of field on background, business visitors in suits browsing, Canon EOS 5D Mark IV 24mm f/8, razor sharp focus, 4K`
     : '';
 
   const prompt = `You are writing a Tier ${tier} concept brief for an exhibition stand project at StandMe.

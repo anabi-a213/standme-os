@@ -88,31 +88,39 @@ export class ConceptBriefAgent extends BaseAgent {
     }
 
     // 4. Camera angles — professional architectural visualisation shots
+    // Angles tuned to match industry-standard trade show photography:
+    // horizontal_angle: 0–360° rotation around subject (0=front, 90=right, 180=back)
+    // vertical_angle:   -30–90° tilt (0=eye level, 90=straight down)
+    // zoom:             0–10 (0=wide full scene, 10=close-up detail)
     const ANGLES = [
-      // Shot 1: Hero / Eye-level — the "street view", human perspective
-      // Camera at eye level, straight on. Most relatable, shows stand
-      // as a visitor walking toward it from the main aisle.
-      { label: 'front',    h: 0,   v: 8,  z: 5 },
+      // Shot 1: Hero / Eye-level — the "street view", human perspective.
+      // Camera at walking height, straight on. Most relatable shot — shows
+      // the stand exactly as a visitor approaching from the main aisle sees it.
+      // Zoom 4 (not 5) gives a touch more aisle context on both sides.
+      { label: 'front',    h: 0,   v: 8,  z: 4 },
 
-      // Shot 2: 45° Corner — best for showing depth and dimension.
-      // Two faces visible simultaneously. Industry standard for stands.
-      { label: 'corner',   h: 45,  v: 15, z: 4 },
+      // Shot 2: 3/4 Corner — industry standard architectural marketing shot.
+      // Two faces visible simultaneously — shows depth, dimension, layering.
+      // h:50 (not 45) gives a slightly deeper perspective into the stand face.
+      // v:18 (not 15) lifts just enough to see into the stand without aerial feel.
+      { label: 'corner',   h: 50,  v: 18, z: 4 },
 
-      // Shot 3: Semi-aerial / Elevated — 30° above eye level.
-      // Shows full stand layout, floor plan, material distribution.
-      // Not too high — keeps human scale visible.
-      { label: 'elevated', h: 25,  v: 35, z: 4 },
+      // Shot 3: Semi-aerial elevated — shows full floor plan + material zones.
+      // h:35 gives better three-face read than h:25 for island/corner stands.
+      // v:38 is the sweet spot: sees into the stand but back wall still visible.
+      // z:3 (wider) shows more surrounding aisle context.
+      { label: 'elevated', h: 35,  v: 38, z: 3 },
 
-      // Shot 4: Top-down overview — bird's eye view.
-      // Shows complete floor plan and spatial zones from above.
-      // Best for showing traffic flow and stand size.
-      { label: 'topview',  h: 15,  v: 65, z: 5 },
+      // Shot 4: Bird's eye overview — complete floor plan from above.
+      // v:68 shows spatial zones clearly without going flat (v:90 kills dimension).
+      // Best for showing traffic flow, stand size, and reception placement.
+      { label: 'topview',  h: 20,  v: 68, z: 5 },
 
-      // Shot 5: Approach / Wide dramatic — low angle from far aisle.
-      // Camera slightly lower than eye level, wide shot showing the
-      // stand in full trade show context with surrounding booths.
-      // Creates the "WOW first impression" shot.
-      { label: 'approach', h: 335, v: 3,  z: 2 },
+      // Shot 5: Wide approach drama — the "WOW first impression" shot.
+      // Camera slightly below eye level from the far aisle, very wide.
+      // Shows the full stand in trade show context with surrounding booths.
+      // z:2 ensures maximum surrounding context — scale and environment.
+      { label: 'approach', h: 338, v: 2,  z: 2 },
     ];
 
     // 5. Get target folder
