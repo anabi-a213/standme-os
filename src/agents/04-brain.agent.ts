@@ -139,6 +139,11 @@ When the user wants an action, end your response with [ACTION: /command args]:
 - /movecard [client] | [stage] — move pipeline card (e.g. /movecard Pharma Corp | 04 Proposal Sent)
 - /crossboard — cross-board health check across all Trello boards
 - /post /caption /campaign /casestudy /portfolio /insight /contentplan — marketing content
+- /inbox — check Gmail inbox (Mo's emails — use when he asks to check/read emails)
+- /searchmail [query] — search Gmail (use when he asks about emails from a person or topic)
+- /readmail [#] — read a specific email by number (after /inbox or /searchmail)
+- /replymail [#] [message] — reply to an email in-thread
+- /sendmail [to] | [subject] | [body] — send a new email from info@standme.de
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PROACTIVE INTELLIGENCE (pre-think)
@@ -162,6 +167,8 @@ RESPONSE STYLE
 - *Bold* for key numbers, names, and urgency items
 - Under 300 words unless a full report is genuinely needed
 - Never say "I cannot" — either do it, guide them to it, or tell them why it can't be done
+- NEVER say you can't read emails — use [ACTION: /inbox] or [ACTION: /searchmail query] immediately
+- NEVER ask Mo to forward or copy-paste emails — you have direct Gmail access via the email commands
 - Proactively flag urgent items even if not asked
 - When live data shows something concerning — say it
 - If a command just ran — tell them the result, don't repeat the action
@@ -205,6 +212,54 @@ export class BrainAgent extends BaseAgent {
     }
 
     const message = ctx.args || ctx.command;
+
+    // ── Direct email routing — bypass Claude for clear email intent ──────────
+    // Brain cannot read Gmail itself. Detect email-related intent and hand off
+    // to EmailManagerAgent immediately so Mo gets real results, not apologies.
+    const emailAgent = getAgent('/inbox');
+    if (emailAgent) {
+      const msgLower = message.toLowerCase();
+
+      // "check emails", "check inbox", "any new emails", "unread emails" → /inbox
+      const inboxTriggers = [
+        /check.*email/i, /check.*inbox/i, /any.*email/i, /new.*email/i,
+        /unread.*email/i, /what.*email/i, /my.*inbox/i, /see.*email/i,
+        /show.*email/i, /read.*email/i, /got.*email/i, /emails.*today/i,
+        /emails.*yesterday/i, /inbox/i,
+      ];
+      if (inboxTriggers.some(r => r.test(msgLower)) && !msgLower.includes('email funnel')) {
+        // Check if a specific person/company is mentioned — if so, do a search
+        const fromMatch = message.match(/from\s+([A-Za-z][A-Za-z\s]{1,30}?)(?:\s+(?:yesterday|today|last|about|on|at|for|\?|$))/i)
+          || message.match(/(?:email|mail)\s+from\s+([A-Za-z][A-Za-z\s]{1,25})/i)
+          || message.match(/(?:amy|ahmed|sarah|john|anna|maria|peter|david|michael|thomas|james|ali|omar|hassan|mohamed|fatima)\b/i);
+
+        if (fromMatch) {
+          const name = (fromMatch[1] || fromMatch[0]).trim();
+          const searchCtx: AgentContext = { ...ctx, command: '/searchmail', args: `from:${name}` };
+          await emailAgent.run(searchCtx);
+          return { success: true, message: 'Routed to email search', confidence: 'HIGH' };
+        }
+
+        // Generic inbox check — run /inbox with optional recency filter
+        const inboxCtx: AgentContext = { ...ctx, command: '/inbox', args: '' };
+        await emailAgent.run(inboxCtx);
+        return { success: true, message: 'Routed to inbox', confidence: 'HIGH' };
+      }
+
+      // "search email for [query]" / "find email about [topic]"
+      const searchMatch = msgLower.match(/(?:search|find|look for|search for).*(?:email|mail).*?(?:about|for|from|with|on)?\s+(.{3,50})/i)
+        || msgLower.match(/(?:email|mail).*(?:about|from|with|on)\s+(.{3,50})/i);
+      if (searchMatch) {
+        const query = (searchMatch[1] || '').trim().replace(/[?.!]+$/, '');
+        if (query.length > 2) {
+          const searchCtx: AgentContext = { ...ctx, command: '/searchmail', args: query };
+          await emailAgent.run(searchCtx);
+          return { success: true, message: 'Routed to email search', confidence: 'HIGH' };
+        }
+      }
+    }
+    // ── End email routing ─────────────────────────────────────────────────────
+
     const lang = await detectLanguage(message);
     const ack = lang === 'ar' ? '...' : lang === 'franco' ? 'ثانية...' : '...';
     await this.respond(ctx.chatId, ack);
