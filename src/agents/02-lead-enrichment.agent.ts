@@ -128,7 +128,6 @@ export class LeadEnrichmentAgent extends BaseAgent {
 
         // If no DM email found, save a detailed guidance note to KB
         if (!dmEmail) {
-          const website = lead.data[21] || ''; // col V might hold website in some rows
           await updateKnowledge(`enrichment-dm-${leadId}`, {
             sourceType: 'manual',
             topic: companyName,
