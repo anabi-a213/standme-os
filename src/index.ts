@@ -37,7 +37,9 @@ import { MarketingContentAgent } from './agents/15-marketing-content.agent';
 import { CardManagerAgent } from './agents/08-card-manager.agent';
 import { CrossBoardAgent } from './agents/16-cross-board.agent';
 import { CampaignBuilderAgent } from './agents/17-campaign-builder.agent';
-
+import { GmailLeadMonitorAgent } from './agents/18-gmail-lead-monitor.agent';
+import { EmailFunnelAgent } from './agents/19-email-funnel.agent';
+import { WoodpeckerSyncAgent } from './agents/20-woodpecker-sync.agent';
 
 async function main() {
   logger.info('========================================');
@@ -84,6 +86,9 @@ async function main() {
     new DriveIndexerAgent(),
     new MarketingContentAgent(),
     new CrossBoardAgent(),
+    new GmailLeadMonitorAgent(),
+    new EmailFunnelAgent(),
+    new WoodpeckerSyncAgent(),
   ];
 
   for (const agent of agents) {
