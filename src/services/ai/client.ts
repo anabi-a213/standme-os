@@ -129,69 +129,192 @@ The brief must be fully usable as-is — never leave a field blank or say "to be
   // Exhibition stand anatomy reference — injected into every concept instruction
   // so Claude writes stand specs, not interior design or marketing copy.
   const standAnatomyGuide = `
-EXHIBITION STAND ANATOMY — write every concept using these building blocks:
+EXHIBITION STAND ANATOMY — professional framework for every concept:
 
-STRUCTURE & FLOOR PLAN
-- Floor: raised platform (50–100mm MDF deck) or flat with vinyl/carpet
-- Walls: back wall, side walls (for corner/inline/peninsula), open aisle faces
-- Overhead: fascia header sign, suspended truss, fabric canopy (if venue allows rigging), or none
-- Ceiling: only fabric canopy or branded truss — never a solid ceiling
+━━━ STRUCTURE & FLOOR PLAN ━━━
+- Floor: raised platform (50–100mm MDF deck) OR flat with vinyl/carpet — state which and why
+- Walls: back wall, side walls (corner/inline/peninsula), open aisle faces — never enclose the front third
+- Overhead: backlit LED fascia header (most common), suspended truss (needs rigging permit), fabric canopy, or none
+- Ceiling: fabric canopy or branded truss ONLY — never a solid ceiling panel
 
-ZONES (assign each sqm a purpose)
-- Reception / welcome counter: first touch-point from the main aisle
-- Product / service display area: shelving, plinths, demo screens, product stands
-- Meeting / consultation area: enclosed or semi-open pod, 2–4 seat table
-- Brand hero wall: largest graphic surface, dominant brand colour + logo
-- Optional: demo station, bar/sampling counter, storage room
+━━━ SPATIAL PROGRAMME — assign approximate sqm to every zone ━━━
+Use the Four-Zone Visitor Journey Framework. Every zone is a stage in the sales journey:
+  1. Welcome Zone (front, main aisle face) — reception counter, greeter position, brand hero graphic
+     → The "front third" rule: always open, never blocked by walls or furniture
+  2. Discovery Zone (perimeter, passive) — product display plinths, shelves, literature — no commitment to enter
+  3. Engagement Zone (centre) — demo screen, product interaction, sampling bar — active, brief conversation
+  4. Consultation Zone (rear, semi-private) — 4-seat meeting table, partial partition — qualified leads only
+  + Storage (rear corner, hidden from aisle) — always include, min 2sqm
 
-MATERIALS (name real ones — never write "premium" or "high-quality")
-  Walls: tension fabric with dye-sublimation print, MDF with vinyl wrap, timber slat cladding,
-         laminate panels, painted MDF, LED lightbox panels
-  Floors: laminate on raised platform, vinyl with print, carpet tile, polished concrete effect
-  Structure: powder-coated aluminium extrusion, timber frame, steel tube
-  Furniture: reception counter (backlit or solid), bar stools, meeting chairs, display plinths
-  Lighting: LED spotlights on track, LED strip behind frosted acrylic, LED lightbox headers,
-            pendant lights over sampling bars, uplighting on back wall
+━━━ MATERIALS — name every surface to finish level. Never write "premium" or "high-quality" ━━━
+  Walls:    matte white MDF (satin finish) | gloss white laminate panel | dark walnut veneer |
+            timber slat cladding (vertical oak, 30mm gap) | tension fabric with dye-sublimation print |
+            SEG lightbox panel (silicone-edge graphic, backlit) | concrete-effect vinyl on MDF
+  Floors:   grey loop-pile exhibition carpet | light oak vinyl plank flooring | polished grey epoxy |
+            raised platform (50mm MDF deck, laminate finish) | concrete-effect printed vinyl
+  Counter:  white MDF reception counter | backlit frosted acrylic fascia | brushed aluminium fascia panel
+  Structure: powder-coated aluminium extrusion (Octanorm system) | timber frame | steel tube
+  Graphics: large-format direct-print graphic | tension fabric lightbox | vinyl-wrapped panel |
+            fret-cut backlit silhouette | freestanding branded totem
 
-VISITOR JOURNEY
-Describe the stand from the visitor's perspective walking past the main aisle:
-1. Approach (10m away): what catches their eye — header sign, hero graphic, lighting
-2. Stop (3m): what makes them pause — product, person, activity, open invitation
-3. Enter: what draws them in — counter position, open floor plan, demo activity
-4. Stay: meeting pod, product interaction, sampling, consultation`;
+━━━ THREE-LAYER LIGHTING DESIGN ━━━
+Every concept must describe all three layers — not just "LED spotlights":
+  Layer 1 — Ambient: Note the hall's overhead lighting and whether the stand compensates for it
+            or uses it. (e.g. "The hall's cool-white overhead lighting will desaturate brand
+            colours — the backlit SEG header generates independent warm-white light.")
+  Layer 2 — Accent (directional, controlled): LED track spotlights (3000K warm white) aimed
+            at products and graphics | under-shelf LED strip | counter-edge LED strip |
+            uplighting on back wall
+  Layer 3 — Architectural (light IS structure): LED lightbox header (beacon, readable at 15m) |
+            backlit SEG panel (graphic = light source) | edge-lit acrylic logo |
+            LED cove (concealed strip — wall appears to float) | fret-cut backlit silhouette
+
+━━━ SIGHTLINE CHECK — design from outside in, not inside out ━━━
+State what the visitor sees at each distance band:
+  15m: header/fascia only — is the brand name and colour readable?
+  10m: hero graphic — is the product category identifiable?
+   5m: key message — is the value proposition readable?
+   3m: interior — can the visitor see inside? Does it feel safe/easy to enter?
+   0m: full experience — product, staff, demo, invitation to sit
+
+━━━ VISITOR JOURNEY — write as first-person walk-through with trigger mechanisms ━━━
+Not just what they experience — specify the mechanism that triggers each stage:
+  Approach (15–10m): what CAUSES them to look — the beacon, the lighting, the hero graphic
+  Stop (5–3m): what CAUSES them to pause — the product visible, the open entrance, the activity
+  Enter (threshold): what CAUSES them to step in — no visual barrier, staff body language, demo draw
+  Engage: what CAUSES them to interact — product at arm's reach, screen, sampling
+  Stay (Consultation Zone): what CAUSES them to sit — staff invitation, relevant discovery, urgency`;
 
   const conceptsInstruction = tier === 1
     ? `${standAnatomyGuide}
 
-## Design Concept A: [Give it a descriptive name, e.g. "The Open Forum" or "Brand Fortress"]
-Write a single buildable exhibition stand concept using the anatomy guide above.
-If any data is missing, assume the most realistic value for this show and industry — never
-leave a blank. Cover: floor plan zones, back wall treatment, flooring, overhead (if any),
-reception counter, key display element, meeting solution, lighting, hero graphic.
-Mark every assumption with [ASSUMED] so the client knows what to confirm.`
+## Design Concept A: "[Give it an evocative name — e.g. The Open Forum, The Brand Fortress, The Glass House]"
+
+**Concept Rationale (3–4 sentences):**
+Before any technical spec — explain WHY this design makes strategic sense for this client at this show.
+What is the single central idea that governs every design decision? What will a visitor remember?
+Example: "The stand reads as a working environment, not a stand about the company. This collapses the
+psychological distance between product and visitor, turning the footprint into an experience."
+
+**Spatial Programme:**
+List each zone with approximate sqm. Total must equal the stand size.
+- Welcome Zone: [X sqm] — front-[left/right/centre], open to main aisle
+- Discovery Zone: [X sqm] — [position] — [what is displayed]
+- Engagement Zone: [X sqm] — [position] — [what activity]
+- Consultation Zone: [X sqm] — rear-[left/right] — [capacity] seats
+- Storage: [X sqm] — rear, hidden
+
+**Sightline Check:**
+- 15m: [what the visitor sees — header/beacon only]
+- 10m: [brand and product category identifiable]
+-  5m: [key message readable]
+-  3m: [interior visible, easy to enter]
+
+**Materials & Build:**
+- Back wall: [named material + finish + graphic treatment]
+- Flooring: [named material + finish]
+- Overhead: [fascia type / truss / none — and why]
+- Reception counter: [named material, backlit or solid, position]
+- Display: [how product is shown — plinths, shelves, screens with dimensions]
+- Meeting: [enclosed or open, capacity, partition material]
+
+**Three-Layer Lighting:**
+- Ambient: [how the stand handles the hall's overhead lighting]
+- Accent: [what is spotlit, colour temperature, track or fixed]
+- Architectural: [which elements generate their own light — header, SEG, cove]
+
+**Visitor Journey:**
+- Approach (15m): [what beacon causes them to look]
+- Stop (3m): [what mechanism causes them to pause]
+- Enter: [what causes them to step in — open floor, staff, demo]
+- Stay: [what causes them to sit in the consultation zone]
+
+**Signature Detail:**
+One specific element that makes this stand different from every other stand in the same aisle.
+Must be buildable within the stated budget.
+
+**Budget Translation:**
+One sentence: which material choices reflect the budget, and where was spend concentrated.
+
+Mark every assumption with [ASSUMED].`
+
     : `${standAnatomyGuide}
 
-## Design Concept A: The Refined Direction — [Give it a descriptive name]
-A clean, confident exhibition stand. Write as a stand designer briefing the build team.
-For any missing data, assume the most realistic value for ${context.showName || 'this show'} and
-the ${context.industry || 'this'} industry — commit to a specific assumption, mark it [ASSUMED].
-Cover all anatomy elements:
-- Floor plan: how the ${context.standSize ? context.standSize + ' sqm' : '[ASSUMED size]'} is divided into zones
-- Back wall / hero graphic: material, colour, graphic treatment
-- Flooring: material and finish
-- Overhead: fascia, truss, or none — and why
-- Reception: counter position, material, backlit or solid
-- Display: how the product/service is shown (plinths, shelves, screens)
-- Meeting: enclosed pod or open meeting corner, capacity
-- Lighting: track spots, LED strips, lightbox, pendant — where and why
-- One signature detail that makes this stand memorable at this show
+## Design Concept A: The Refined Direction — "[Give it an evocative name]"
 
-## Design Concept B: The Bold Direction — [Give it a descriptive name]
-Same footprint and budget. Meaningfully different design language — not just a colour swap.
-Use the same anatomy structure. The difference must be in the spatial logic or the hero element:
-choose ONE bold move (full-height LED video wall, dramatic truss with suspended canopy,
-bold colour-block geometry on all wall faces, or a product activation as the central
-architectural feature). Every other element must still be 100% buildable and budgeted.`;
+**Concept Rationale (3–4 sentences):**
+Before any technical spec — state the single strategic idea behind this concept.
+Why does this design make sense for ${context.clientName} at ${context.showName || 'this show'}?
+What will a visitor remember? What does the stand *say* before anyone speaks?
+
+**Competitive Positioning (1–2 sentences):**
+What do other ${context.industry || 'exhibition'} sector stands typically look like at this show?
+How does this concept deliberately contrast or differentiate?
+
+**Spatial Programme — ${context.standSize ? context.standSize + ' sqm' : '[ASSUMED size] sqm'} total:**
+Every zone gets a name, an approximate sqm allocation, and a position.
+- Welcome Zone: [X sqm] — front, open to main aisle — reception counter + brand hero graphic
+- Discovery Zone: [X sqm] — [position] — [specific product/service display elements]
+- Engagement Zone: [X sqm] — [position] — [specific demo or sampling activity]
+- Consultation Zone: [X sqm] — rear — [capacity] seats, [partition type]
+- Storage: [X sqm] — hidden rear corner
+
+**Sightline Check:**
+- 15m: [what functions as the stand's beacon — header, lighting, tall element]
+- 10m: [brand and product category clearly identifiable]
+-  5m: [key value message readable on the hero graphic]
+-  3m: [visitor can see inside — open, inviting, no visual barrier at entry]
+
+**Materials & Build:**
+Name every surface to finish level. State why each material was chosen.
+- Back wall: [named material + finish] — [why: cost, premium signal, brand fit]
+- Flooring: [named material + finish] — [why]
+- Overhead: [fascia/truss/none] — [why: rigging rules, budget, sightline]
+- Reception counter: [material, finish, backlit or solid]
+- Display: [plinths / shelves / screens — dimensions and positions]
+- Meeting: [enclosed pod / open corner — capacity, partition material and height]
+
+**Three-Layer Lighting:**
+- Layer 1 Ambient: [how the stand handles the hall's overhead HID/LED — compensate or use]
+- Layer 2 Accent: [3000K LED track spots — what is spotlit and why, strip positions]
+- Layer 3 Architectural: [which surfaces generate their own light — SEG, lightbox header, cove strip]
+
+**Visitor Journey (with trigger mechanisms):**
+- Approach (15m): [what CAUSES them to look — beacon, lighting, hero graphic]
+- Stop (5–3m): [what CAUSES them to slow — product visible, open entry, activity]
+- Enter: [what CAUSES them to step in — no barrier, staff body language, demo]
+- Engage: [what CAUSES interaction — product at arm's reach, screen, sample]
+- Stay: [what CAUSES them to sit — relevant discovery, staff invitation, urgency]
+
+**Signature Detail:**
+One specific, buildable element that makes this stand memorable at this show specifically.
+Not a general design feature — specific to this client, this show, this industry.
+
+**Budget Translation:**
+One sentence: which material choices keep cost down, where budget was concentrated, and
+whether this is a modular build (reusable at next show) or bespoke (one-show).
+
+Mark every assumption with [ASSUMED].
+
+---
+
+## Design Concept B: The Bold Direction — "[Give it an evocative name]"
+
+Same ${context.standSize ? context.standSize + ' sqm' : '[size]'} footprint and same budget as Concept A.
+Meaningfully different — not a colour swap. The difference must be in ONE bold hero element
+that changes the spatial logic or the dominant visual. Everything else stays clean and buildable.
+
+Choose ONE bold move (commit to one — do not blend):
+  Option 1: Full-height LED video wall as the entire back panel — brand and product footage
+  Option 2: Back wall entirely in deep brand colour + oversized white logo — maximum contrast
+  Option 3: Exposed steel truss fascia above stand + oversized illuminated brand name (rigging required)
+  Option 4: Central raised product plinth (30cm platform, spotlit from above) — product IS the stand
+
+Write Concept B using the same section structure as Concept A:
+Concept Rationale → Competitive Positioning → Spatial Programme → Sightline Check →
+Materials & Build → Three-Layer Lighting → Visitor Journey → Signature Detail → Budget Translation
+
+The rationale must explain WHY the bold move was chosen for this client and this show specifically.`;
 
   const freepikPrompts = tier >= 2
     ? `\n## Render Prompts (for Freepik AI — follow every rule exactly)
