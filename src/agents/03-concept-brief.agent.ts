@@ -87,40 +87,53 @@ export class ConceptBriefAgent extends BaseAgent {
       promptB = `${base}, bold dark materials, strong brand statement, dramatic lighting`;
     }
 
-    // 4. Camera angles — professional architectural visualisation shots
-    // Angles tuned to match industry-standard trade show photography:
-    // horizontal_angle: 0–360° rotation around subject (0=front, 90=right, 180=back)
-    // vertical_angle:   -30–90° tilt (0=eye level, 90=straight down)
-    // zoom:             0–10 (0=wide full scene, 10=close-up detail)
+    // 4. Camera angles — all at human eye level (v: 0–10°)
+    //
+    // Freepik image-change-camera works by synthesising new pixels for areas
+    // that were occluded in the source image. At high vertical angles (v > 20°)
+    // the AI must invent large portions of the ceiling/floor that weren't in the
+    // master render — producing a plausible but DIFFERENT-looking stand.
+    // Freepik's own docs recommend: h: 15–30°, v: 10–20° for consistent results.
+    //
+    // Rules enforced here:
+    //   vertical_angle  ≤ 10° — stays in the "human walking the aisle" range
+    //   zoom            ≥ 4   — z:2-3 is flagged as "glitchy" in real-world use
+    //   horizontal_angle chosen so each shot shows a clearly different face
+    //
+    // API ranges: h: 0–360 | v: -30 to +90 (0=eye level) | z: 0–10 (5=medium)
     const ANGLES = [
-      // Shot 1: Hero / Eye-level — the "street view", human perspective.
-      // Camera at walking height, straight on. Most relatable shot — shows
-      // the stand exactly as a visitor approaching from the main aisle sees it.
-      // Zoom 4 (not 5) gives a touch more aisle context on both sides.
-      { label: 'front',    h: 0,   v: 8,  z: 4 },
+      // Shot 1: Front hero — dead-on from the main approach aisle.
+      // Camera at 170cm eye height, looking very slightly down at the stand facade.
+      // v:5 avoids the "flat architectural elevation" feel of v:0 while staying
+      // fully eye-level. z:5 is Freepik's default medium — stand fills the frame.
+      { label: 'front',        h: 0,   v: 5,  z: 5 },
 
-      // Shot 2: 3/4 Corner — industry standard architectural marketing shot.
-      // Two faces visible simultaneously — shows depth, dimension, layering.
-      // h:50 (not 45) gives a slightly deeper perspective into the stand face.
-      // v:18 (not 15) lifts just enough to see into the stand without aerial feel.
-      { label: 'corner',   h: 50,  v: 18, z: 4 },
+      // Shot 2: 3/4 corner right — the industry-standard architectural shot.
+      // Two stand faces visible simultaneously: front face + right face.
+      // Shows depth, layering, reception counter position, and back wall together.
+      // h:40 keeps the front face as the dominant read (h:45 splits equally).
+      // v:10 is natural "slight downward tilt" — exactly how aisle photography looks.
+      { label: 'corner-right',  h: 40,  v: 10, z: 5 },
 
-      // Shot 3: Semi-aerial elevated — shows full floor plan + material zones.
-      // h:35 gives better three-face read than h:25 for island/corner stands.
-      // v:38 is the sweet spot: sees into the stand but back wall still visible.
-      // z:3 (wider) shows more surrounding aisle context.
-      { label: 'elevated', h: 35,  v: 38, z: 3 },
+      // Shot 3: Left flank — mirror of the corner shot from the other aisle.
+      // h:320 = 360-40, so same 40° offset but from the left approach direction.
+      // Shows the left face of the stand — different materials/graphics visible.
+      // Same v:5 and z:5 keeps it in the same "same real stand" visual family.
+      { label: 'left-flank',    h: 320, v: 5,  z: 5 },
 
-      // Shot 4: Bird's eye overview — complete floor plan from above.
-      // v:68 shows spatial zones clearly without going flat (v:90 kills dimension).
-      // Best for showing traffic flow, stand size, and reception placement.
-      { label: 'topview',  h: 20,  v: 68, z: 5 },
+      // Shot 4: Interior / entry — camera at the stand threshold looking in.
+      // h:15 slight offset so it's not dead-centre. v:0 = pure eye level.
+      // z:7 (tighter, like a 50mm lens) isolates the interior quality:
+      // brand wall, display furniture, backlit graphics, reception counter.
+      // This is the "quality and detail" shot — shows what the stand feels like inside.
+      { label: 'interior',      h: 15,  v: 0,  z: 7 },
 
-      // Shot 5: Wide approach drama — the "WOW first impression" shot.
-      // Camera slightly below eye level from the far aisle, very wide.
-      // Shows the full stand in trade show context with surrounding booths.
-      // z:2 ensures maximum surrounding context — scale and environment.
-      { label: 'approach', h: 338, v: 2,  z: 2 },
+      // Shot 5: Wide aisle context — the "first impression" shot from far across the hall.
+      // h:330 (30° offset left) gives a natural slightly-off-axis feel.
+      // v:3 nearly flat — the dramatic low angle professional photographers use.
+      // z:3 (wider than medium) shows surrounding booths and hall ceiling for context.
+      // z:3 not z:2 — Freepik reviewers flag z:2 as producing glitchy output.
+      { label: 'wide-approach',  h: 330, v: 3,  z: 3 },
     ];
 
     // 5. Get target folder
@@ -129,7 +142,7 @@ export class ConceptBriefAgent extends BaseAgent {
     // 6. Announce start
     await this.respond(ctx.chatId,
       `🎨 Generating renders for *${companyName}*...\n` +
-      `2 concepts × 5 angles = 10 images. Takes ~5 minutes.`
+      `2 concepts × 5 views = 10 images. Takes ~5 minutes.\nAll views at human eye level — front, corner, flank, interior, wide.`
     );
 
     const results: Array<{ concept: string; angle: string; url: string }> = [];
@@ -178,7 +191,7 @@ export class ConceptBriefAgent extends BaseAgent {
         continue;
       }
 
-      await this.respond(ctx.chatId, `✅ Concept ${label} master done. Generating 3 angles...`);
+      await this.respond(ctx.chatId, `✅ Concept ${label} master done. Generating 4 angle variations...`);
 
       // image-change-camera only accepts public HTTPS URLs — never base64.
       // Prefer Freepik's own CDN URL (returned by text-to-image when available) —
