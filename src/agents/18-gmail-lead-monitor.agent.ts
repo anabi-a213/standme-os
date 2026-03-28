@@ -61,7 +61,7 @@ export class GmailLeadMonitorAgent extends BaseAgent {
     id: 'agent-18',
     description: 'Monitor info@standme.de for stand request emails and auto-create leads',
     commands: ['/checkemails', '/emailstatus'],
-    schedule: '*/30 * * * *',   // every 30 minutes
+    schedule: '*/15 * * * *',   // every 15 minutes
     requiredRole: UserRole.ADMIN,
   };
 

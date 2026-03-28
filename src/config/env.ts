@@ -26,6 +26,10 @@ const envSchema = z.object({
   SHEET_DRIVE_INDEX: z.string().min(1),
   SHEET_CROSS_AGENT_HUB: z.string().min(1),
   SHEET_SYSTEM_LOG: z.string().min(1),
+  SHEET_KNOWLEDGE_BASE: z.string().optional().default(''),
+  SHEET_WORKFLOW_LOG: z.string().optional().default(''),
+  SHEET_CAMPAIGN_SALES: z.string().optional().default(''),
+  SHEET_EMAIL_FUNNEL: z.string().optional().default(''),
 
   // Trello
   TRELLO_API_KEY: z.string().min(1),
@@ -37,8 +41,14 @@ const envSchema = z.object({
   TRELLO_BOARD_PRODUCTION: z.string().min(1),     // read only
 
   // Woodpecker
-  WOODPECKER_API_KEY: z.string().min(1),
+  WOODPECKER_API_KEY: z.string().optional().default(''),
   WOODPECKER_CAMPAIGN_ID: z.string().default(''), // optional: force a specific campaign ID
+  WOODPECKER_WEBHOOK_SECRET: z.string().optional().default(''),
+
+  // Instantly.ai (cold outreach — Growth plan uses 3h poller; Hypergrowth uses webhook)
+  INSTANTLY_API_KEY: z.string().optional().default(''),
+  INSTANTLY_WEBHOOK_SECRET: z.string().optional().default(''),
+  INSTANTLY_WEBHOOK_ENABLED: z.string().optional().default('false'),
 
   // Anthropic (Claude)
   ANTHROPIC_API_KEY: z.string().min(1),

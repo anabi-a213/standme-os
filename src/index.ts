@@ -11,6 +11,7 @@ import { dashboardBus } from './services/dashboard/event-bus';
 import { initDashboardSocket } from './services/dashboard/socket';
 import { dashboardRouter } from './services/dashboard/routes';
 import { startScheduler } from './scheduler';
+import { initWorkflowEngine } from './services/workflow-engine';
 import { logger } from './utils/logger';
 import { writeSystemLog } from './utils/system-log';
 import { canApprove, getUserRole, UserRole } from './config/access';
@@ -278,6 +279,54 @@ async function main() {
     }
   });
 
+  // POST /webhook/instantly — receives reply/open/bounce events from Instantly.ai (Hypergrowth plan)
+  // Guard: only active when INSTANTLY_WEBHOOK_ENABLED=true is set; Growth plan uses the 3h poller instead.
+  app.post('/webhook/instantly', async (req, res) => {
+    res.sendStatus(200);
+
+    if (process.env.INSTANTLY_WEBHOOK_ENABLED !== 'true') {
+      // Growth plan — polling mode active; ignore inbound webhooks silently
+      return;
+    }
+
+    const secret = process.env.INSTANTLY_WEBHOOK_SECRET;
+    if (secret && req.headers['x-instantly-secret'] !== secret) {
+      logger.warn('[Webhook] Instantly: invalid secret, ignoring');
+      return;
+    }
+
+    const { event_type, prospect } = req.body || {};
+    const prospectEmail = (prospect?.email || '').toLowerCase();
+    const eventType = (event_type || '').toUpperCase();
+
+    logger.info(`[Webhook] Instantly: ${eventType} — ${prospectEmail}`);
+    dashboardBus.logEvent('agent-17', 'Campaign Builder', `Instantly Webhook: ${eventType} — ${prospectEmail}`);
+
+    const campaignAgent = getAgent('/salesreplies');
+    if (!campaignAgent || !prospectEmail) return;
+
+    if (eventType === 'REPLY_RECEIVED') {
+      const ctx = {
+        userId: 'webhook',
+        username: 'webhook',
+        chatId: parseInt(process.env.MO_TELEGRAM_ID || '0'),
+        command: 'scheduled',
+        args: '',
+        role: UserRole.ADMIN,
+        language: 'en' as const,
+      };
+      campaignAgent.run(ctx).catch((err: any) =>
+        logger.warn(`[Webhook] Instantly reply processing error: ${err.message}`)
+      );
+    } else if (['EMAIL_OPENED', 'BOUNCED', 'UNSUBSCRIBED', 'INTERESTED', 'NOT_INTERESTED'].includes(eventType)) {
+      const agent = campaignAgent as any;
+      if (typeof agent.handleWebhookEvent === 'function') {
+        agent.handleWebhookEvent(eventType, prospectEmail)
+          .catch((err: any) => logger.warn(`[Webhook] Instantly event error: ${err.message}`));
+      }
+    }
+  });
+
   // Health check endpoint for Railway
   app.get('/health', (_req, res) => res.json({ status: 'ok', agents: getAllAgents().length }));
 
@@ -291,8 +340,9 @@ async function main() {
     logger.info(`  Server on port ${PORT} — Dashboard: /dashboard | Webhook: /webhook/woodpecker`);
   });
 
-  // Start scheduler
+  // Start scheduler + workflow engine
   startScheduler();
+  initWorkflowEngine(); // W1-W5 event workflows + W5 morning briefing + Instantly 3h reply poller
 
   // Log startup
   await writeSystemLog({
